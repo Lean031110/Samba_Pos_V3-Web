@@ -1,0 +1,667 @@
+     1→﻿using System;
+     2→using System.Collections.Generic;
+     3→using System.ComponentModel.Composition;
+     4→using System.Diagnostics;
+     5→using System.Linq;
+     6→using Samba.Domain.Builders;
+     7→using Samba.Domain.Models.Accounts;
+     8→using Samba.Domain.Models.Entities;
+     9→using Samba.Domain.Models.Settings;
+    10→using Samba.Domain.Models.Tickets;
+    11→using Samba.Infrastructure.Data.Serializer;
+    12→using Samba.Infrastructure.Helpers;
+    13→using Samba.Localization.Properties;
+    14→using Samba.Persistance;
+    15→using Samba.Persistance.Common;
+    16→using Samba.Presentation.Services.Common;
+    17→using Samba.Services;
+    18→using Samba.Services.Common;
+    19→
+    20→namespace Samba.Presentation.Services.Implementations.TicketModule
+    21→{
+    22→    [Export(typeof(ITicketService))]
+    23→    public class TicketService : ITicketService
+    24→    {
+    25→        private readonly ITicketDao _ticketDao;
+    26→        private readonly ITicketServiceBase _ticketServiceBase;
+    27→        private readonly IApplicationState _applicationState;
+    28→        private readonly IExpressionService _expressionService;
+    29→        private readonly IUserService _userService;
+    30→        private readonly ISettingService _settingService;
+    31→        private readonly IAccountService _accountService;
+    32→        private readonly ICacheService _cacheService;
+    33→
+    34→        [ImportingConstructor]
+    35→        public TicketService(ITicketDao ticketDao, ITicketServiceBase ticketServiceBase, IDepartmentService departmentService, IApplicationState applicationState,
+    36→            IUserService userService, ISettingService settingService, IExpressionService expressionService, IAccountService accountService, ICacheService cacheService)
+    37→        {
+    38→            _ticketDao = ticketDao;
+    39→            _ticketServiceBase = ticketServiceBase;
+    40→            _expressionService = expressionService;
+    41→            _applicationState = applicationState;
+    42→            _userService = userService;
+    43→            _settingService = settingService;
+    44→            _accountService = accountService;
+    45→            _cacheService = cacheService;
+    46→        }
+    47→
+    48→        private decimal GetExchangeRate(Account account)
+    49→        {
+    50→            return account.ForeignCurrencyId == 0 ? 1 : _cacheService.GetCurrencyById(account.ForeignCurrencyId).ExchangeRate;
+    51→        }
+    52→
+    53→        public void UpdateEntity(Ticket ticket, Entity entity, int accountTypeId, int accountId, string entityCustomData)
+    54→        {
+    55→            var currentEntity = ticket.TicketEntities.SingleOrDefault(x => x.EntityTypeId == entity.EntityTypeId);
+    56→            var currentEntityId = currentEntity != null ? currentEntity.EntityId : 0;
+    57→            var newEntityName = entity.Name;
+    58→            var oldEntityName = currentEntity != null ? currentEntity.EntityName : "";
+    59→            var newEntityData = entityCustomData;
+    60→            var oldEntityData = currentEntity != null ? currentEntity.EntityCustomData : "";
+    61→
+    62→            if (currentEntity != null && currentEntity.EntityId != entity.Id)
+    63→            {
+    64→                var entityType = _cacheService.GetEntityTypeById(currentEntity.EntityTypeId);
+    65→                _applicationState.NotifyEvent(RuleEventNames.EntityUpdated, new
+    66→                {
+    67→                    Ticket = ticket,
+    68→                    EntityTypeId = currentEntity.EntityTypeId,
+    69→                    EntityId = currentEntity.EntityId,
+    70→                    EntityTypeName = entityType.Name,
+    71→                    OpenTicketCount = GetOpenTicketCount(currentEntity.EntityId, ticket.Id)
+    72→                });
+    73→            }
+    74→
+    75→            ticket.UpdateEntity(entity.EntityTypeId, entity.Id, entity.Name, accountTypeId, accountId, entityCustomData);
+    76→
+    77→            if (currentEntityId != entity.Id || oldEntityName != newEntityName || newEntityData != oldEntityData)
+    78→            {
+    79→                var entityType = _cacheService.GetEntityTypeById(entity.EntityTypeId);
+    80→                _applicationState.NotifyEvent(RuleEventNames.TicketEntityChanged,
+    81→                    new
+    82→                    {
+    83→                        Ticket = ticket,
+    84→                        Entity = entity,
+    85→                        EntityTypeId = entity.EntityTypeId,
+    86→                        EntityId = entity.Id,
+    87→                        EntityTypeName = entityType.Name,
+    88→                        OldEntityName = oldEntityName,
+    89→                        NewEntityName = newEntityName,
+    90→                        OrderCount = ticket.Orders.Count,
+    91→                        OldCustomData = oldEntityData,
+    92→                        CustomData = newEntityData
+    93→                    });
+    94→            }
+    95→        }
+    96→
+    97→        private int GetOpenTicketCount(int entityId, int ticketId)
+    98→        {
+    99→            var ids = _ticketServiceBase.GetOpenTicketIds(entityId).ToList();
+   100→            if (ticketId > 0 && !ids.Contains(ticketId)) ids.Add(ticketId);
+   101→            return ids.Count - (ticketId > 0 ? 1 : 0);
+   102→        }
+   103→
+   104→        public void UpdateEntity(Ticket ticket, Entity entity)
+   105→        {
+   106→            if (entity == null) return;
+   107→            var entityType = _cacheService.GetEntityTypeById(entity.EntityTypeId);
+   108→            UpdateEntity(ticket, entity, entityType.AccountTypeId, entity.AccountId, entity.CustomData);
+   109→        }
+   110→
+   111→        public Ticket OpenTicket(int ticketId)
+   112→        {
+   113→            Debug.Assert(_applicationState.CurrentDepartment != null);
+   114→
+   115→            var ticket = ticketId == 0
+   116→                             ? CreateTicket()
+   117→                             : _ticketDao.OpenTicket(ticketId);
+   118→
+   119→            _applicationState.NotifyEvent(RuleEventNames.TicketOpened, new { Ticket = ticket, OrderCount = ticket.Orders.Count });
+   120→
+   121→            return ticket;
+   122→        }
+   123→
+   124→        private Ticket CreateTicket()
+   125→        {
+   126→            var account = _cacheService.GetAccountById(_applicationState.CurrentTicketType.SaleTransactionType.DefaultTargetAccountId);
+   127→            var result = TicketBuilder.Create(_applicationState.CurrentTicketType, _applicationState.CurrentDepartment.Model)
+   128→                                      .WithExchangeRate(GetExchangeRate(account))
+   129→                                      .WithCalculations(
+   130→                                          _applicationState.GetCalculationSelectors()
+   131→                                                           .Where(x => string.IsNullOrEmpty(x.ButtonHeader))
+   132→                                                           .SelectMany(y => y.CalculationTypes))
+   133→                                      .Build();
+   134→
+   135→            _applicationState.NotifyEvent(RuleEventNames.TicketCreated, new { Ticket = result, TicketTypeName = _applicationState.CurrentTicketType.Name });
+   136→            return result;
+   137→        }
+   138→
+   139→        public TicketCommitResult CloseTicket(Ticket ticket)
+   140→        {
+   141→            var result = _ticketDao.CheckConcurrency(ticket);
+   142→            Debug.Assert(ticket != null);
+   143→            var changed = !string.IsNullOrEmpty(result.ErrorMessage);
+   144→            var canSumbitTicket = !changed && ticket.CanSubmit;
+   145→
+   146→            if (canSumbitTicket)
+   147→            {
+   148→                RecalculateTicket(ticket);
+   149→                _applicationState.NotifyEvent(RuleEventNames.BeforeTicketClosing, new { Ticket = ticket, TicketId = ticket.Id, ticket.RemainingAmount, ticket.TotalAmount });
+   150→                if (ticket.Orders.Count > 0)
+   151→                {
+   152→                    var ticketType = _cacheService.GetTicketTypeById(ticket.TicketTypeId);
+   153→
+   154→                    if (ticket.Orders.Any(x => x.OrderNumber == 0))
+   155→                    {
+   156→                        var number = _settingService.GetNextNumber(ticketType.OrderNumerator.Id);
+   157→                        ticket.MergeOrdersAndUpdateOrderNumbers(number);
+   158→                    }
+   159→
+   160→                    if (ticket.Id == 0)
+   161→                    {
+   162→                        UpdateTicketNumber(ticket, ticketType.TicketNumerator);
+   163→                        _ticketDao.Save(ticket);
+   164→                    }
+   165→
+   166→                    Debug.Assert(!string.IsNullOrEmpty(ticket.TicketNumber));
+   167→                    Debug.Assert(ticket.Id > 0);
+   168→                    _applicationState.NotifyEvent(RuleEventNames.TicketClosing, new { Ticket = ticket, TicketId = ticket.Id, ticket.RemainingAmount, ticket.TotalAmount });
+   169→                    ticket.LockTicket();
+   170→                }
+   171→
+   172→                ticket.RemoveZeroAmountAccountTransactions();
+   173→
+   174→                if (ticket.Id > 0)// eğer adisyonda satır yoksa ID burada 0 olmalı.
+   175→                    _ticketDao.Save(ticket);
+   176→
+   177→                Debug.Assert(ticket.Orders.Count(x => x.OrderNumber == 0) == 0);
+   178→            }
+   179→
+   180→            if (ticket.Id > 0)
+   181→            {
+   182→                foreach (var ticketEntity in ticket.TicketEntities)
+   183→                {
+   184→                    var entityType = _cacheService.GetEntityTypeById(ticketEntity.EntityTypeId);
+   185→                    _applicationState.NotifyEvent(RuleEventNames.EntityUpdated, new
+   186→                    {
+   187→                        EntityTypeId = ticketEntity.EntityTypeId,
+   188→                        EntityId = ticketEntity.EntityId,
+   189→                        EntityTypeName = entityType.Name,
+   190→                        OpenTicketCount = _ticketServiceBase.GetOpenTicketIds(ticketEntity.EntityId).Count()
+   191→                    });
+   192→                }
+   193→            }
+   194→
+   195→            result.TicketId = ticket.Id;
+   196→            return result;
+   197→        }
+   198→
+   199→        public void AddPayment(Ticket ticket, PaymentType paymentType, Account account, decimal amount, decimal tenderedAmount)
+   200→        {
+   201→            if (account == null) return;
+   202→            var remainingAmount = ticket.GetRemainingAmount();
+   203→            var changeAmount = tenderedAmount > remainingAmount ? tenderedAmount - remainingAmount : 0;
+   204→            ticket.AddPayment(paymentType, account, amount, GetExchangeRate(account), _applicationState.CurrentLoggedInUser.Id);
+   205→            _applicationState.NotifyEvent(RuleEventNames.PaymentProcessed,
+   206→                new
+   207→                {
+   208→                    Ticket = ticket,
+   209→                    PaymentTypeName = paymentType.Name,
+   210→                    TenderedAmount = tenderedAmount,
+   211→                    ProcessedAmount = tenderedAmount - changeAmount,
+   212→                    ChangeAmount = changeAmount,
+   213→                    SelectedQuantity = ticket.PaidItems.Sum(x => x.Quantity),
+   214→                    RemainingAmount = ticket.GetRemainingAmount()
+   215→                });
+   216→        }
+   217→
+   218→        public void AddChangePayment(Ticket ticket, ChangePaymentType paymentType, Account account, decimal amount)
+   219→        {
+   220→            if (account == null) return;
+   221→            ticket.AddChangePayment(paymentType, account, amount, GetExchangeRate(account), _applicationState.CurrentLoggedInUser.Id);
+   222→        }
+   223→
+   224→        public void PayTicket(Ticket ticket, PaymentType template)
+   225→        {
+   226→            var amount = ticket.GetRemainingAmount();
+   227→            AddPayment(ticket, template, template.Account ?? GetAccountForPayment(ticket, template), amount, amount);
+   228→        }
+   229→
+   230→        public Account GetAccountForPayment(Ticket ticket, PaymentType paymentType)
+   231→        {
+   232→            var rt = _cacheService.GetEntityTypes().Where(
+   233→                x => x.AccountTypeId == paymentType.AccountTransactionType.TargetAccountTypeId).Select(x => x.Id);
+   234→            var tr = ticket.TicketEntities.FirstOrDefault(x => rt.Contains(x.EntityTypeId));
+   235→            return tr != null ? _accountService.GetAccountById(tr.AccountId) : null;
+   236→        }
+   237→
+   238→        public void UpdateTicketNumber(Ticket ticket, Numerator numerator)
+   239→        {
+   240→            if (string.IsNullOrEmpty(ticket.TicketNumber))
+   241→            {
+   242→                ticket.TicketNumber = _settingService.GetNextString(numerator.Id);
+   243→                var ticketType = _cacheService.GetTicketTypeById(ticket.TicketTypeId);
+   244→                var transaction =
+   245→                    ticket.TransactionDocument.AccountTransactions.FirstOrDefault(
+   246→                        x => x.AccountTransactionTypeId == ticketType.SaleTransactionType.Id);
+   247→                if (transaction != null)
+   248→                {
+   249→                    transaction.UpdateDescription(string.Format("{0} [#{1}]", transaction.Name, ticket.TicketNumber));
+   250→                }
+   251→            }
+   252→        }
+   253→
+   254→        public TicketCommitResult MergeTickets(IEnumerable<int> ticketIds)
+   255→        {
+   256→            var ticketList = ticketIds.Select(OpenTicket).ToList();
+   257→
+   258→            if (ticketList.Any(x => x.Calculations.Any()))
+   259→                return new TicketCommitResult { ErrorMessage = string.Format("Can't merge tickets\r{0}", "contains calculations") };
+   260→
+   261→            var entitiesUnMatches = ticketList.SelectMany(x => x.TicketEntities).GroupBy(x => x.EntityTypeId).Any(x => x.Select(y => y.EntityId).Distinct().Count() > 1);
+   262→            if (entitiesUnMatches) return new TicketCommitResult { ErrorMessage = string.Format("Can't merge tickets\r{0}", "Entities doesn't match") };
+   263→
+   264→            var clonedOrders = ticketList.SelectMany(x => x.Orders).Select(ObjectCloner.Clone).ToList();
+   265→            var clonedPayments = ticketList.SelectMany(x => x.Payments).Select(ObjectCloner.Clone2).ToList();
+   266→            var clonedChangePayments = ticketList.SelectMany(x => x.ChangePayments).Select(ObjectCloner.Clone2).ToList();
+   267→            var clonedTags = ticketList.SelectMany(x => x.GetTicketTagValues()).Select(ObjectCloner.Clone).ToList();
+   268→            var clonedEntites = ticketList.SelectMany(x => x.TicketEntities).Select(ObjectCloner.Clone).ToList();
+   269→            var clonedLogs = ticketList.SelectMany(x => x.GetTicketLogValues()).Select(ObjectCloner.Clone).ToList();
+   270→            var ticketNumbers = string.Join(",", ticketList.Select(x => x.TicketNumber));
+   271→
+   272→            ticketList.ForEach(x => x.RemoveData());
+   273→            ticketList.ForEach(x => CloseTicket(x));
+   274→
+   275→            var ticket = CreateTicket();
+   276→
+   277→            clonedOrders.ForEach(ticket.Orders.Add);
+   278→
+   279→            foreach (var cp in clonedPayments)
+   280→            {
+   281→                var account = _accountService.GetAccountById(cp.AccountTransaction.TargetTransactionValue.AccountId);
+   282→                ticket.AddPayment(_cacheService.GetPaymentTypeById(cp.PaymentTypeId), account, cp.Amount, GetExchangeRate(account), cp.UserId);
+   283→            }
+   284→
+   285→            foreach (var cp in clonedChangePayments)
+   286→            {
+   287→                var account = _accountService.GetAccountById(cp.AccountTransaction.TargetTransactionValue.AccountId);
+   288→                ticket.AddChangePayment(_cacheService.GetChangePaymentTypeById(cp.ChangePaymentTypeId), account, cp.Amount, GetExchangeRate(account), cp.UserId);
+   289→            }
+   290→
+   291→            clonedEntites.ForEach(x => ticket.UpdateEntity(x.EntityTypeId, x.EntityId, x.EntityName, x.AccountTypeId, x.AccountId, x.EntityCustomData));
+   292→            clonedTags.ForEach(x => ticket.SetTagValue(x.TagName, x.TagValue));
+   293→
+   294→            ticket.SetLogs(clonedLogs);
+   295→
+   296→            RefreshAccountTransactions(ticket);
+   297→
+   298→            _applicationState.NotifyEvent(RuleEventNames.TicketsMerged, new { Ticket = ticket, TicketNumbers = ticketNumbers });
+   299→            return CloseTicket(ticket);
+   300→        }
+   301→
+   302→        public TicketCommitResult MoveOrders(Ticket ticket, Order[] selectedOrders, int targetTicketId)
+   303→        {
+   304→            _applicationState.NotifyEvent(RuleEventNames.TicketMoving, new { Ticket = ticket });
+   305→            foreach (var selectedOrder in selectedOrders)
+   306→            {
+   307→                _applicationState.NotifyEvent(RuleEventNames.OrderMoving, new { Ticket = ticket, Order = selectedOrder, selectedOrder.MenuItemName, selectedOrder.Quantity });
+   308→            }
+   309→            var clonedOrders = selectedOrders.Select(ObjectCloner.Clone2).ToList();
+   310→            ticket.RemoveOrders(selectedOrders);
+   311→            CloseTicket(ticket);
+   312→
+   313→            var newTicket = OpenTicket(targetTicketId);
+   314→
+   315→            foreach (var clonedOrder in clonedOrders)
+   316→            {
+   317→                clonedOrder.TicketId = 0;
+   318→                newTicket.Orders.Add(clonedOrder);
+   319→                _applicationState.NotifyEvent(RuleEventNames.OrderMoved, new { Ticket = newTicket, Order = clonedOrder, clonedOrder.MenuItemName, clonedOrder.Quantity, OldTicketNumber = ticket.TicketNumber });
+   320→            }
+   321→
+   322→            RefreshAccountTransactions(newTicket);
+   323→            newTicket.LastOrderDate = DateTime.Now;
+   324→
+   325→            _applicationState.NotifyEvent(RuleEventNames.TicketMoved, new { Ticket = newTicket, OldTicketNumber = ticket.TicketNumber });
+   326→
+   327→            return CloseTicket(newTicket);
+   328→        }
+   329→
+   330→        public void RecalculateTicket(Ticket ticket)
+   331→        {
+   332→            var total = ticket.TotalAmount;
+   333→            ticket.Calculations.Where(x => x.CalculationType == 5).ToList().ForEach(
+   334→                x => x.Amount = _expressionService.EvalCommand(FunctionNames.Calculation, "_" + x.Name, new { Ticket = ticket }, 0m));
+   335→            ticket.Recalculate();
+   336→            if (total != ticket.TotalAmount)
+   337→            {
+   338→                _applicationState.NotifyEvent(RuleEventNames.TicketTotalChanged,
+   339→                    new
+   340→                    {
+   341→                        Ticket = ticket,
+   342→                        PreviousTotal = total,
+   343→                        TicketTotal = ticket.GetSum(),
+   344→                        DiscountTotal = ticket.GetPreTaxServicesTotal(),
+   345→                        PaymentTotal = ticket.GetPaymentAmount(),
+   346→                        RemainingAmount = ticket.GetRemainingAmount()
+   347→                    });
+   348→            }
+   349→        }
+   350→
+   351→        public void UpdateTicketState(Ticket ticket, string stateName, string currentState, string state, string stateValue, string quantity = "")
+   352→        {
+   353→            var sv = ticket.GetStateValue(stateName);
+   354→            if (!string.IsNullOrEmpty(currentState) && sv.State != currentState) return;
+   355→            if (sv != null && sv.StateName == stateName && sv.StateValue == stateValue && sv.State == state && sv.Quantity == QuantityFuncParser.Parse(quantity, sv.Quantity)) return;
+   356→
+   357→            ticket.SetStateValue(stateName, state, stateValue, quantity);
+   358→
+   359→            _applicationState.NotifyEvent(RuleEventNames.TicketStateUpdated,
+   360→            new
+   361→            {
+   362→                Ticket = ticket,
+   363→                StateName = stateName,
+   364→                State = state,
+   365→                StateValue = stateValue,
+   366→                Quantity = quantity,
+   367→                TicketState = ticket.GetStateData(x => true)
+   368→            });
+   369→        }
+   370→
+   371→        private void UpdateTag(Ticket ticket, TicketTagGroup tagGroup, string tagValue)
+   372→        {
+   373→            ticket.SetTagValue(tagGroup.Name, tagValue);
+   374→
+   375→            if (tagGroup.FreeTagging && tagGroup.SaveFreeTags)
+   376→            {
+   377→                SaveFreeTicketTag(tagGroup.Id, tagValue);
+   378→            }
+   379→
+   380→            var tagData = new TicketTagData
+   381→            {
+   382→                Ticket = ticket,
+   383→                TicketTagGroup = tagGroup,
+   384→                TagName = tagGroup.Name,
+   385→                TagValue = tagValue
+   386→            };
+   387→
+   388→            _applicationState.NotifyEvent(RuleEventNames.TicketTagSelected,
+   389→                        new
+   390→                        {
+   391→                            Ticket = ticket,
+   392→                            tagData.TagName,
+   393→                            tagData.TagValue,
+   394→                            NumericValue = tagGroup.IsNumeric ? Convert.ToDecimal(tagValue) : 0,
+   395→                            TicketTag = ticket.GetTagData()
+   396→                        });
+   397→        }
+   398→
+   399→        public void UpdateTag(Ticket ticket, TicketTagGroup tagGroup, TicketTag ticketTag)
+   400→        {
+   401→            UpdateTag(ticket, tagGroup, ticketTag.Name);
+   402→        }
+   403→
+   404→        public void UpdateTag(Ticket ticket, string tagName, string tagValue)
+   405→        {
+   406→            var tagGroup = _cacheService.GetTicketTagGroupByName(tagName);
+   407→            if (tagGroup != null)
+   408→            {
+   409→                UpdateTag(ticket, tagGroup, tagValue);
+   410→            }
+   411→            else
+   412→            {
+   413→                ticket.SetTagValue(tagName, tagValue);
+   414→            }
+   415→        }
+   416→
+   417→        public void SaveFreeTicketTag(int tagGroupId, string freeTag)
+   418→        {
+   419→            _ticketDao.SaveFreeTicketTag(tagGroupId, freeTag);
+   420→            _cacheService.ResetTicketTagCache();
+   421→        }
+   422→
+   423→        public void TagOrders(Ticket ticket, IEnumerable<Order> selectedOrders, OrderTagGroup orderTagGroup, OrderTag orderTag, string tagNote)
+   424→        {
+   425→            var so = selectedOrders.ToList();
+   426→
+   427→            if (orderTagGroup.MaxSelectedItems == 1)
+   428→            {
+   429→                foreach (var order in so.Where(x => x.OrderTagExists(y => y.OrderTagGroupId == orderTagGroup.Id && y.TagValue != orderTag.Name)))
+   430→                {
+   431→                    var orderTagValue = order.GetOrderTagValues().First(x => x.OrderTagGroupId == orderTagGroup.Id);
+   432→                    order.UntagOrder(orderTagValue);
+   433→                    _applicationState.NotifyEvent(RuleEventNames.OrderUntagged,
+   434→                               new
+   435→                               {
+   436→                                   Ticket = ticket,
+   437→                                   Order = order,
+   438→                                   OrderTagName = orderTagGroup.Name,
+   439→                                   OrderTagValue = orderTagValue.TagValue
+   440→                               });
+   441→
+   442→                }
+   443→            }
+   444→
+   445→            foreach (var selectedOrder in so)
+   446→            {
+   447→                var result = selectedOrder.ToggleOrderTag(orderTagGroup, orderTag, _applicationState.CurrentLoggedInUser.Id, tagNote);
+   448→
+   449→                if (orderTagGroup.SaveFreeTags && orderTagGroup.OrderTags.All(x => x.Name != orderTag.Name))
+   450→                {
+   451→                    _ticketDao.SaveFreeOrderTag(orderTagGroup.Id, orderTag);
+   452→                    _cacheService.ResetOrderTagCache();
+   453→                }
+   454→                _applicationState.NotifyEvent(result ? RuleEventNames.OrderTagged : RuleEventNames.OrderUntagged,
+   455→                new
+   456→                {
+   457→                    Ticket = ticket,
+   458→                    Order = selectedOrder,
+   459→                    OrderTagName = orderTagGroup.Name,
+   460→                    OrderTagValue = orderTag.Name
+   461→                });
+   462→            }
+   463→        }
+   464→
+   465→        public void UntagOrders(Ticket ticket, IEnumerable<Order> selectedOrders, OrderTagGroup orderTagGroup, OrderTag orderTag)
+   466→        {
+   467→            foreach (var selectedOrder in selectedOrders.Where(selectedOrder => selectedOrder.UntagIfTagged(orderTagGroup, orderTag)))
+   468→            {
+   469→                _applicationState.NotifyEvent(RuleEventNames.OrderUntagged,
+   470→                                               new
+   471→                                               {
+   472→                                                   Ticket = ticket,
+   473→                                                   Order = selectedOrder,
+   474→                                                   OrderTagName = orderTagGroup.Name,
+   475→                                                   OrderTagValue = orderTag.Name
+   476→                                               });
+   477→            }
+   478→        }
+   479→
+   480→        public bool CanDeselectOrders(IEnumerable<Order> selectedOrders)
+   481→        {
+   482→            return selectedOrders.All(CanDeselectOrder);
+   483→        }
+   484→
+   485→        public bool CanDeselectOrder(Order order)
+   486→        {
+   487→            if (!order.DecreaseInventory || order.Locked) return true;
+   488→            var ots = _applicationState.GetOrderTagGroups(order.MenuItemId);
+   489→            return ots.Where(x => x.MinSelectedItems > 0).All(orderTagGroup => order.GetOrderTagValues(x => x.OrderTagGroupId == orderTagGroup.Id).Count() >= orderTagGroup.MinSelectedItems);
+   490→        }
+   491→
+   492→        public OrderTagGroup GetMandantoryOrderTagGroup(Order order)
+   493→        {
+   494→            if (order.Locked) return null;
+   495→            var ots = _applicationState.GetOrderTagGroups(order.MenuItemId);
+   496→            return ots.Where(x => x.MinSelectedItems > 0).FirstOrDefault(orderTagGroup => order.GetOrderTagValues(x => x.OrderTagGroupId == orderTagGroup.Id).Count() < orderTagGroup.MinSelectedItems);
+   497→        }
+   498→
+   499→        public bool CanCloseTicket(Ticket ticket)
+   500→        {
+   501→            return ticket.IsLocked || CanDeselectOrders(ticket.Orders);
+   502→        }
+   503→
+   504→        public bool CanSettleTicket(Ticket ticket)
+   505→        {
+   506→            return CanCloseTicket(ticket) && (ticket.GetRemainingAmount() > 0 || ticket.Orders.Count > 0);
+   507→        }
+   508→
+   509→        public void RefreshAccountTransactions(Ticket ticket)
+   510→        {
+   511→            foreach (var template in from order in ticket.Orders.GroupBy(x => x.AccountTransactionTypeId)
+   512→                                     where ticket.TransactionDocument.AccountTransactions.All(x => x.AccountTransactionTypeId != order.Key)
+   513→                                     select _cacheService.GetAccountTransactionTypeById(order.Key))
+   514→            {
+   515→                var transaction = ticket.TransactionDocument.AddNewTransaction(template, ticket.GetTicketAccounts());
+   516→                transaction.Reversable = false;
+   517→            }
+   518→
+   519→            foreach (var taxTransactionTemplate in ticket.GetTaxIds().Select(x => _cacheService.GetAccountTransactionTypeById(x)))
+   520→            {
+   521→                ticket.TransactionDocument.AddSingletonTransaction(taxTransactionTemplate.Id,
+   522→                       taxTransactionTemplate, ticket.GetTicketAccounts());
+   523→            }
+   524→        }
+   525→
+   526→        public void UpdateOrderStates(Ticket ticket, IList<Order> orders, string stateName, string currentState, int groupOrder, string state, int stateOrder,
+   527→                                       string stateValue)
+   528→        {
+   529→            var so = orders.Where(x => string.IsNullOrEmpty(currentState) || x.IsInState(stateName, currentState)).ToList();
+   530→            foreach (var order in so)
+   531→            {
+   532→                if (order.IsInState(stateName, state) && (string.IsNullOrEmpty(stateValue) || order.IsAnyStateValue(stateValue))) continue;
+   533→                order.SetStateValue(stateName, groupOrder, state, stateOrder, stateValue, _applicationState.CurrentLoggedInUser.Id);
+   534→                _applicationState.NotifyEvent(RuleEventNames.OrderStateUpdated,
+   535→                                               new
+   536→                                               {
+   537→                                                   Ticket = ticket,
+   538→                                                   Order = order,
+   539→                                                   StateName = stateName,
+   540→                                                   State = state,
+   541→                                                   StateValue = stateValue,
+   542→                                                   PreviousState = currentState
+   543→                                               });
+   544→            }
+   545→        }
+   546→
+   547→        public void ChangeOrdersAccountTransactionTypeId(Ticket ticket, IEnumerable<Order> selectedOrders, int accountTransactionTypeId)
+   548→        {
+   549→            var so = selectedOrders.ToList();
+   550→            var accountTransactionTypeIds = so.GroupBy(x => x.AccountTransactionTypeId).Select(x => x.Key).ToList();
+   551→            so.ForEach(x => x.AccountTransactionTypeId = accountTransactionTypeId);
+   552→            accountTransactionTypeIds.Where(x => so.All(y => y.AccountTransactionTypeId != x)).ToList()
+   553→                .ForEach(x => ticket.TransactionDocument.AccountTransactions.Where(y => y.AccountTransactionTypeId == x).ToList().ForEach(y => ticket.TransactionDocument.AccountTransactions.Remove(y)));
+   554→            RefreshAccountTransactions(ticket);
+   555→        }
+   556→
+   557→        public void AddAccountTransaction(Ticket ticket, Account sourceAccount, Account targetAccount, decimal amount, decimal exchangeRate)
+   558→        {
+   559→            var transactionType = _cacheService.FindAccountTransactionType(sourceAccount.AccountTypeId, targetAccount.AccountTypeId, sourceAccount.Id, targetAccount.Id);
+   560→            if (transactionType != null)
+   561→            {
+   562→                var transaction = ticket.TransactionDocument.AddNewTransaction(transactionType, ticket.GetTicketAccounts(), amount, exchangeRate);
+   563→                transaction.UpdateDescription(string.Format("{0} - {1}: {2}", transaction.Name, Resources.TicketNumber, ticket.TicketNumber));
+   564→                _applicationState.NotifyEvent(RuleEventNames.AccountTransactionAddedToTicket,
+   565→                               new
+   566→                               {
+   567→                                   Ticket = ticket,
+   568→                                   TransactionTypeName = transactionType.Name,
+   569→                                   SourceAccountName = sourceAccount.Name,
+   570→                                   TargetAccountName = targetAccount.Name,
+   571→                                   Amount = amount,
+   572→                                   ExchangeRate = exchangeRate
+   573→                               });
+   574→            }
+   575→        }
+   576→
+   577→        public bool CanMakeAccountTransaction(TicketEntity ticketEntity, AccountTransactionType accountTransactionType, decimal targetBalance)
+   578→        {
+   579→            if (ticketEntity.AccountId == 0) return false;
+   580→            var entityType = _cacheService.GetEntityTypeById(ticketEntity.EntityTypeId);
+   581→            var typeId = accountTransactionType.TargetAccountTypeId;
+   582→            if (accountTransactionType.DefaultSourceAccountId == 0)
+   583→                typeId = accountTransactionType.SourceAccountTypeId;
+   584→            var result = entityType.AccountTypeId == typeId;
+   585→            if (result)
+   586→            {
+   587→                var accountType = _cacheService.GetAccountTypeById(entityType.AccountTypeId);
+   588→                if (accountType.WorkingRule != 0)
+   589→                {
+   590→                    if (accountType.WorkingRule == 1 && targetBalance < 0) return false; //disallow credit
+   591→                    if (accountType.WorkingRule == 2 && targetBalance > ticketEntity.GetCustomDataAsDecimal(Resources.CreditLimit)) return false; //disallow debit
+   592→                }
+   593→            }
+   594→            return result;
+   595→        }
+   596→
+   597→        public void UpdateOrderPrice(Order order, string portionName, string priceTag)
+   598→        {
+   599→            var mi = _cacheService.GetMenuItem(x => x.Id == order.MenuItemId);
+   600→            if (mi != null)
+   601→            {
+   602→                var portion = !string.IsNullOrEmpty(portionName)
+   603→                                  ? mi.Portions.FirstOrDefault(x => x.Name == portionName)
+   604→                                  : mi.Portions.First();
+   605→                order.UpdatePortion(portion, priceTag, null);
+   606→            }
+   607→        }
+   608→
+   609→        public void CancelSelectedOrders(Ticket ticket)
+   610→        {
+   611→            foreach (var order in ticket.Orders.Where(x => x.IsSelected && x.Id == 0))
+   612→            {
+   613→                _applicationState.NotifyEvent(RuleEventNames.OrderCancelled,
+   614→                    new { Ticket = ticket, Order = order, MenuItemName = order.MenuItemName, Quantity = order.Quantity });
+   615→            }
+   616→        }
+   617→
+   618→        public Order AddOrder(Ticket ticket, int menuItemId, decimal quantity, string portionName, string orderState)
+   619→        {
+   620→            if (ticket.IsLocked && !_userService.IsUserPermittedFor(PermissionNames.AddItemsToLockedTickets)) return null;
+   621→            if (!ticket.CanSubmit) return null;
+   622→            var menuItem = _cacheService.GetMenuItem(x => x.Id == menuItemId);
+   623→            var portion = _cacheService.GetMenuItemPortion(menuItemId, portionName);
+   624→            if (portion == null) return null;
+   625→            var priceTag = _applicationState.CurrentDepartment.PriceTag;
+   626→            var productTimer = _applicationState.GetProductTimer(menuItemId);
+   627→
+   628→            var order = ticket.AddOrder(
+   629→                _applicationState.CurrentTicketType.SaleTransactionType,
+   630→                _applicationState.CurrentDepartment.Model,
+   631→                _applicationState.CurrentLoggedInUser.Name, menuItem,
+   632→                _applicationState.GetTaxTemplates(menuItem.Id).ToList(), portion, priceTag, productTimer);
+   633→
+   634→            order.Quantity = quantity > 9 ? decimal.Round(quantity / portion.Multiplier, 3, MidpointRounding.AwayFromZero) : quantity;
+   635→            order.ResetSelectedQuantity();
+   636→            SetOrderState(order, orderState);
+   637→
+   638→            RecalculateTicket(ticket);
+   639→            _applicationState.NotifyEvent(RuleEventNames.OrderAdded, new { Ticket = ticket, Order = order, MenuItemName = order.MenuItemName, MenuItemTag = menuItem.Tag, MenuItemGroupCode = menuItem.GroupCode });
+   640→            return order;
+   641→        }
+   642→
+   643→        private void SetOrderState(Order order, string orderState)
+   644→        {
+   645→            var i = 0;
+   646→            var orderStates = orderState.Split(';');
+   647→            foreach (var state in orderStates)
+   648→            {
+   649→                string gn;
+   650→                string sv;
+   651→                if (state.Contains("="))
+   652→                {
+   653→                    var sParts = state.Split('=');
+   654→                    gn = sParts[0];
+   655→                    sv = sParts[1];
+   656→                }
+   657→                else
+   658→                {
+   659→                    return;
+   660→                }
+   661→                order.SetStateValue(gn, 99 + i, sv, 99 + i, "", _applicationState.CurrentLoggedInUser.Id);
+   662→                i++;
+   663→            }
+   664→        }
+   665→    }
+   666→}
+   667→
