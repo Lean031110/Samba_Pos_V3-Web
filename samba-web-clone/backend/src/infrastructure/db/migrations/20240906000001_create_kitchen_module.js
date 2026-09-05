@@ -1,23 +1,24 @@
 // =====================================================================
 // Migration 20240906000001_create_kitchen_module.js
 // =====================================================================
-// Creates Kitchen Display System (KDS) tables:
-//   - KitchenStations: cocina, pizzería, bebidas, despacho
-//   - KitchenOrders: órdenes enviadas a cocina (una por orden de ticket)
-//   - KitchenOrderItems: items individuales dentro de una kitchen order
-//   - KitchenStationRouting: routing producto → estación
+// Creates Kitchen Display System (KDS) tables with:
+//   - Code/IsDefault on stations (stable identifiers, not human names)
+//   - Version column on KitchenOrders (optimistic locking)
+//   - UNIQUE(OrderId, KitchenStationId) constraint (idempotent routing)
 // =====================================================================
 
 exports.up = async function(knex) {
-  // Kitchen Stations (cocina, pizzería, bebidas, despacho)
+  // Kitchen Stations
   await knex.schema.createTable('KitchenStations', (table) => {
     table.increments('Id').primary();
+    table.string('Code', 20).notNullable().unique();   // KITCHEN, PIZZA, DRINKS, EXPO
     table.string('Name', 100).notNullable();
     table.string('DisplayName', 100).notNullable();
     table.integer('SortOrder').notNullable().defaultTo(0);
-    table.string('Color', 20);         // color for UI header
-    table.integer('PrinterId');         // linked printer for this station
+    table.string('Color', 20);
+    table.integer('PrinterId');
     table.boolean('IsActive').notNullable().defaultTo(1);
+    table.boolean('IsDefault').notNullable().defaultTo(0);
     table.timestamps(true, true);
   });
 
@@ -25,43 +26,45 @@ exports.up = async function(knex) {
   await knex.schema.createTable('KitchenOrders', (table) => {
     table.increments('Id').primary();
     table.integer('TicketId').notNullable();
-    table.integer('OrderId').notNullable();        // Links to Orders.Id
-    table.integer('KitchenStationId');              // Which station is preparing this
+    table.integer('OrderId').notNullable();
+    table.integer('KitchenStationId');
     table.string('State', 20).notNullable().defaultTo('NEW');
-    // States: NEW, ACCEPTED, PREPARING, READY, SERVED, VOIDED
     table.timestamp('CreatedAt').notNullable().defaultTo(knex.fn.now());
     table.timestamp('AcceptedAt');
     table.timestamp('ReadyAt');
     table.timestamp('ServedAt');
-    table.integer('Priority').notNullable().defaultTo(0);  // 0=normal, 1=high, 2=urgent
+    table.integer('Priority').notNullable().defaultTo(0);
     table.string('TicketNumber', 50);
     table.string('TableName', 50);
     table.integer('OrderNumber').notNullable().defaultTo(0);
-    table.string('Notes');                           // Special instructions
+    table.string('Notes');
     table.integer('CreatedByUserId').notNullable().defaultTo(0);
+    table.integer('Version').notNullable().defaultTo(1);  // Optimistic locking
     table.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
     table.foreign('KitchenStationId').references('KitchenStations.Id');
+    // Idempotency: one kitchen order per (OrderId, StationId) — prevents duplicates
+    table.unique(['OrderId', 'KitchenStationId'], 'UX_KitchenOrders_OrderId_StationId');
   });
 
-  // Kitchen Order Items — individual items within a kitchen order
+  // Kitchen Order Items
   await knex.schema.createTable('KitchenOrderItems', (table) => {
     table.increments('Id').primary();
     table.integer('KitchenOrderId').notNullable();
     table.string('MenuItemName').notNullable();
     table.decimal('Quantity', 16, 3).notNullable().defaultTo(1);
     table.string('PortionName');
-    table.string('Notes');                           // Per-item notes (no onions, extra cheese)
-    table.string('Modifiers');                       // JSON: [{ name, price }]
+    table.string('Notes');
+    table.string('Modifiers');
     table.string('State', 20).notNullable().defaultTo('NEW');
     table.foreign('KitchenOrderId').references('KitchenOrders.Id').onDelete('CASCADE');
   });
 
-  // Kitchen Station Routing — which products go to which station
+  // Kitchen Station Routing
   await knex.schema.createTable('KitchenStationRouting', (table) => {
     table.increments('Id').primary();
     table.integer('KitchenStationId').notNullable();
-    table.string('MenuItemGroupCode');     // Route by group code (e.g., "Food", "Drinks")
-    table.integer('MenuItemId');            // Or route by specific menu item
+    table.string('MenuItemGroupCode');
+    table.integer('MenuItemId');
     table.foreign('KitchenStationId').references('KitchenStations.Id').onDelete('CASCADE');
   });
 
@@ -80,18 +83,18 @@ exports.up = async function(knex) {
     table.index(['MenuItemGroupCode'], 'IX_KitchenStationRouting_GroupCode');
   });
 
-  // Seed default kitchen stations
+  // Seed default kitchen stations with stable Code identifiers
   await knex('KitchenStations').insert([
-    { Name: 'kitchen', DisplayName: 'Cocina', SortOrder: 10, Color: '#FF6B6B', IsActive: 1 },
-    { Name: 'pizza', DisplayName: 'Pizzería', SortOrder: 20, Color: '#4ECDC4', IsActive: 1 },
-    { Name: 'bar', DisplayName: 'Bebidas', SortOrder: 30, Color: '#45B7D1', IsActive: 1 },
-    { Name: 'dispatch', DisplayName: 'Despacho', SortOrder: 40, Color: '#96CEB4', IsActive: 1 },
+    { Code: 'KITCHEN', Name: 'kitchen', DisplayName: 'Cocina', SortOrder: 10, Color: '#FF6B6B', IsActive: 1, IsDefault: 1 },
+    { Code: 'PIZZA', Name: 'pizza', DisplayName: 'Pizzería', SortOrder: 20, Color: '#4ECDC4', IsActive: 1, IsDefault: 0 },
+    { Code: 'DRINKS', Name: 'bar', DisplayName: 'Bebidas', SortOrder: 30, Color: '#45B7D1', IsActive: 1, IsDefault: 0 },
+    { Code: 'EXPO', Name: 'dispatch', DisplayName: 'Despacho', SortOrder: 40, Color: '#96CEB4', IsActive: 1, IsDefault: 0 },
   ]);
 
-  // Default routing: Food → kitchen, Drinks → bar, Pizza → pizza
-  const kitchenStation = await knex('KitchenStations').where({ Name: 'kitchen' }).first();
-  const barStation = await knex('KitchenStations').where({ Name: 'bar' }).first();
-  const pizzaStation = await knex('KitchenStations').where({ Name: 'pizza' }).first();
+  // Default routing rules
+  const kitchenStation = await knex('KitchenStations').where({ Code: 'KITCHEN' }).first();
+  const barStation = await knex('KitchenStations').where({ Code: 'DRINKS' }).first();
+  const pizzaStation = await knex('KitchenStations').where({ Code: 'PIZZA' }).first();
 
   if (kitchenStation) {
     await knex('KitchenStationRouting').insert([

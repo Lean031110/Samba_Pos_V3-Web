@@ -11,6 +11,7 @@ const { TicketRepository } = require('../../infrastructure/repositories/TicketRe
 const { Ticket } = require('../../domain/Ticket');
 const { TicketBuilder } = require('../../domain/TicketBuilder');
 const { OrderBuilder } = require('../../domain/OrderBuilder');
+const { KitchenService } = require('./KitchenService');
 const engine = require('../../domain/CalculationEngine');
 const { recalculateTicket } = require('../../domain/TicketRecalculator');
 const { AccountTransaction } = require('../../domain/AccountTransaction');
@@ -18,6 +19,7 @@ const { NotFoundError, ConflictError, ValidationError } = require('../middleware
 const { publish, EventTopicNames } = require('../../application/eventBus');
 
 const ticketRepo = new TicketRepository();
+const kitchenService = new KitchenService();
 
 class TicketServiceExtended {
   // ===================================================================
@@ -78,20 +80,21 @@ class TicketServiceExtended {
   // reverses all AccountTransactions, recalculates (naturally zeros totals).
   // ===================================================================
   async voidTicket(ticketId) {
-    const ticketRow = await ticketRepo.getTicketById(ticketId);
-    if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
-    if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
+    return withTransaction(async (trx) => {
+      const ticketRow = await ticketRepo.getTicketById(ticketId);
+      if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
+      if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
 
-    const ticket = new Ticket(ticketRow);
+      const ticket = new Ticket(ticketRow);
 
-    // Reverse all AccountTransactions
-    if (ticket.TransactionDocument) {
-      for (const txn of ticket.TransactionDocument.AccountTransactions) {
-        if (txn instanceof AccountTransaction && txn.canReverse()) {
-          txn.reverse();
+      // Reverse all AccountTransactions
+      if (ticket.TransactionDocument) {
+        for (const txn of ticket.TransactionDocument.AccountTransactions) {
+          if (txn instanceof AccountTransaction && txn.canReverse()) {
+            txn.reverse();
+          }
         }
       }
-    }
 
     // Mark all orders as Void (CalculatePrice=false → excluded from totals)
     for (const order of ticket.Orders) {
@@ -102,6 +105,11 @@ class TicketServiceExtended {
       else states.push({ StateName: 'Status', State: 'Void' });
       order.OrderStates = JSON.stringify(states);
       order.CalculatePrice = false;
+    }
+
+    // Propagate void to kitchen orders (bidirectional sync)
+    for (const order of ticket.Orders) {
+      await kitchenService.voidOrdersForPosOrder(order.Id, 0, trx);
     }
 
     // Mark ticket state
@@ -119,9 +127,12 @@ class TicketServiceExtended {
 
     ticket.IsClosed = true;
 
-    await ticketRepo.saveTicket(ticket);
+    await ticketRepo.saveTicket(ticket, trx);
     publish(EventTopicNames.TicketClosed, { Ticket: ticket, reason: 'voided' });
-    return ticketRepo.getTicketById(ticketId);
+    return { ticketId };
+    }).then(async ({ ticketId }) => {
+      return ticketRepo.getTicketById(ticketId);
+    });
   }
 
   // ===================================================================

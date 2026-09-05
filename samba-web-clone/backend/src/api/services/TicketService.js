@@ -122,6 +122,7 @@ class TicketService {
       throw new ValidationError('quantity must be a positive number');
     }
 
+    // Load reference data OUTSIDE the transaction (read-only)
     const ticketRow = await ticketRepo.getTicketById(ticketId);
     if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
     if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
@@ -139,7 +140,7 @@ class TicketService {
     // Build the Ticket domain object from DB row
     const ticket = new Ticket(ticketRow);
 
-    // Build the Order via OrderBuilder — use the ACTUAL user from JWT
+    // Build the Order via OrderBuilder
     const order = OrderBuilder.create()
       .forMenuItem(menuItem)
       .withPortion(menuItem.Portions.find(p => p.Name === data.portionName) || menuItem.Portions[0])
@@ -150,25 +151,26 @@ class TicketService {
       .withQuantity(data.quantity || 1)
       .build();
 
-    // Add the order to the ticket (this triggers recalc + eventBus)
+    // Add the order to the ticket (triggers recalc)
     ticket.addOrder(order, taxTemplates, saleTxnType, user.username);
 
-    // Persist
-    ticket.Id = ticketId;
-    await ticketRepo.saveTicket(ticket);
-    const saved = await ticketRepo.getTicketById(ticketId);
+    // ATOMIC: ticket save + kitchen routing in ONE transaction
+    // If kitchen routing fails, the entire order is rolled back.
+    // No "order saved but kitchen didn't receive it" state is possible.
+    await withTransaction(async (trx) => {
+      ticket.Id = ticketId;
+      await ticketRepo.saveTicket(ticket, trx);
 
-    // Route the new order to kitchen stations
-    const newOrder = saved.Orders[saved.Orders.length - 1];
-    if (newOrder) {
-      try {
-        await kitchenService.routeOrderToKitchen(newOrder, saved, user.userId);
-      } catch (err) {
-        console.error('[TicketService.addOrder] Kitchen routing failed:', err.message);
-        // Don't fail the order if kitchen routing fails — log and continue
+      // Get the newly saved order (it now has an Id assigned by the DB)
+      const savedOrders = await trx('Orders').where({ TicketId: ticketId }).orderBy('Id', 'desc');
+      const newOrder = savedOrders[0];
+      if (newOrder) {
+        // Route to kitchen INSIDE the same transaction
+        await kitchenService.routeOrderToKitchen(newOrder, ticket, user.userId, trx);
       }
-    }
+    });
 
+    const saved = await ticketRepo.getTicketById(ticketId);
     return saved;
   }
 
