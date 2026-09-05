@@ -152,17 +152,26 @@ function orderGetTotal(order) {
  * @param {boolean} taxIncluded
  * @param {Decimal} plainSum
  * @param {Decimal} preTaxServices
+ * @param {number} [taxTemplateId]  - if provided, only TaxValues whose
+ *        TaxTempleteAccountTransactionTypeId matches are summed.
+ *        Source: Order.cs:386 (overload with taxTemplateId)
  * @returns {Decimal}
  */
-function orderGetTotalTaxAmount(order, taxIncluded, plainSum, preTaxServices) {
+function orderGetTotalTaxAmount(order, taxIncluded, plainSum, preTaxServices, taxTemplateId = null) {
   if (!order.CalculatePrice) return new Decimal(0);
   const taxablePrice = orderGetTaxablePrice(order);
-  const taxValues = order._parsedTaxes || [];
+  let taxValues = order._parsedTaxes || [];
+  if (taxTemplateId !== null) {
+    taxValues = taxValues.filter(tv => tv.TaxTempleteAccountTransactionTypeId === taxTemplateId);
+  }
   if (taxValues.length === 0) return new Decimal(0);
 
-  // totalRate = sum of all TaxRates (needed when taxIncluded=true, because the
-  // price already includes all taxes and must distribute proportionally)
-  const totalRate = taxValues.reduce(
+  // totalRate = sum of ALL TaxRates on this order (needed when taxIncluded=true,
+  // because the price already includes all taxes and must distribute proportionally)
+  // NOTE: When filtering by taxTemplateId, the original C# still uses totalRate
+  // of ALL applicable tax values, not just the filtered ones. We mirror that.
+  const allTaxValues = order._parsedTaxes || [];
+  const totalRate = allTaxValues.reduce(
     (sum, tv) => sum.plus(tv.TaxRate || 0), new Decimal(0)
   );
 
