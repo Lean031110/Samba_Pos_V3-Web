@@ -347,6 +347,105 @@ class KitchenService {
   }
 
   /**
+   * KDS void → POS propagation.
+   * When kitchen voids an order, the POS order is marked as Voided
+   * (CalculatePrice=false, OrderStates=Status=Voided).
+   * This is an EXPLICIT operation — the POS does NOT auto-delete the order.
+   * The order remains for audit, but is excluded from totals.
+   *
+   * Policy: KDS void → POS order voided (CalculatePrice=false).
+   * The cashier sees the order as voided in the POS.
+   * Reconciliation is implicit: both sides agree the order is voided.
+   *
+   * @param {number} kitchenOrderId
+   * @param {number} userId
+   * @param {trx} [trx]
+   */
+  async voidOrderFromKitchen(kitchenOrderId, userId = 0, trx = null) {
+    const conn = this._conn(trx);
+    const ko = await conn('KitchenOrders').where({ Id: kitchenOrderId }).first();
+    if (!ko) throw new NotFoundError(`Kitchen order ${kitchenOrderId} not found`);
+
+    // Mark kitchen order as VOIDED
+    const result = await this.updateOrderState(kitchenOrderId, KITCHEN_STATES.VOIDED, userId, null, trx);
+
+    // Propagate to POS order: mark as voided (CalculatePrice=false)
+    const order = await conn('Orders').where({ Id: ko.OrderId }).first();
+    if (order) {
+      let states = [];
+      try { states = JSON.parse(order.OrderStates || '[]'); } catch {}
+      const idx = states.findIndex(s => s.StateName === 'Status');
+      if (idx >= 0) states[idx].State = 'Voided';
+      else states.push({ StateName: 'Status', State: 'Voided' });
+
+      await conn('Orders').where({ Id: order.Id }).update({
+        CalculatePrice: 0,
+        OrderStates: JSON.stringify(states),
+      });
+
+      // Publish event so POS terminals refresh
+      publish('KitchenOrderVoided', {
+        kitchenOrderId,
+        orderId: ko.OrderId,
+        ticketId: ko.TicketId,
+        userId,
+        action: 'kds_void_propagated',
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Update kitchen order from POS when the order is edited
+   * (quantity change, modifier change, note change).
+   * Increments Revision counter and updates KitchenOrderItems.
+   * Does NOT create a duplicate KitchenOrder.
+   *
+   * @param {number} orderId — the POS Order ID
+   * @param {Object} updatedOrder — the updated order row from DB
+   * @param {trx} [trx]
+   */
+  async updateOrderFromPOS(orderId, updatedOrder, trx = null) {
+    const conn = this._conn(trx);
+    const kitchenOrders = await conn('KitchenOrders').where({ OrderId: orderId });
+
+    for (const ko of kitchenOrders) {
+      // Skip if already voided or served
+      if (ko.State === KITCHEN_STATES.VOIDED || ko.State === KITCHEN_STATES.SERVED) continue;
+
+      // Increment revision
+      const newRevision = (ko.Revision || 0) + 1;
+      await conn('KitchenOrders').where({ Id: ko.Id }).update({
+        Revision: newRevision,
+        Notes: updatedOrder.Tag || ko.Notes,
+      });
+
+      // Update kitchen order items
+      await conn('KitchenOrderItems').where({ KitchenOrderId: ko.Id }).del();
+      await conn('KitchenOrderItems').insert({
+        KitchenOrderId: ko.Id,
+        MenuItemName: updatedOrder.MenuItemName,
+        Quantity: updatedOrder.Quantity,
+        PortionName: updatedOrder.PortionName || '',
+        Notes: updatedOrder.Tag || '',
+        Modifiers: updatedOrder.OrderTags || '[]',
+        State: ko.State,  // Keep current state
+      });
+
+      // Publish realtime update
+      publish('KitchenOrderUpdated', {
+        kitchenOrderId: ko.Id,
+        orderId,
+        ticketId: ko.TicketId,
+        newState: ko.State,
+        revision: newRevision,
+        action: 'pos_edit',
+      });
+    }
+  }
+
+  /**
    * Get kitchen statistics for a station.
    */
   async getStationStats(stationId, trx = null) {

@@ -40,6 +40,7 @@ exports.up = async function(knex) {
     table.string('Notes');
     table.integer('CreatedByUserId').notNullable().defaultTo(0);
     table.integer('Version').notNullable().defaultTo(1);  // Optimistic locking
+    table.integer('Revision').notNullable().defaultTo(0); // Incremented when POS edits the order
     table.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
     table.foreign('KitchenStationId').references('KitchenStations.Id');
     // Idempotency: one kitchen order per (OrderId, StationId) — prevents duplicates

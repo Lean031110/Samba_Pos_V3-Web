@@ -160,7 +160,7 @@ function bridgeEventsToSocket(io) {
     });
   }
 
-  // Kitchen-specific events — only go to kitchen room
+  // Kitchen-specific events — only go to kitchen room + POS (for void propagation)
   subscribe('KitchenOrderAdded', (payload) => {
     io.to('role:kitchen').emit('KitchenOrderAdded', payload);
     log(LEVELS.DEBUG, `WebSocket broadcast: KitchenOrderAdded`, { orderId: payload?.orderId });
@@ -169,6 +169,12 @@ function bridgeEventsToSocket(io) {
     io.to('role:kitchen').emit('KitchenOrderUpdated', payload);
     io.to('role:pos').emit('KitchenOrderUpdated', payload);
     log(LEVELS.DEBUG, `WebSocket broadcast: KitchenOrderUpdated`, { orderId: payload?.orderId });
+  });
+  subscribe('KitchenOrderVoided', (payload) => {
+    // KDS void → POS must be notified (propagation)
+    io.to('role:kitchen').emit('KitchenOrderVoided', payload);
+    io.to('role:pos').emit('KitchenOrderVoided', payload);
+    log(LEVELS.DEBUG, `WebSocket broadcast: KitchenOrderVoided`, { orderId: payload?.orderId });
   });
 }
 

@@ -87,12 +87,13 @@ router.post('/orders/:id/serve', auditLog('kitchen.serve', 'KitchenOrder'), asyn
   } catch (err) { next(err); }
 });
 
-// POST /api/kitchen/orders/:id/void
+// POST /api/kitchen/orders/:id/void — void from kitchen (propagates to POS)
 router.post('/orders/:id/void', auditLog('kitchen.void', 'KitchenOrder'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { expectedVersion } = req.body || {};
-    const result = await kitchenService.voidOrder(
+    // voidOrderFromKitchen: marks KDS as VOIDED + propagates to POS order
+    const result = await kitchenService.voidOrderFromKitchen(
       id, req.user?.userId || 0,
       expectedVersion !== undefined ? expectedVersion : null
     );
