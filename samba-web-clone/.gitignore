@@ -54,3 +54,6 @@ coverage/
 
 # === Original SambaPOS V3 source (kept locally for reference, NOT committed) ===
 source/
+
+# === Playwright test artifacts ===
+backend/test-results/

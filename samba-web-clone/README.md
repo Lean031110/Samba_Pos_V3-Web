@@ -2,7 +2,7 @@
 
 Réplica web fiel (pixel-perfect + logic-perfect) de **SambaPOS V3** (https://github.com/josephwambura/SambaPOS-3), migrando la aplicación WPF original a una arquitectura moderna Node.js + Vanilla JS + Web Components.
 
-> Estado del proyecto: **Sprint 4 completado** (Frontend táctil pixel-perfect + API REST + WebSockets)
+> Estado del proyecto: **Sprint 5 completado** (JWT auth + flujos avanzados + Playwright + Docker)
 
 ---
 
@@ -268,12 +268,37 @@ Los 4 entregables de la Fase 0 están en `/analysis/`:
 - **Static serving**: Express sirve `/frontend` como SPA (fallback a `index.html`)
 - **E2E test**: 23/23 passed — verifica flujo completo login → mesa → productos → descuento → pago → cierre → print + 5 eventos WebSocket broadcast
 
-### Sprint 5 — Flujo Transaccional Completo + Impresión Real (próximo)
-- Conexión WebUSB para impresoras térmicas ESC/POS (Chrome/Edge)
-- Implementación completa de Gift, Void, Tags, Note (endpoints faltantes)
-- Split ticket, refund, merge tickets
-- Autenticación JWT (reemplaza el mock admin/1234)
-- Capturas de pantalla y video del flujo completo
+### Sprint 5 — Flujo Transaccional Completo + JWT + Playwright + Docker ✅
+- **Autenticación JWT** real (reemplaza el mock admin/1234):
+  - `POST /api/auth/login` devuelve `{ token, user }` con expiración 8h
+  - Middleware `authenticate` valida `Authorization: Bearer <token>` en todas las rutas `/api/*` (excepto `/api/auth/login`)
+  - Frontend almacena token en `localStorage`, auto-logout en 401
+  - PIN soporta tanto bcrypt hash como texto plano (backward compat con seed)
+- **7 endpoints avanzados** del `BUSINESS_RULES_ENGINE.md`:
+  - `POST /api/tickets/:id/note` — setea nota del ticket
+  - `POST /api/tickets/:id/gift` — marca órdenes como Gift (`CalculatePrice=false`)
+  - `POST /api/tickets/:id/void` — anula ticket (revierte AccountTransactions, marca `Status=Void`)
+  - `POST /api/tickets/:id/tags` — actualiza `TicketTags` JSON
+  - `POST /api/tickets/:id/split` — divide ticket moviendo órdenes a uno nuevo
+  - `POST /api/tickets/:id/refund` — crea ticket de devolución con monto negativo (auto-reversal)
+  - `POST /api/tickets/merge` — combina 2+ tickets en uno nuevo, cierra los originales
+- **Mock de impresión ESC/POS verificado**:
+  - Test de checksum SHA-256: buffer determinista, same ticket → same buffer
+  - Buffer empieza con `0x1B 0x40` (ESC @ — printer init)
+  - Contiene `ESC a` (align), `GS V 66 0` (cut), `ESC d 1` (feed), `ESC p 0 25 250` (cash drawer)
+  - Sin bytes inválidos — seguro para enviar a impresora térmica real
+- **Tests de Playwright** (3 tests, 9 capturas de pantalla):
+  - `tests/e2e/flow.spec.js`: login → dashboard → POS → note modal → logout
+  - Login con PIN incorrecto muestra error
+  - Indicator de WebSocket muestra "Connected"
+  - Capturas en `/docs/screenshots/01-login-filled.png` … `09-ws-connected.png`
+- **Docker**:
+  - `Dockerfile` multi-stage: Node 20 slim + sqlite3 build deps
+  - `docker-compose.yml`: un solo comando `docker compose up -d --build`
+  - Volume `samba-data` persiste la BD SQLite
+  - Healthcheck en `/health`
+  - Variables de entorno: `JWT_SECRET`, `JWT_EXPIRES_IN`, `SAMBA_DB_PATH`
+- **47/47 tests de integración** pasan (incluyendo 12 nuevos de Sprint 5: JWT + extended endpoints + split/refund/merge)
 
 ---
 
@@ -325,26 +350,109 @@ Los 4 entregables de la Fase 0 están en `/analysis/`:
 ```bash
 node scripts/insert-ticket-demo.js
 ```
-Verifica: inserción de ticket con 2 órdenes, lectura via repositorio, cálculo byte-identical al C# original, preservación de la inconsistencia de redondeo.
 
 ### Sprint 2 — Aceptación del motor de negocio
 ```bash
 node scripts/sprint2-acceptance-test.js
 ```
-Verifica 5 escenarios:
-1. Ticket simple, TaxIncluded=true, sin descuento
-2. Ticket simple, TaxIncluded=false, sin descuento
-3. Descuento PRE-TAX (10%) + tax excluido
-4. Service charge POST-TAX (10%) + tax incluido
-5. Auto-reversal en monto negativo (-7.00)
 
-Más: ledger balanceado en cada escenario, eventBus publica eventos correctos.
-
-### Sprint 3 — Integración HTTP
+### Sprint 3 — Integración HTTP (supertest)
 ```bash
-npm test
+npm test    # 47 tests: health, products, tables, tickets lifecycle, JWT auth, split/refund/merge
 ```
-Tests con supertest: cada endpoint recibe input y devuelve el HTTP code correcto + body JSON esperado. Cubre 404, 409, 400, 200.
+
+### Sprint 4 — E2E flow test
+```bash
+npm run test:e2e    # 23 tests: full flow via HTTP + WebSocket events
+```
+
+### Sprint 5 — Playwright (browser automation)
+```bash
+cd backend
+npx playwright test --reporter=line          # headless (CI)
+npx playwright test --headed                  # show browser
+npx playwright test --debug                   # step-by-step
+npx playwright show-report tests/e2e/report   # open HTML report
+```
+Capturas de pantalla se guardan en `/docs/screenshots/`.
+
+### Sprint 5 — ESC/POS buffer checksum
+```bash
+npm run test:print    # 7 tests: SHA-256 checksum, ESC/POS structure validation
+```
+
+---
+
+## 🐳 Docker
+
+### Levantar con un solo comando
+```bash
+docker compose up -d --build
+# → http://localhost:3001
+# → Login: Administrator / 1234
+```
+
+### Variables de entorno
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `PORT` | `3001` | Puerto HTTP + WebSocket |
+| `NODE_ENV` | `production` | Modo de ejecución |
+| `JWT_SECRET` | `change-this-in-production` | Secret para firmar JWT |
+| `JWT_EXPIRES_IN` | `8h` | Expiración del token |
+| `SAMBA_DB_PATH` | `/app/data/samba.db` | Ruta de la BD SQLite |
+
+### Volúmenes
+- `samba-data` → persiste `/app/data/samba.db` entre reinicios del container
+
+### Healthcheck
+El container incluye un healthcheck que verifica `GET /health` cada 30s.
+
+### Detener y limpiar
+```bash
+docker compose down              # detiene containers
+docker compose down -v           # detiene + borra volumen (¡pierde la BD!)
+```
+
+---
+
+## 🖨 Impresión ESC/POS
+
+### Mock (actual)
+El endpoint `GET /api/tickets/:id/print` devuelve:
+```json
+{
+  "data": {
+    "ticket": { /* full ticket object */ },
+    "formatted": "<L00>Ticket: 1\n<L00>Date: ...\n<F>\n<J00>Burger x2|15.00\n...",
+    "escposBase64": "G0AxMjM0NT...",
+    "escposBytesCount": 305
+  }
+}
+```
+
+El buffer ESC/POS generado:
+- Empieza con `0x1B 0x40` (ESC @ — init printer)
+- Contiene `ESC a 0/1/2` (alineación left/center/right)
+- Contiene `ESC d 1` + `GS V 66 0` (feed + cut)
+- Contiene `ESC p 0 25 250` (cash drawer open) cuando hay tag `<drawer>`
+
+### Impresora real (Sprint 6 — pendiente)
+Para conectar una impresora térmica USB real:
+1. **Backend**: instalar `node-escpos` + `node-escpos-usb` para enviar bytes via USB
+2. **Frontend (WebUSB)**: Chrome/Edge soporta WebUSB API para enviar bytes directamente desde el navegador:
+   ```javascript
+   const device = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x04b8 }] });
+   await device.open();
+   await device.claimInterface(0);
+   await device.transferOut(1, new Uint8Array(escposBytes));
+   ```
+3. **Fallback PDF**: `window.print()` con una ventana emergente que contiene el HTML formateado
+
+### Test de checksum
+```bash
+npm run test:print
+```
+Verifica que el buffer es determinista (same ticket → same SHA-256) y que todos los bytes son válidos ESC/POS.
 
 ---
 

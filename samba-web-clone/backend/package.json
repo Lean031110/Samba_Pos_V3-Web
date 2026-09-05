@@ -12,7 +12,9 @@
     "test": "node --test tests/api-integration.test.js",
     "test:ticket": "node scripts/insert-ticket-demo.js",
     "test:sprint2": "node scripts/sprint2-acceptance-test.js",
-    "test:e2e": "node scripts/sprint4-e2e-test.js"
+    "test:e2e": "node scripts/sprint4-e2e-test.js",
+    "test:playwright": "npx playwright test --reporter=line",
+    "test:print": "node scripts/print-checksum-test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
