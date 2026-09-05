@@ -243,7 +243,7 @@ class TicketRepository {
         ticketId = newId;
       }
 
-      // Upsert Orders
+      // Upsert Orders (strip _-prefixed internal fields first)
       for (const o of (ticket.Orders || [])) {
         const orderRow = {
           Id: o.Id || undefined,
@@ -271,6 +271,7 @@ class TicketRepository {
           OrderTags: o.OrderTags || null,
           OrderStates: o.OrderStates || null,
         };
+        // Explicit field allowlist above — internal _-prefixed fields are NOT included.
         if (o.Id) {
           await trx('Orders').where({ Id: o.Id, TicketId: ticketId }).update(orderRow);
         } else {
@@ -279,9 +280,27 @@ class TicketRepository {
       }
 
       // Upsert Payments / ChangePayments / Calculations / PaidItems / TicketEntities
+      // NOTE: We use an explicit field allowlist per child table because the
+      // domain layer attaches extra runtime fields (e.g. AccountTransaction on
+      // Payment, _calculationAmount on Calculation, _parsedTaxes on Order) that
+      // are NOT DB columns and would cause "no such column" errors on insert.
+      const childFieldAllowlist = {
+        Payments: ['Id', 'PaymentTypeId', 'Name', 'Date', 'AccountTransactionId', 'Amount', 'UserId'],
+        ChangePayments: ['Id', 'ChangePaymentTypeId', 'Name', 'Date', 'AccountTransactionId', 'Amount', 'UserId'],
+        Calculations: ['Id', 'Name', 'Order', 'CalculationTypeId', 'AccountTransactionTypeId',
+                       'CalculationType', 'IncludeTax', 'DecreaseAmount', 'UsePlainSum',
+                       'Amount', 'CalculationAmount'],
+        PaidItems: ['Id', 'Key', 'Quantity'],
+        TicketEntities: ['Id', 'EntityTypeId', 'EntityId', 'AccountId', 'AccountTypeId',
+                         'EntityName', 'EntityCustomData'],
+      };
       for (const childTable of ['Payments', 'ChangePayments', 'Calculations', 'PaidItems', 'TicketEntities']) {
+        const allowlist = childFieldAllowlist[childTable];
         for (const c of (ticket[childTable] || [])) {
-          const row = { ...c, TicketId: ticketId };
+          const row = { TicketId: ticketId };
+          for (const field of allowlist) {
+            if (c[field] !== undefined) row[field] = c[field];
+          }
           if (c.Id) {
             await trx(childTable).where({ Id: c.Id, TicketId: ticketId }).update(row);
           } else {

@@ -1,19 +1,25 @@
 {
   "name": "samba-web-clone-backend",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Web clone of SambaPOS V3 — backend (Node.js + Knex + SQLite)",
-  "main": "src/index.js",
+  "main": "src/api/server.js",
   "scripts": {
+    "start": "node src/api/server.js",
+    "dev": "node --watch src/api/server.js",
     "migrate": "knex migrate:latest --knexfile src/infrastructure/db/knexfile.js",
     "migrate:rollback": "knex migrate:rollback --knexfile src/infrastructure/db/knexfile.js",
     "seed": "knex seed:run --knexfile src/infrastructure/db/knexfile.js",
-    "test": "node tests/ticket-comparator.test.js",
-    "test:ticket": "node scripts/insert-ticket-demo.js"
+    "test": "node --test tests/api-integration.test.js",
+    "test:ticket": "node scripts/insert-ticket-demo.js",
+    "test:sprint2": "node scripts/sprint2-acceptance-test.js"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "decimal.js": "^10.4.3",
+    "express": "^5.2.1",
     "knex": "^3.1.0",
-    "sqlite3": "^5.1.7"
-  },
-  "devDependencies": {}
+    "socket.io": "^4.8.3",
+    "sqlite3": "^5.1.7",
+    "supertest": "^7.2.2"
+  }
 }
