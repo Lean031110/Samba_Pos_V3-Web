@@ -22,6 +22,7 @@ const { Server } = require('socket.io');
 
 const { requestLogger, errorLogger, log, LEVELS } = require('./middleware/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const { authenticate } = require('./middleware/auth');
 const { subscribe, EventTopicNames } = require('../application/eventBus');
 
 const PORT = process.env.PORT || 3001;
@@ -58,7 +59,11 @@ function createApp() {
     res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
   });
 
+  // === Auth middleware (applied to all /api/* routes except /api/auth/login) ===
+  app.use('/api', authenticate);
+
   // === Routes ===
+  app.use('/api/auth', require('./routes/auth'));
   app.use('/api/tickets', require('./routes/tickets'));
   app.use('/api/products', require('./routes/products'));
   app.use('/api/tables', require('./routes/tables'));

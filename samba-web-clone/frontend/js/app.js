@@ -45,8 +45,8 @@ const App = {
   },
 
   /**
-   * Login handler — verifies PIN against the seeded admin user (PIN=1234).
-   * In a real app this would hit POST /api/auth/login.
+   * Login handler — calls POST /api/auth/login to get a JWT.
+   * Stores token in localStorage via Api.setToken().
    */
   async login() {
     const { username, pin } = LoginView.getValues();
@@ -54,20 +54,21 @@ const App = {
       LoginView.showError('Username and PIN are required');
       return;
     }
-    // Mock: hardcoded check against the seed (admin/1234)
-    // Real auth will come in Sprint 5 with JWT.
-    if (pin === '1234' && username.toLowerCase() === 'administrator') {
-      window.store.setState({ currentUser: { name: username } }, 'logged-in');
+    try {
+      const res = await Api.login(username, pin);
+      Api.setToken(res.token);
+      window.store.setState({ currentUser: res.user }, 'logged-in');
       LoginView.reset();
-      document.getElementById('header-user').textContent = username;
+      document.getElementById('header-user').textContent = res.user.name;
       this.navigate('dashboard');
-      this.toast('Welcome, ' + username, 'success');
-    } else {
-      LoginView.showError('Invalid credentials. Try administrator / 1234');
+      this.toast('Welcome, ' + res.user.name, 'success');
+    } catch (err) {
+      LoginView.showError(err.message || 'Login failed');
     }
   },
 
   logout() {
+    Api.setToken(null);
     window.store.setState({ currentUser: null, currentTicket: null }, 'logged-out');
     document.getElementById('header-user').textContent = '—';
     this.navigate('login');

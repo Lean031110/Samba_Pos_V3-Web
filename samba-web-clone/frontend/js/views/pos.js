@@ -290,9 +290,14 @@ const PosView = {
 
   async _saveNote() {
     const note = document.getElementById('note-input').value;
-    // We don't have a dedicated endpoint yet — would need POST /api/tickets/:id/note
-    window.App.closeModal();
-    window.App.toast('Note saving requires a dedicated endpoint (Sprint 5)', 'warn');
+    try {
+      const res = await Api.setNote(window.store.currentTicket.Id, note);
+      window.store.setState({ currentTicket: res.data }, 'note-set');
+      window.App.closeModal();
+      window.App.toast('Note saved', 'success');
+    } catch (err) {
+      window.App.toast('Cannot save note: ' + err.message, 'error');
+    }
   },
 
   tags() {

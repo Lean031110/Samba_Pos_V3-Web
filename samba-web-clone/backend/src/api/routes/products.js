@@ -43,4 +43,27 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/products — create a new menu item (Sprint 5)
+router.post('/', async (req, res, next) => {
+  try {
+    const { name, price, groupCode, barcode } = req.body || {};
+    if (!name) throw new ValidationError('name is required');
+    if (typeof price !== 'number') throw new ValidationError('price must be a number');
+
+    const { db } = require('../../infrastructure/db/db');
+    const [miId] = await db('MenuItems').insert({
+      Name: name, GroupCode: groupCode || null, Barcode: barcode || null, Tag: null,
+    });
+    const [portionId] = await db('MenuItemPortions').insert({
+      Name: 'Normal', MenuItemId: miId, Multiplier: 1,
+    });
+    await db('MenuItemPrices').insert({
+      MenuItemPortionId: portionId, PriceTag: null, Price: price,
+    });
+
+    const item = await productRepo.getMenuItemById(miId);
+    res.status(201).json({ data: item });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

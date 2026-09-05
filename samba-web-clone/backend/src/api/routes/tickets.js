@@ -14,10 +14,12 @@
 
 const express = require('express');
 const { TicketService } = require('../services/TicketService');
+const { TicketServiceExtended } = require('../services/TicketServiceExtended');
 const { ValidationError } = require('../middleware/errorHandler');
 
 const router = express.Router();
 const ticketService = new TicketService();
+const ticketServiceExt = new TicketServiceExtended();
 
 // GET /api/tickets — list open tickets
 router.get('/', async (req, res, next) => {
@@ -43,6 +45,16 @@ router.post('/', async (req, res, next) => {
     const { departmentId, ticketTypeId, tableId } = req.body || {};
     const ticket = await ticketService.createTicket({ departmentId, ticketTypeId, tableId });
     res.status(201).json({ data: ticket });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/merge — merge multiple tickets into one
+// NOTE: must be defined BEFORE /:id routes to avoid path conflict
+router.post('/merge', async (req, res, next) => {
+  try {
+    const { sourceTicketIds } = req.body || {};
+    const result = await ticketServiceExt.mergeTickets(sourceTicketIds);
+    res.status(201).json({ data: result });
   } catch (err) { next(err); }
 });
 
@@ -96,6 +108,76 @@ router.get('/:id/print', async (req, res, next) => {
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
     const result = await ticketService.printTicket(id);
     res.json({ data: result });
+  } catch (err) { next(err); }
+});
+
+// =====================================================================
+// Sprint 5 — Extended endpoints
+// =====================================================================
+
+// POST /api/tickets/:id/note — set ticket note
+router.post('/:id/note', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { note } = req.body || {};
+    const ticket = await ticketServiceExt.setNote(id, note);
+    res.json({ data: ticket });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/gift — mark orders as Gift (CalculatePrice=false)
+router.post('/:id/gift', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { orderId, orderIds } = req.body || {};
+    const ids = orderIds || (orderId ? [orderId] : []);
+    const ticket = await ticketServiceExt.giftOrders(id, ids);
+    res.json({ data: ticket });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/void — void the entire ticket
+router.post('/:id/void', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const ticket = await ticketServiceExt.voidTicket(id);
+    res.json({ data: ticket });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/tags — set ticket tags
+router.post('/:id/tags', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { tags } = req.body || {};
+    const ticket = await ticketServiceExt.setTags(id, tags);
+    res.json({ data: ticket });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/split — split ticket (move orders to new ticket)
+router.post('/:id/split', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { orderIds } = req.body || {};
+    const result = await ticketServiceExt.splitTicket(id, orderIds);
+    res.status(201).json({ data: result });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/refund — refund a closed ticket
+router.post('/:id/refund', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { amount, reason } = req.body || {};
+    const result = await ticketServiceExt.refundTicket(id, amount, reason);
+    res.status(201).json({ data: result });
   } catch (err) { next(err); }
 });
 
