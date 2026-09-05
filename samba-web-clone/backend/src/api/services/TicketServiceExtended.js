@@ -311,6 +311,11 @@ class TicketServiceExtended {
       // Save using the same transaction
       await ticketRepo.saveTicket(originalTicket, trx);
 
+      // Reverse inventory deductions (REVERSAL movements)
+      const refundDept = await trx('Departments').where({ Id: originalRow.DepartmentId }).first();
+      const refundWarehouseId = refundDept?.WarehouseId || 1;
+      await inventoryService.reverseForTicket(originalTicket, refundWarehouseId, 0, trx);
+
       publish(EventTopicNames.PaymentProcessed, {
         Ticket: originalTicket,
         PaymentTypeName: 'Refund',

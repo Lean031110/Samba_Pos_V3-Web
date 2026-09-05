@@ -78,7 +78,7 @@ class InventoryService {
 
     // Create new recipe
     const [recipeId] = await conn('Recipes').insert({
-      MenuItemPortionId, FixedCost: fixedCost, IsActive: 1,
+      MenuItemPortionId: menuItemPortionId, FixedCost: fixedCost, IsActive: 1,
     });
 
     // Insert recipe items

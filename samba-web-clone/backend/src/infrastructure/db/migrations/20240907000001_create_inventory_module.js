@@ -190,22 +190,7 @@ exports.up = async function(knex) {
     ]);
   }
 
-  // Seed initial stock balances for the default warehouse
-  const warehouse = await knex('Warehouses').first();
-  if (warehouse) {
-    const ingredients = await knex('Ingredients');
-    for (const ing of ingredients) {
-      const stockQty = 100;  // Start with 100 units of each
-      await knex('StockBalances').insert({
-        IngredientId: ing.Id,
-        WarehouseId: warehouse.Id,
-        Quantity: stockQty,
-        UnitId: ing.BaseUnitId,
-        AverageCost: ing.CostPerUnit,
-        LastUpdated: new Date().toISOString(),
-      });
-    }
-  }
+  // Note: StockBalances are seeded in seeds/seed.js (after the warehouse is created)
 };
 
 exports.down = async function(knex) {

@@ -533,6 +533,37 @@ async function seed(knex) {
       { Name: 'Status',           GroupName: 'Status', StateType: 2, Color: 'Gainsboro'    },
     ]);
 
+    // -----------------------------------------------------------------
+    // 22. Inventory — seed initial stock balances
+    // -----------------------------------------------------------------
+    // The inventory migration creates ingredients + units but NOT stock balances
+    // (because the warehouse is created by THIS seed, not by the migration).
+    // So we seed stock balances here, after the warehouse exists.
+    try {
+      const ingredients = await trx('Ingredients');
+      const warehouse = await trx('Warehouses').first();
+      if (warehouse && ingredients.length > 0) {
+        for (const ing of ingredients) {
+          // Check if balance already exists (idempotent)
+          const existing = await trx('StockBalances')
+            .where({ IngredientId: ing.Id, WarehouseId: warehouse.Id }).first();
+          if (!existing) {
+            await trx('StockBalances').insert({
+              IngredientId: ing.Id,
+              WarehouseId: warehouse.Id,
+              Quantity: 100,
+              UnitId: ing.BaseUnitId,
+              AverageCost: ing.CostPerUnit,
+              LastUpdated: new Date().toISOString(),
+            });
+          }
+        }
+        console.log(`[seed] Seeded ${ingredients.length} stock balances`);
+      }
+    } catch (invErr) {
+      console.log('[seed] Inventory tables not found, skipping stock balances');
+    }
+
     console.log('[seed] All inserts completed. Committing transaction...');
   });
 
