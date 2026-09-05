@@ -2,7 +2,7 @@
 
 Réplica web fiel (pixel-perfect + logic-perfect) de **SambaPOS V3** (https://github.com/josephwambura/SambaPOS-3), migrando la aplicación WPF original a una arquitectura moderna Node.js + Vanilla JS + Web Components.
 
-> Estado del proyecto: **Sprint 3 en curso** (APIs REST + WebSockets + Mock de impresión)
+> Estado del proyecto: **Sprint 4 completado** (Frontend táctil pixel-perfect + API REST + WebSockets)
 
 ---
 
@@ -178,13 +178,17 @@ npm run seed
 node scripts/insert-ticket-demo.js
 node scripts/sprint2-acceptance-test.js
 
-# 6. (Sprint 3) Iniciar el servidor API
+# 6. (Sprint 3+4) Iniciar el servidor API + frontend (sirve ambos en el mismo puerto)
 npm start
-# → Server escuchando en http://localhost:3001
+# → API escuchando en http://localhost:3001/api
+# → Frontend escuchando en http://localhost:3001/
 # → WebSocket escuchando en ws://localhost:3001
 
-# 7. (Sprint 3) Ejecutar tests de integración
+# 7. (Sprint 3) Ejecutar tests de integración HTTP (supertest)
 npm test
+
+# 8. (Sprint 4) Ejecutar test E2E del flujo completo (requiere server corriendo)
+npm run test:e2e
 ```
 
 ### Scripts npm disponibles
@@ -233,12 +237,43 @@ Los 4 entregables de la Fase 0 están en `/analysis/`:
 - Cada mutación dispara recálculo + publica evento en eventBus (`TicketTotalChanged`, `OrderAdded`, `PaymentProcessed`)
 - **Acceptance test**: 5 escenarios (4 cálculo + 1 auto-reversal), 35 assertions, ledger balanceado en todos
 
-### Sprint 3 — APIs RESTful + WebSockets 🚧 (en progreso)
+### Sprint 3 — APIs RESTful + WebSockets ✅
 - Express server con middleware (logging, errores 400/404/409, validación)
-- Endpoints: `/api/tickets`, `/api/products`, `/api/tables`
-- Socket.io para multi-terminal sync (`TicketTotalChanged`, `TicketClosed`)
-- Mock de impresión ESC/POS en base64
-- Tests de integración con supertest
+- 14 endpoints REST: `/api/tickets` (8), `/api/products` (3), `/api/tables` (3)
+- Socket.io para multi-terminal sync (`TicketTotalChanged`, `TicketClosed`, `OrderAdded`, `PaymentProcessed`)
+- Mock de impresión ESC/POS en base64 (inicia con `0x1B 0x40` — ESC @ init)
+- Tests de integración con supertest: 32/32 passed
+
+### Sprint 4 — Interfaz de Usuario Táctil (Pixel Perfect) ✅
+- **Vanilla JS + Web Components** (sin framework, sin virtual DOM)
+- `<flex-button>` Web Component replicando FlexButton de WPF:
+  - Auto-contrast de foreground (luminance < 128 → blanco)
+  - Border = Lerp(bgColor, black, 30%)
+  - Press feedback <100ms (CSS transition + transform + bg flash)
+  - Glow on hover
+- **CSS Grid layout** replicando el Shell del original (header 50px / main 1fr / footer 30px)
+- **Paleta exacta** extraída del XAML: 50+ colores WPF named + hex hardcoded (variables.css)
+- **Font Awesome 6 Free** para todos los iconos (mapeo del `UI_SPECS_FOR_WEB.md`)
+- **4 pantallas prioritarias** implementadas:
+  1. **LoginView** — teclado numérico 4×3 (60×60 keys), botón Login con gradiente verde `#FFB9EFA9→#FF288D09`
+  2. **EntityDashboardView** (mapa de mesas) — grid 7 columnas, tiles con colores por estado:
+     - Available → `#90EE90` (LightGreen)
+     - New Orders → `#00008B` (DarkBlue, texto blanco)
+     - Bill Requested → `#FFA500` (Orange)
+     - Locked → `#808080` (Gray)
+  3. **PosView** — 4 zonas (CSS Grid): ticket info + open tickets strip + main (orders 60% / products 40%) + command bar (Gift/Void/Note/Tags/Discount/Print/Pay)
+  4. **PaymentEditorView** — orders list + numeric keypad + summary (tendered/remaining/change/total) + payment type buttons (Cash/Card/Voucher/Account)
+- **Store Singleton Observable** (EventTarget-based) — single source of truth, emula PRISM EventAggregator
+- **WebSocket client** con reconexión automática y backoff exponencial (1s → 30s cap, 30% jitter)
+- **Static serving**: Express sirve `/frontend` como SPA (fallback a `index.html`)
+- **E2E test**: 23/23 passed — verifica flujo completo login → mesa → productos → descuento → pago → cierre → print + 5 eventos WebSocket broadcast
+
+### Sprint 5 — Flujo Transaccional Completo + Impresión Real (próximo)
+- Conexión WebUSB para impresoras térmicas ESC/POS (Chrome/Edge)
+- Implementación completa de Gift, Void, Tags, Note (endpoints faltantes)
+- Split ticket, refund, merge tickets
+- Autenticación JWT (reemplaza el mock admin/1234)
+- Capturas de pantalla y video del flujo completo
 
 ---
 

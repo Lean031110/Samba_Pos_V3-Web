@@ -16,6 +16,7 @@
 
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const cors = require('cors');
 const { Server } = require('socket.io');
 
@@ -24,6 +25,11 @@ const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { subscribe, EventTopicNames } = require('../application/eventBus');
 
 const PORT = process.env.PORT || 3001;
+
+// Frontend is served from /frontend (sibling of /backend, both inside /samba-web-clone)
+// __dirname = /samba-web-clone/backend/src/api
+// So ../.. = /samba-web-clone/backend, ../../.. = /samba-web-clone, then /frontend
+const FRONTEND_DIR = path.join(__dirname, '..', '..', '..', 'frontend');
 
 /**
  * Create and configure the Express app.
@@ -41,6 +47,15 @@ function createApp() {
   // === Health check ===
   app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'samba-web-clone' });
+  });
+
+  // === Static frontend (single-page app) ===
+  // Serves /frontend/index.html at / and /frontend/css/* at /css/* etc.
+  app.use(express.static(FRONTEND_DIR));
+  // SPA fallback: any non-/api route returns index.html
+  app.get(/^\/(?!api|health).*/, (req, res, next) => {
+    if (req.method !== 'GET') return next();
+    res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
   });
 
   // === Routes ===

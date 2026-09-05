@@ -1,0 +1,208 @@
+/* =====================================================================
+   components.css — FlexButton, TicketItem, NumberPad, etc.
+   ===================================================================== */
+
+/* =====================================================================
+   flex-button — the workhorse touch button
+   Mirrors Samba.Presentation.Controls.FlexButton behavior:
+     - Auto-contrast foreground (luminance < 128 → white text)
+     - Border = Lerp(bgColor, black, 0.3)
+     - Press feedback <100ms (transform + bg flash)
+     - Glow on hover
+   ===================================================================== */
+.flex-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--samba-min-btn-h);
+  min-width: var(--samba-min-btn-w);
+  padding: var(--samba-pad-btn);
+  margin: 0 var(--samba-gap-btn) var(--samba-gap-btn) 0;
+  border-radius: var(--samba-radius-button);
+  border: 1px solid;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--samba-anim-fast),
+              transform var(--samba-anim-fast),
+              box-shadow var(--samba-anim-fast);
+  background: var(--flex-bg, var(--samba-bg-button-default));
+  color: var(--flex-fg, var(--samba-fg-default));
+  /* Auto-contrast border: darkens the bg by 30% via color-mix (modern browsers) */
+  border-color: color-mix(in srgb, var(--flex-bg, var(--samba-bg-button-default)) 70%, black);
+  position: relative;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+.flex-button:hover {
+  box-shadow: var(--samba-shadow-glow);
+  background: color-mix(in srgb, var(--flex-bg, var(--samba-bg-button-default)) 90%, white);
+}
+.flex-button:active,
+.flex-button.is-pressed {
+  transform: translate(1px, 1px);
+  box-shadow: var(--samba-shadow-pressed);
+  background: color-mix(in srgb, var(--flex-bg, var(--samba-bg-button-default)) 80%, black);
+  transition: background 0ms, transform 0ms, box-shadow 0ms;
+}
+.flex-button:disabled,
+.flex-button.is-disabled {
+  background: var(--samba-bg-button-disabled);
+  color: var(--samba-fg-inverse);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.flex-button__icon { font-size: 1.4em; }
+.flex-button__label { font-size: var(--flex-fs, var(--samba-fs-md)); }
+.flex-button__sublabel { font-size: var(--samba-fs-xs); opacity: 0.8; font-weight: normal; }
+
+/* Variant utility classes (when not using inline --flex-bg) */
+.flex-button--success { --flex-bg: var(--samba-bg-button-success); --flex-fg: var(--samba-fg-inverse); }
+.flex-button--danger  { --flex-bg: var(--samba-bg-button-danger);  --flex-fg: var(--samba-fg-inverse); }
+.flex-button--warning { --flex-bg: var(--samba-bg-button-warning); --flex-fg: var(--samba-fg-default); }
+.flex-button--discount{ --flex-bg: var(--samba-bg-button-discount);--flex-fg: var(--samba-fg-inverse); }
+.flex-button--action  { --flex-bg: var(--samba-bg-button-action);  --flex-fg: var(--samba-fg-inverse); }
+.flex-button--info    { --flex-bg: var(--samba-bg-button-info);    --flex-fg: var(--samba-fg-default); }
+
+/* Tall button (command bar) */
+.flex-button--tall { min-height: var(--samba-h-cmd-bar); }
+
+/* Big payment button (FontSize=40 in original) */
+.flex-button--xl { font-size: var(--samba-fs-3xl); min-height: 80px; }
+
+/* =====================================================================
+   NumberPad (calc-style keypad, 4×3)
+   ===================================================================== */
+.numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.numpad__key {
+  min-height: 50px;
+  min-width: 50px;
+  background: var(--samba-bg-button-default);
+  border: 1px solid;
+  border-color: color-mix(in srgb, var(--samba-bg-button-default) 70%, black);
+  border-radius: var(--samba-radius-button);
+  font-size: var(--samba-fs-xl);
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--samba-anim-fast), transform var(--samba-anim-fast);
+}
+.numpad__key:hover { background: var(--samba-bg-button-hover); }
+.numpad__key:active { transform: translate(1px, 1px); background: var(--samba-bg-button-pressed); }
+.numpad__key--accent { background: var(--samba-bg-button-action); color: var(--samba-fg-inverse); border-color: color-mix(in srgb, var(--samba-bg-button-action) 70%, black); }
+.numpad__key--danger { background: var(--samba-bg-button-danger);  color: var(--samba-fg-inverse); border-color: color-mix(in srgb, var(--samba-bg-button-danger) 70%, black); }
+
+/* =====================================================================
+   ticket-item — order row in ticket list
+   ===================================================================== */
+.ticket-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--samba-border-light);
+  font-size: var(--samba-fs-md);
+  cursor: pointer;
+  transition: background var(--samba-anim-fast);
+  background: var(--samba-bg-order-normal);
+  user-select: none;
+}
+.ticket-item:hover { background: var(--samba-bg-button-hover); }
+.ticket-item.is-selected { background: var(--samba-bg-order-selected); }
+.ticket-item.is-locked   { background: var(--samba-bg-order-locked); color: var(--samba-fg-disabled); }
+.ticket-item.is-gift     { background: var(--samba-bg-order-gift); font-style: italic; }
+.ticket-item.is-void     { background: var(--samba-bg-order-void); color: var(--samba-fg-inverse); text-decoration: line-through; }
+.ticket-item__name { flex: 1; }
+.ticket-item__qty { font-weight: bold; margin: 0 8px; }
+.ticket-item__total { font-weight: bold; }
+
+/* =====================================================================
+   Category tab (top of product selector)
+   ===================================================================== */
+.category-tab {
+  min-height: 45px;
+  padding: 0 16px;
+  background: var(--samba-bg-button-default);
+  border: 1px solid;
+  border-color: color-mix(in srgb, var(--samba-bg-button-default) 70%, black);
+  border-radius: var(--samba-radius-button);
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--samba-anim-fast);
+  white-space: nowrap;
+}
+.category-tab:hover { background: var(--samba-bg-button-hover); }
+.category-tab.is-active {
+  background: var(--samba-bg-button-action);
+  color: var(--samba-fg-inverse);
+  border-color: color-mix(in srgb, var(--samba-bg-button-action) 70%, black);
+}
+
+/* =====================================================================
+   Login keypad (60×60 keys, larger than numpad)
+   ===================================================================== */
+.login-keypad .numpad__key {
+  min-height: 60px;
+  min-width: 60px;
+  font-size: var(--samba-fs-2xl);
+}
+.login-keypad .numpad__key--login {
+  background: linear-gradient(to bottom, #FFB9EFA9, #FF288D09);
+  color: var(--samba-fg-inverse);
+  border-color: #FF288D09;
+}
+
+/* =====================================================================
+   Print preview modal
+   ===================================================================== */
+.print-preview {
+  font-family: 'Courier New', monospace;
+  background: #FFFFFF;
+  padding: 16px;
+  border: 1px solid var(--samba-border-light);
+  border-radius: var(--samba-radius-panel);
+  white-space: pre;
+  font-size: var(--samba-fs-sm);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* =====================================================================
+   Loading spinner
+   ===================================================================== */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--samba-border-light);
+  border-top-color: var(--samba-bg-button-action);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* =====================================================================
+   Connection indicator (top right of header)
+   ===================================================================== */
+.conn-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--samba-fs-xs);
+}
+.conn-indicator__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--samba-bg-button-danger);
+}
+.conn-indicator.is-connected .conn-indicator__dot { background: var(--samba-bg-button-success); }
+.conn-indicator.is-reconnecting .conn-indicator__dot { background: var(--samba-bg-button-warning); animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }

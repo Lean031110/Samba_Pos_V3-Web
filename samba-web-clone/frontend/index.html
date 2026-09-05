@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>SambaPOS V3 — Web Clone</title>
+
+  <!-- Font Awesome 6 Free (CDN) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="/css/reset.css">
+  <link rel="stylesheet" href="/css/variables.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/components.css">
+</head>
+<body>
+  <div id="app">
+    <!-- =========================================================== -->
+    <!-- Header                                                       -->
+    <!-- =========================================================== -->
+    <header class="app-header no-select">
+      <div class="app-header__left">
+        <span id="header-department">Restaurant</span>
+        <span class="app-header__clock" id="header-clock">--:--:--</span>
+      </div>
+      <div class="app-header__right">
+        <span class="conn-indicator" id="conn-indicator">
+          <span class="conn-indicator__dot"></span>
+          <span id="conn-label">Connecting…</span>
+        </span>
+        <span id="header-user">Administrator</span>
+        <flex-button variant="danger" icon="fa-right-from-bracket" label="Logout"
+                     style="min-height: 32px; padding: 0 10px; font-size: 12px;"
+                     onclick="window.App.logout()"></flex-button>
+      </div>
+    </header>
+
+    <!-- =========================================================== -->
+    <!-- Main view container (one active view at a time)              -->
+    <!-- =========================================================== -->
+    <main class="app-main">
+      <!-- LoginView -->
+      <section class="view view-login" id="view-login">
+        <div class="login-card no-select">
+          <div class="login-card__title">
+            <i class="fa-solid fa-cash-register"></i> SambaPOS V3 — Login
+          </div>
+          <input type="text" class="login-card__input" id="login-username"
+                 placeholder="Username" value="Administrator" autocomplete="off">
+          <input type="password" class="login-card__input" id="login-pin"
+                 placeholder="PIN" inputmode="numeric" autocomplete="off">
+          <div class="login-keypad numpad" id="login-keypad">
+            <!-- Keypad populated by JS -->
+          </div>
+          <flex-button variant="success" icon="fa-right-to-bracket" label="Login"
+                       style="min-height: 50px;"
+                       onclick="window.App.login()"></flex-button>
+          <div id="login-error" style="color: var(--samba-fg-error); font-size: 12px; min-height: 16px;"></div>
+        </div>
+      </section>
+
+      <!-- EntityDashboardView (table map) -->
+      <section class="view view-dashboard" id="view-dashboard">
+        <div class="dashboard-search">
+          <input type="text" id="dashboard-search-input" placeholder="Search tables..."
+                 oninput="window.App.views.dashboard.filter(this.value)">
+          <flex-button variant="danger" icon="fa-xmark" label="Clear"
+                       style="min-height: 40px; padding: 0 10px;"
+                       onclick="document.getElementById('dashboard-search-input').value=''; window.App.views.dashboard.filter('')"></flex-button>
+        </div>
+        <div class="dashboard-grid" id="dashboard-grid"></div>
+      </section>
+
+      <!-- PosView -->
+      <section class="view view-pos" id="view-pos">
+        <!-- Ticket info bar -->
+        <div class="pos-ticketinfo" id="pos-ticketinfo">
+          <div class="pos-ticketinfo__field">
+            <span class="pos-ticketinfo__label">Ticket:</span>
+            <span class="pos-ticketinfo__value" id="pos-ticket-number">(new)</span>
+          </div>
+          <div class="pos-ticketinfo__field">
+            <span class="pos-ticketinfo__label">Table:</span>
+            <span class="pos-ticketinfo__value" id="pos-table">(none)</span>
+          </div>
+          <div class="pos-ticketinfo__field">
+            <span class="pos-ticketinfo__label">Date:</span>
+            <span class="pos-ticketinfo__value" id="pos-date">--</span>
+          </div>
+        </div>
+
+        <!-- Open tickets strip -->
+        <div class="pos-opentickets" id="pos-opentickets">
+          <div class="pos-opentickets__tile pos-opentickets__tile--new"
+               onclick="window.App.views.pos.newTicket()">
+            <i class="fa-solid fa-plus"></i>
+            <div>New Ticket</div>
+          </div>
+        </div>
+
+        <!-- Main area: orders (left) + products (right) -->
+        <div class="pos-main">
+          <div class="pos-orders">
+            <div class="pos-orders__list" id="pos-orders-list">
+              <div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">
+                No orders yet. Tap a product button to start.
+              </div>
+            </div>
+            <div class="pos-orders__totals" id="pos-totals">
+              <div class="pos-orders__total-row"><span>Subtotal</span><span>$0.00</span></div>
+              <div class="pos-orders__total-row"><span>Tax</span><span>$0.00</span></div>
+              <div class="pos-orders__total-row"><span>Discounts</span><span>$0.00</span></div>
+              <div class="pos-orders__total-row pos-orders__total-row--grand">
+                <span>Total</span><span id="pos-grand-total">$0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pos-products">
+            <div class="pos-categories" id="pos-categories"></div>
+            <div class="pos-products__grid" id="pos-products-grid"></div>
+            <div class="pos-products__paging" id="pos-products-paging"></div>
+          </div>
+        </div>
+
+        <!-- Command bar -->
+        <div class="pos-cmdbar" id="pos-cmdbar">
+          <flex-button variant="discount" icon="fa-gift" label="Gift"
+                       onclick="window.App.views.pos.gift()"></flex-button>
+          <flex-button variant="danger" icon="fa-ban" label="Void"
+                       onclick="window.App.views.pos.void()"></flex-button>
+          <flex-button variant="warning" icon="fa-note-sticky" label="Note"
+                       onclick="window.App.views.pos.note()"></flex-button>
+          <flex-button variant="info" icon="fa-tags" label="Tags"
+                       onclick="window.App.views.pos.tags()"></flex-button>
+          <flex-button variant="discount" icon="fa-percent" label="Discount"
+                       onclick="window.App.views.pos.discount()"></flex-button>
+          <flex-button icon="fa-print" label="Print Bill"
+                       onclick="window.App.views.pos.printBill()"></flex-button>
+          <flex-button variant="action" icon="fa-money-bill-wave" label="Pay"
+                       onclick="window.App.views.pos.pay()"></flex-button>
+        </div>
+      </section>
+
+      <!-- PaymentEditorView -->
+      <section class="view view-payment" id="view-payment">
+        <div class="payment-header">
+          <span class="payment-header__title">
+            <i class="fa-solid fa-money-bill-wave"></i> Payment
+            <span id="payment-ticket-number" style="font-weight: normal; color: var(--samba-fg-muted);"></span>
+          </span>
+          <span class="payment-header__amount" id="payment-remaining">$0.00</span>
+        </div>
+        <div class="payment-main">
+          <div class="payment-orders" id="payment-orders"></div>
+          <div class="payment-right">
+            <div class="payment-numpad numpad" id="payment-numpad"></div>
+            <div class="payment-summary">
+              <div class="payment-summary__row"><span>Tendered</span><span id="payment-tendered">$0.00</span></div>
+              <div class="payment-summary__row"><span>Remaining</span><span id="payment-remaining-2">$0.00</span></div>
+              <div class="payment-summary__row"><span>Change</span><span id="payment-change">$0.00</span></div>
+              <div class="payment-summary__row payment-summary__row--total">
+                <span>Total</span><span id="payment-total">$0.00</span>
+              </div>
+            </div>
+            <div class="payment-types" id="payment-types"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- =========================================================== -->
+    <!-- Footer                                                       -->
+    <!-- =========================================================== -->
+    <footer class="app-footer no-select">
+      <span>SambaPOS V3 Web Clone · Terminal: <strong>Server</strong></span>
+      <span id="footer-status">Ready</span>
+    </footer>
+
+    <!-- =========================================================== -->
+    <!-- Modal container (generic)                                    -->
+    <!-- =========================================================== -->
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-card" id="modal-card">
+        <div class="modal-card__title" id="modal-title"></div>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- Scripts (loaded in order — no module bundler)               -->
+  <!-- =========================================================== -->
+  <script src="/js/components/flex-button.js"></script>
+  <script src="/js/services/api.js"></script>
+  <script src="/js/store/store.js"></script>
+  <script src="/js/store/websocket-client.js"></script>
+  <script src="/js/views/login.js"></script>
+  <script src="/js/views/dashboard.js"></script>
+  <script src="/js/views/pos.js"></script>
+  <script src="/js/views/payment.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

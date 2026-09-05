@@ -1,0 +1,407 @@
+/* =====================================================================
+   layout.css — Main grid + zones (Shell, PosView, Payment, Login, Dashboard)
+   ===================================================================== */
+
+#app {
+  display: grid;
+  grid-template-rows: var(--samba-h-header) 1fr var(--samba-h-footer);
+  height: 100vh;
+  width: 100vw;
+  background: var(--samba-shell-bg);
+  overflow: hidden;
+}
+
+/* === Header === */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  color: var(--samba-fg-inverse);
+  font-weight: bold;
+  background: linear-gradient(to right, rgba(0,0,0,0.3), rgba(0,0,0,0.1));
+}
+.app-header__left { display: flex; align-items: center; gap: 16px; }
+.app-header__right { display: flex; align-items: center; gap: 12px; }
+.app-header__clock {
+  font-family: 'Lucida Console', monospace;
+  font-size: var(--samba-fs-md);
+  opacity: 0.9;
+}
+
+/* === Main view container === */
+.app-main {
+  position: relative;
+  overflow: hidden;
+  background: var(--samba-bg-panel);
+}
+.view {
+  position: absolute;
+  inset: 0;
+  display: none;
+  opacity: 0;
+  transition: opacity var(--samba-anim-normal);
+}
+.view.is-active {
+  display: flex;
+  flex-direction: column;
+  opacity: 1;
+}
+
+/* === Footer === */
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  color: var(--samba-fg-inverse);
+  font-size: var(--samba-fs-sm);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* =====================================================================
+   LoginView — centered modal with numeric keypad
+   ===================================================================== */
+.view-login {
+  align-items: center;
+  justify-content: center;
+}
+.login-card {
+  width: 360px;
+  background: var(--samba-bg-modal);
+  border-radius: var(--samba-radius-modal);
+  box-shadow: var(--samba-shadow-modal);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.login-card__title {
+  font-size: var(--samba-fs-xl);
+  font-weight: bold;
+  text-align: center;
+  color: var(--samba-fg-default);
+}
+.login-card__input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--samba-border-input);
+  border-radius: var(--samba-radius-button);
+  background: var(--samba-bg-input);
+  font-size: var(--samba-fs-lg);
+}
+.login-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+/* =====================================================================
+   EntityDashboardView (table map) — search bar + grid of tables
+   ===================================================================== */
+.view-dashboard {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+.dashboard-search {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--samba-bg-panel);
+  border-bottom: 1px solid var(--samba-border-light);
+}
+.dashboard-search input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--samba-border-input);
+  border-radius: var(--samba-radius-button);
+  font-size: var(--samba-fs-lg);
+}
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+  padding: 12px;
+  overflow-y: auto;
+  align-content: start;
+}
+.table-tile {
+  min-height: 80px;
+  border-radius: var(--samba-radius-tile);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform var(--samba-anim-fast), box-shadow var(--samba-anim-fast);
+  border: 2px solid transparent;
+  user-select: none;
+}
+.table-tile:hover { transform: translateY(-2px); box-shadow: var(--samba-shadow-glow); }
+.table-tile:active { transform: translateY(0); }
+.table-tile__name { font-size: var(--samba-fs-lg); }
+.table-tile__state { font-size: var(--samba-fs-xs); margin-top: 4px; opacity: 0.8; }
+.table-tile--available { background: var(--samba-bg-table-available); color: var(--samba-fg-default); }
+.table-tile--occupied  { background: var(--samba-bg-table-occupied);  color: var(--samba-fg-inverse); }
+.table-tile--bill      { background: var(--samba-bg-table-bill);      color: var(--samba-fg-default); }
+.table-tile--locked    { background: var(--samba-bg-table-locked);    color: var(--samba-fg-inverse); }
+.table-tile--selected  { background: var(--samba-bg-table-selected);  color: var(--samba-fg-default); border-color: var(--samba-border-default); }
+
+/* =====================================================================
+   PosView — 4 zones: ticket info + open tickets + main + command bar
+   ===================================================================== */
+.view-pos {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+}
+.pos-ticketinfo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 12px;
+  height: var(--samba-h-ticketinfo);
+  background: var(--samba-bg-info);
+  font-size: var(--samba-fs-sm);
+  border-bottom: 1px solid var(--samba-border-light);
+}
+.pos-ticketinfo__field { display: flex; gap: 4px; }
+.pos-ticketinfo__label { color: var(--samba-fg-muted); }
+.pos-ticketinfo__value { font-weight: bold; }
+
+.pos-opentickets {
+  display: flex;
+  gap: 5px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  background: var(--samba-bg-panel);
+  border-bottom: 1px solid var(--samba-border-light);
+}
+.pos-opentickets__tile {
+  min-width: var(--samba-w-openticket);
+  height: var(--samba-h-openticket);
+  background: var(--samba-bg-ticket-tile);
+  color: var(--samba-fg-default);
+  border-radius: var(--samba-radius-tile);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background var(--samba-anim-fast);
+}
+.pos-opentickets__tile:hover { background: var(--samba-bg-ticket-tile-hover); }
+.pos-opentickets__tile--new {
+  background: var(--samba-bg-button-default);
+  border: 2px dashed var(--samba-border-default);
+}
+
+.pos-main {
+  display: grid;
+  grid-template-columns: 60fr 40fr;
+  overflow: hidden;
+}
+
+/* Left: ticket/orders */
+.pos-orders {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--samba-border-light);
+  background: var(--samba-bg-modal);
+}
+.pos-orders__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+.pos-orders__totals {
+  border-top: 2px solid var(--samba-border-default);
+  padding: 8px 12px;
+  background: var(--samba-bg-panel);
+  font-size: var(--samba-fs-lg);
+}
+.pos-orders__total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.pos-orders__total-row--grand {
+  font-size: var(--samba-fs-2xl);
+  font-weight: bold;
+  color: var(--samba-fg-amount);
+  border-top: 1px dashed var(--samba-border-default);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* Right: product selector */
+.pos-products {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+.pos-categories {
+  display: flex;
+  gap: 3px;
+  padding: 6px;
+  overflow-x: auto;
+  background: var(--samba-bg-panel);
+  border-bottom: 1px solid var(--samba-border-light);
+}
+.pos-products__grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+  padding: 6px;
+  overflow-y: auto;
+  align-content: start;
+}
+.pos-products__paging {
+  display: flex;
+  gap: 3px;
+  padding: 6px;
+  background: var(--samba-bg-panel);
+  border-top: 1px solid var(--samba-border-light);
+}
+
+/* Command bar (bottom) */
+.pos-cmdbar {
+  display: flex;
+  gap: 3px;
+  padding: 6px 12px;
+  background: var(--samba-bg-panel);
+  border-top: 1px solid var(--samba-border-light);
+}
+.pos-cmdbar > * { flex: 1; }
+
+/* =====================================================================
+   PaymentEditorView
+   ===================================================================== */
+.view-payment {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+.payment-header {
+  padding: 12px;
+  background: var(--samba-bg-info);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--samba-border-light);
+}
+.payment-header__title { font-size: var(--samba-fs-xl); font-weight: bold; }
+.payment-header__amount { font-size: var(--samba-fs-3xl); font-weight: bold; color: var(--samba-fg-amount); }
+
+.payment-main {
+  display: grid;
+  grid-template-columns: 60fr 40fr;
+  overflow: hidden;
+}
+.payment-orders {
+  border-right: 1px solid var(--samba-border-light);
+  overflow-y: auto;
+  padding: 4px;
+}
+.payment-right {
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: 8px;
+  padding: 8px;
+}
+.payment-numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.payment-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--samba-bg-panel);
+  border-radius: var(--samba-radius-panel);
+}
+.payment-summary__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--samba-fs-lg);
+}
+.payment-summary__row--total {
+  font-size: var(--samba-fs-2xl);
+  font-weight: bold;
+  color: var(--samba-fg-amount);
+  border-top: 1px dashed var(--samba-border-default);
+  padding-top: 4px;
+}
+.payment-types {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+/* =====================================================================
+   Modal overlay (generic)
+   ===================================================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--samba-bg-modal-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--samba-anim-normal);
+}
+.modal-overlay.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal-card {
+  background: var(--samba-bg-modal);
+  border-radius: var(--samba-radius-modal);
+  box-shadow: var(--samba-shadow-modal);
+  padding: 24px;
+  min-width: 360px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-card__title {
+  font-size: var(--samba-fs-xl);
+  font-weight: bold;
+  margin-bottom: 16px;
+  color: var(--samba-fg-default);
+}
+
+/* =====================================================================
+   Toast (status messages)
+   ===================================================================== */
+.toast-container {
+  position: fixed;
+  bottom: 50px;
+  right: 16px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--samba-radius-button);
+  background: var(--samba-bg-button-action);
+  color: var(--samba-fg-inverse);
+  box-shadow: var(--samba-shadow-modal);
+  font-size: var(--samba-fs-md);
+  animation: toast-in var(--samba-anim-normal);
+  max-width: 360px;
+}
+.toast--error { background: var(--samba-bg-button-danger); }
+.toast--success { background: var(--samba-bg-button-success); }
+.toast--warn { background: var(--samba-bg-button-warning); color: var(--samba-fg-default); }
+@keyframes toast-in {
+  from { transform: translateX(40px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

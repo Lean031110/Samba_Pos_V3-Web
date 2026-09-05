@@ -1,0 +1,116 @@
+/* =====================================================================
+   variables.css — SambaPOS V3 color palette (extracted from XAML)
+   =====================================================================
+   Source: analysis/UI_SPECS_FOR_WEB.md section 1
+   ===================================================================== */
+
+:root {
+  /* === Shell gradient === */
+  --samba-shell-bg: linear-gradient(to bottom,
+    #FF70B8FF 0%,
+    #FF5CBBFF 50%,
+    #FF044392 100%);
+
+  /* === Surfaces === */
+  --samba-bg-panel:        #F5F5F5;  /* WhiteSmoke */
+  --samba-bg-modal:        #FFFFFF;
+  --samba-bg-modal-overlay: rgba(0, 0, 0, 0.5);
+
+  /* === Button default states === */
+  --samba-bg-button-default: #DCDCDC;  /* Gainsboro */
+  --samba-bg-button-hover:    #D3D3D3;  /* LightGray */
+  --samba-bg-button-pressed:  #C0C0C0;  /* Silver */
+  --samba-bg-button-disabled: #A9A9A9;  /* DarkGray */
+
+  /* === Semantic button variants === */
+  --samba-bg-button-success: #008000;  /* Green */
+  --samba-bg-button-danger:  #FF0000;  /* Red */
+  --samba-bg-button-warning: #FFA500;  /* Orange */
+  --samba-bg-button-discount:#800080;  /* Purple */
+  --samba-bg-button-action:  #4169E1;  /* RoyalBlue */
+  --samba-bg-button-info:    #87CEFA;  /* LightSkyBlue */
+
+  /* === Ticket tile colors === */
+  --samba-bg-ticket-tile:    #FFA500;  /* Orange (open ticket) */
+  --samba-bg-ticket-tile-hover: #FF8C00;
+
+  /* === Table states (EntityDashboardView) === */
+  --samba-bg-table-available: #90EE90;  /* LightGreen */
+  --samba-bg-table-occupied:  #00008B;  /* DarkBlue (with white text) */
+  --samba-bg-table-bill:      #FFA500;  /* Orange (Bill Requested) */
+  --samba-bg-table-locked:    #808080;  /* Gray */
+  --samba-bg-table-selected:  #87CEFA;  /* LightSkyBlue */
+
+  /* === Order row states === */
+  --samba-bg-order-normal:  transparent;
+  --samba-bg-order-selected:#FFD700;  /* Gold */
+  --samba-bg-order-locked:  #D3D3D3;  /* LightGray */
+  --samba-bg-order-gift:    #FFE4C4;  /* Bisque */
+  --samba-bg-order-void:    #CD5C5C;  /* IndianRed */
+  --samba-bg-order-timer:   #FFE4C4;  /* Bisque */
+
+  /* === Form fields === */
+  --samba-bg-input:   #FFFFFF;
+  --samba-bg-note:    #FFFFE0;  /* LightYellow */
+  --samba-bg-info:    #E0FFFF;  /* LightCyan */
+
+  /* === Text colors === */
+  --samba-fg-default:  #000000;
+  --samba-fg-inverse:  #FFFFFF;
+  --samba-fg-disabled: #A9A9A9;
+  --samba-fg-amount:   #9370DB;  /* MediumPurple — ticket total */
+  --samba-fg-error:    #DC143C;  /* Crimson */
+  --samba-fg-muted:    #808080;
+
+  /* === Borders === */
+  --samba-border-default: #808080;
+  --samba-border-light:   #DCDCDC;
+  --samba-border-input:   #A9A9A9;
+
+  /* === Shadows & glows === */
+  --samba-shadow-glow:    0 0 8px rgba(146, 156, 252, 0.3);
+  --samba-shadow-pressed: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+  --samba-shadow-modal:   0 4px 20px rgba(0, 0, 0, 0.3);
+
+  /* === Radii === */
+  --samba-radius-button: 4px;
+  --samba-radius-panel:  6px;
+  --samba-radius-modal:  8px;
+  --samba-radius-tile:   6px;
+
+  /* === Animation timings === */
+  --samba-anim-fast:   100ms ease;
+  --samba-anim-normal: 200ms ease;
+  --samba-anim-slow:   500ms ease;
+  --samba-anim-elastic: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* === Layout dimensions (touch-friendly) === */
+  --samba-h-header:    50px;
+  --samba-h-footer:    30px;
+  --samba-h-ticketinfo: 25px;
+  --samba-h-cmd-bar:   65px;
+  --samba-h-openticket: 90px;
+  --samba-w-openticket: 180px;
+
+  --samba-min-btn-h:   60px;
+  --samba-min-btn-w:   80px;
+  --samba-pad-btn:     0 12px;
+  --samba-gap-btn:     3px;
+
+  /* === Typography sizes === */
+  --samba-fs-xs:    11px;
+  --samba-fs-sm:    12px;
+  --samba-fs-md:    14px;
+  --samba-fs-lg:    16px;
+  --samba-fs-xl:    20px;
+  --samba-fs-2xl:   24px;
+  --samba-fs-3xl:   30px;
+  --samba-fs-4xl:   35px;
+  --samba-fs-5xl:   40px;
+
+  /* === Z-index scale === */
+  --z-base:    1;
+  --z-overlay: 100;
+  --z-modal:   1000;
+  --z-toast:   10000;
+}
