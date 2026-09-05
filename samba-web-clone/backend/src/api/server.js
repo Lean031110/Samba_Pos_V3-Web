@@ -117,6 +117,7 @@ function createApp() {
   app.use('/api/products', require('./routes/products'));
   app.use('/api/tables', require('./routes/tables'));
   app.use('/api/kitchen', require('./routes/kitchen'));
+  app.use('/api/inventory', require('./routes/inventory'));
   app.use('/api', require('./routes/config'));
 
   // === 404 + Error handlers ===

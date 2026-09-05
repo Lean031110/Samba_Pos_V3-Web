@@ -12,6 +12,7 @@ const { Ticket } = require('../../domain/Ticket');
 const { TicketBuilder } = require('../../domain/TicketBuilder');
 const { OrderBuilder } = require('../../domain/OrderBuilder');
 const { KitchenService } = require('./KitchenService');
+const { InventoryService } = require('./InventoryService');
 const engine = require('../../domain/CalculationEngine');
 const { recalculateTicket } = require('../../domain/TicketRecalculator');
 const { AccountTransaction } = require('../../domain/AccountTransaction');
@@ -20,6 +21,7 @@ const { publish, EventTopicNames } = require('../../application/eventBus');
 
 const ticketRepo = new TicketRepository();
 const kitchenService = new KitchenService();
+const inventoryService = new InventoryService();
 
 class TicketServiceExtended {
   // ===================================================================
@@ -111,6 +113,11 @@ class TicketServiceExtended {
     for (const order of ticket.Orders) {
       await kitchenService.voidOrdersForPosOrder(order.Id, 0, trx);
     }
+
+    // Reverse inventory deductions (REVERSAL movements)
+    const department = await trx('Departments').where({ Id: ticketRow.DepartmentId }).first();
+    const warehouseId = department?.WarehouseId || 1;
+    await inventoryService.reverseForTicket(ticket, warehouseId, 0, trx);
 
     // Mark ticket state
     let ticketStates = [];

@@ -14,6 +14,7 @@ const { Ticket } = require('../../domain/Ticket');
 const { TicketBuilder } = require('../../domain/TicketBuilder');
 const { OrderBuilder } = require('../../domain/OrderBuilder');
 const { KitchenService } = require('./KitchenService');
+const { InventoryService } = require('./InventoryService');
 const engine = require('../../domain/CalculationEngine');
 const { recalculateTicket } = require('../../domain/TicketRecalculator');
 const { NotFoundError, ConflictError, ValidationError } = require('../middleware/errorHandler');
@@ -23,6 +24,7 @@ const ticketRepo = new TicketRepository();
 const productRepo = new ProductRepository();
 const tableRepo = new TableRepository();
 const kitchenService = new KitchenService();
+const inventoryService = new InventoryService();
 
 class TicketService {
   /**
@@ -366,6 +368,12 @@ class TicketService {
       ticket.Id = ticketId;
       // Save using the SAME transaction
       await ticketRepo.saveTicket(ticket, trx);
+
+      // Deduct inventory (recipe explosion → stock movements)
+      // MUST be in the same transaction — if this fails, the close fails
+      const department = await trx('Departments').where({ Id: ticketRow.DepartmentId }).first();
+      const warehouseId = department?.WarehouseId || 1;
+      await inventoryService.deductForTicketSale(ticket, warehouseId, user.userId || 0, trx);
 
       // Release any linked tables (in the same transaction)
       for (const te of ticket.TicketEntities) {
