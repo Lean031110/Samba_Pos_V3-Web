@@ -17,6 +17,7 @@ const { TicketService } = require('../services/TicketService');
 const { TicketServiceExtended } = require('../services/TicketServiceExtended');
 const { ValidationError } = require('../middleware/errorHandler');
 const { auditLog } = require('../middleware/auditLog');
+const { requirePermission } = require('../middleware/rbac');
 
 const router = express.Router();
 const ticketService = new TicketService();
@@ -41,7 +42,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // POST /api/tickets — create new ticket
-router.post('/', async (req, res, next) => {
+router.post('/', requirePermission('pos.open_ticket'), async (req, res, next) => {
   try {
     const { departmentId, ticketTypeId, tableId } = req.body || {};
     const ticket = await ticketService.createTicket({ departmentId, ticketTypeId, tableId });
@@ -51,7 +52,7 @@ router.post('/', async (req, res, next) => {
 
 // POST /api/tickets/merge — merge multiple tickets into one
 // NOTE: must be defined BEFORE /:id routes to avoid path conflict
-router.post('/merge', auditLog('ticket.merge', 'Ticket'), async (req, res, next) => {
+router.post('/merge', requirePermission('pos.merge'), auditLog('ticket.merge', 'Ticket'), async (req, res, next) => {
   try {
     const { sourceTicketIds } = req.body || {};
     const result = await ticketServiceExt.mergeTickets(sourceTicketIds);
@@ -60,7 +61,7 @@ router.post('/merge', auditLog('ticket.merge', 'Ticket'), async (req, res, next)
 });
 
 // POST /api/tickets/:id/orders — add order
-router.post('/:id/orders', async (req, res, next) => {
+router.post('/:id/orders', requirePermission('pos.add_order'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -71,7 +72,7 @@ router.post('/:id/orders', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/calculations — add discount/service
-router.post('/:id/calculations', async (req, res, next) => {
+router.post('/:id/calculations', requirePermission('pos.discount'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -82,7 +83,7 @@ router.post('/:id/calculations', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/payments — process payment
-router.post('/:id/payments', auditLog('payment.process', 'Payment'), async (req, res, next) => {
+router.post('/:id/payments', requirePermission('pos.payment'), auditLog('payment.process', 'Payment'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -93,7 +94,7 @@ router.post('/:id/payments', auditLog('payment.process', 'Payment'), async (req,
 });
 
 // POST /api/tickets/:id/close — close ticket
-router.post('/:id/close', auditLog('ticket.close', 'Ticket'), async (req, res, next) => {
+router.post('/:id/close', requirePermission('pos.close_ticket'), auditLog('ticket.close', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -128,7 +129,7 @@ router.post('/:id/note', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/gift — mark orders as Gift (CalculatePrice=false)
-router.post('/:id/gift', auditLog('ticket.gift', 'Ticket'), async (req, res, next) => {
+router.post('/:id/gift', requirePermission('pos.gift'), auditLog('ticket.gift', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -140,7 +141,7 @@ router.post('/:id/gift', auditLog('ticket.gift', 'Ticket'), async (req, res, nex
 });
 
 // POST /api/tickets/:id/void — void the entire ticket
-router.post('/:id/void', auditLog('ticket.void', 'Ticket'), async (req, res, next) => {
+router.post('/:id/void', requirePermission('pos.void'), auditLog('ticket.void', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -161,7 +162,7 @@ router.post('/:id/tags', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/split — split ticket (move orders to new ticket)
-router.post('/:id/split', auditLog('ticket.split', 'Ticket'), async (req, res, next) => {
+router.post('/:id/split', requirePermission('pos.split'), auditLog('ticket.split', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -172,7 +173,7 @@ router.post('/:id/split', auditLog('ticket.split', 'Ticket'), async (req, res, n
 });
 
 // POST /api/tickets/:id/refund — refund a closed ticket (in-place reversal)
-router.post('/:id/refund', auditLog('ticket.refund', 'Ticket'), async (req, res, next) => {
+router.post('/:id/refund', requirePermission('pos.refund'), auditLog('ticket.refund', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');

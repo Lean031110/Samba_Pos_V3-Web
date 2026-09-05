@@ -18,6 +18,7 @@ const express = require('express');
 const { InventoryService, MOVEMENT_TYPES } = require('../services/InventoryService');
 const { ValidationError, NotFoundError } = require('../middleware/errorHandler');
 const { auditLog } = require('../middleware/auditLog');
+const { requirePermission } = require('../middleware/rbac');
 const { db } = require('../../infrastructure/db/db');
 
 const router = express.Router();
@@ -46,7 +47,7 @@ router.get('/ingredients/:id', async (req, res, next) => {
 });
 
 // POST /api/inventory/ingredients
-router.post('/ingredients', auditLog('inventory.createIngredient', 'Ingredient'), async (req, res, next) => {
+router.post('/ingredients', requirePermission('manage.inventory'), auditLog('inventory.createIngredient', 'Ingredient'), async (req, res, next) => {
   try {
     const { name, code, groupCode, baseUnitId, minimumStock, costPerUnit } = req.body || {};
     if (!name) throw new ValidationError('name is required');
@@ -81,7 +82,7 @@ router.get('/recipes/:portionId', async (req, res, next) => {
 });
 
 // POST /api/inventory/recipes/:portionId
-router.post('/recipes/:portionId', auditLog('inventory.saveRecipe', 'Recipe'), async (req, res, next) => {
+router.post('/recipes/:portionId', requirePermission('manage.inventory'), auditLog('inventory.saveRecipe', 'Recipe'), async (req, res, next) => {
   try {
     const portionId = parseInt(req.params.portionId, 10);
     if (isNaN(portionId)) throw new ValidationError('portionId must be a number');
@@ -124,7 +125,7 @@ router.get('/movements', async (req, res, next) => {
 });
 
 // POST /api/inventory/movements — manual movement (adjustment, waste, purchase)
-router.post('/movements', auditLog('inventory.movement', 'StockMovement'), async (req, res, next) => {
+router.post('/movements', requirePermission('manage.inventory'), auditLog('inventory.movement', 'StockMovement'), async (req, res, next) => {
   try {
     const {
       ingredientId, warehouseId, unitId,

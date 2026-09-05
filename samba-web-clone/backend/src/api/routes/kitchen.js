@@ -17,12 +17,13 @@ const express = require('express');
 const { KitchenService } = require('../services/KitchenService');
 const { ValidationError } = require('../middleware/errorHandler');
 const { auditLog } = require('../middleware/auditLog');
+const { requirePermission } = require('../middleware/rbac');
 
 const router = express.Router();
 const kitchenService = new KitchenService();
 
 // GET /api/kitchen/stations
-router.get('/stations', async (req, res, next) => {
+router.get('/stations', requirePermission('kitchen.view'), async (req, res, next) => {
   try {
     const stations = await kitchenService.getStations();
     res.json({ data: stations, count: stations.length });
@@ -30,7 +31,7 @@ router.get('/stations', async (req, res, next) => {
 });
 
 // GET /api/kitchen/orders
-router.get('/orders', async (req, res, next) => {
+router.get('/orders', requirePermission('kitchen.view'), async (req, res, next) => {
   try {
     const stationId = req.query.stationId ? parseInt(req.query.stationId, 10) : null;
     const orders = await kitchenService.getActiveOrders(stationId);
@@ -62,7 +63,7 @@ router.post('/orders/:id/state', auditLog('kitchen.updateState', 'KitchenOrder')
 });
 
 // POST /api/kitchen/orders/:id/bump
-router.post('/orders/:id/bump', auditLog('kitchen.bump', 'KitchenOrder'), async (req, res, next) => {
+router.post('/orders/:id/bump', requirePermission('kitchen.bump'), auditLog('kitchen.bump', 'KitchenOrder'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { expectedVersion } = req.body || {};
@@ -75,7 +76,7 @@ router.post('/orders/:id/bump', auditLog('kitchen.bump', 'KitchenOrder'), async 
 });
 
 // POST /api/kitchen/orders/:id/serve
-router.post('/orders/:id/serve', auditLog('kitchen.serve', 'KitchenOrder'), async (req, res, next) => {
+router.post('/orders/:id/serve', requirePermission('kitchen.serve'), auditLog('kitchen.serve', 'KitchenOrder'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { expectedVersion } = req.body || {};
@@ -88,7 +89,7 @@ router.post('/orders/:id/serve', auditLog('kitchen.serve', 'KitchenOrder'), asyn
 });
 
 // POST /api/kitchen/orders/:id/void — void from kitchen (propagates to POS)
-router.post('/orders/:id/void', auditLog('kitchen.void', 'KitchenOrder'), async (req, res, next) => {
+router.post('/orders/:id/void', requirePermission('kitchen.void'), auditLog('kitchen.void', 'KitchenOrder'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { expectedVersion } = req.body || {};
@@ -102,7 +103,7 @@ router.post('/orders/:id/void', auditLog('kitchen.void', 'KitchenOrder'), async 
 });
 
 // POST /api/kitchen/orders/:id/recall
-router.post('/orders/:id/recall', auditLog('kitchen.recall', 'KitchenOrder'), async (req, res, next) => {
+router.post('/orders/:id/recall', requirePermission('kitchen.recall'), auditLog('kitchen.recall', 'KitchenOrder'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { expectedVersion } = req.body || {};

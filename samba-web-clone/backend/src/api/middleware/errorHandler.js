@@ -38,6 +38,10 @@ class UnauthorizedError extends HttpError {
   constructor(message = 'Unauthorized', details = null) { super(401, message, details); }
 }
 
+class ForbiddenError extends HttpError {
+  constructor(message = 'Forbidden', details = null) { super(403, message, details); }
+}
+
 /**
  * Convert any thrown error into a JSON HTTP response.
  * - HttpError subclasses: use their statusCode + message
@@ -90,6 +94,7 @@ module.exports = {
   ConflictError,
   ValidationError,
   UnauthorizedError,
+  ForbiddenError,
   errorHandler,
   notFoundHandler,
 };
