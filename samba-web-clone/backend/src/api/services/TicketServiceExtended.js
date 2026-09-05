@@ -152,181 +152,248 @@ class TicketServiceExtended {
   // SPLIT — POST /api/tickets/:id/split
   // Body: { orderIds: number[] }
   // Creates a new ticket, moves the specified orders to it, recalculates both.
+  // ATOMIC: all operations in a single transaction.
   // ===================================================================
   async splitTicket(sourceTicketId, orderIds) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       throw new ValidationError('orderIds array is required');
     }
 
-    const sourceRow = await ticketRepo.getTicketById(sourceTicketId);
-    if (!sourceRow) throw new NotFoundError(`Ticket ${sourceTicketId} not found`);
-    if (sourceRow.IsClosed) throw new ConflictError(`Ticket ${sourceTicketId} is closed`);
+    return withTransaction(async (trx) => {
+      const sourceRow = await trx('Tickets')
+        .where({ Id: sourceTicketId })
+        .select('*')
+        .first();
+      if (!sourceRow) throw new NotFoundError(`Ticket ${sourceTicketId} not found`);
+      if (sourceRow.IsClosed) throw new ConflictError(`Ticket ${sourceTicketId} is closed`);
 
-    // Validate all orderIds belong to this ticket
-    const sourceOrders = sourceRow.Orders || [];
-    const movingOrders = orderIds.map(id => {
-      const o = sourceOrders.find(o => o.Id === id);
-      if (!o) throw new NotFoundError(`Order ${id} not found on ticket ${sourceTicketId}`);
-      return o;
-    });
+      // Load source orders
+      const sourceOrders = await trx('Orders').where({ TicketId: sourceTicketId });
+      const movingOrders = orderIds.map(id => {
+        const o = sourceOrders.find(o => o.Id === id);
+        if (!o) throw new NotFoundError(`Order ${id} not found on ticket ${sourceTicketId}`);
+        return o;
+      });
 
-    // Step 1: Create the new ticket (uses its own transaction internally)
-    const department = await db('Departments').where({ Id: sourceRow.DepartmentId }).first();
-    const ticketType = await db('TicketTypes').where({ Id: sourceRow.TicketTypeId }).first();
-    const newTicket = TicketBuilder.create(
-      { ...ticketType, TaxIncluded: ticketType.TaxIncluded ? true : false },
-      department
-    ).withExchangeRate(sourceRow.ExchangeRate).build();
-    newTicket.TicketEntities = sourceRow.TicketEntities.map(te => ({ ...te, Id: 0 }));
+      // Create the new ticket in the same transaction
+      const department = await trx('Departments').where({ Id: sourceRow.DepartmentId }).first();
+      const ticketType = await trx('TicketTypes').where({ Id: sourceRow.TicketTypeId }).first();
+      const newTicket = TicketBuilder.create(
+        { ...ticketType, TaxIncluded: ticketType.TaxIncluded ? true : false },
+        department
+      ).withExchangeRate(sourceRow.ExchangeRate).build();
 
-    const newTicketId = await ticketRepo.saveTicket(newTicket);
+      // Save new ticket using the SAME transaction
+      const newTicketId = await ticketRepo.saveTicket(newTicket, trx);
 
-    // Step 2: Move orders (separate simple transaction — no nested saveTicket)
-    await withTransaction(async (trx) => {
-      await trx.raw('PRAGMA defer_foreign_keys = ON');
+      // Move orders to new ticket
       for (const order of movingOrders) {
         await trx('Orders').where({ Id: order.Id, TicketId: sourceTicketId })
           .update({ TicketId: newTicketId });
       }
+
+      // Recalculate source (now has fewer orders)
+      const sourceTicketRow = await trx('Tickets').where({ Id: sourceTicketId }).first();
+      const sourceOrdersRemaining = await trx('Orders').where({ TicketId: sourceTicketId });
+      sourceTicketRow.Orders = sourceOrdersRemaining;
+      const sourceTicket = new Ticket(sourceTicketRow);
+      recalculateTicket(sourceTicket);
+      await ticketRepo.saveTicket(sourceTicket, trx);
+
+      // Recalculate new ticket
+      const newTicketRow = await trx('Tickets').where({ Id: newTicketId }).first();
+      const newOrdersLoaded = await trx('Orders').where({ TicketId: newTicketId });
+      newTicketRow.Orders = newOrdersLoaded;
+      const newTicketReloaded = new Ticket(newTicketRow);
+      recalculateTicket(newTicketReloaded);
+      await ticketRepo.saveTicket(newTicketReloaded, trx);
+
+      publish(EventTopicNames.TicketCreated, { Ticket: newTicketReloaded, reason: 'split' });
+
+      return {
+        sourceTicketId,
+        newTicketId,
+      };
+    }).then(async ({ sourceTicketId, newTicketId }) => {
+      // Read outside the transaction (after commit) so we see the final state
+      return {
+        sourceTicket: await ticketRepo.getTicketById(sourceTicketId),
+        newTicket: await ticketRepo.getTicketById(newTicketId),
+      };
     });
-
-    // Step 3: Recalculate source (now has fewer orders)
-    const sourceTicket = new Ticket(await ticketRepo.getTicketById(sourceTicketId));
-    recalculateTicket(sourceTicket);
-    await ticketRepo.saveTicket(sourceTicket);
-
-    // Step 4: Recalculate new ticket
-    const newTicketReloaded = new Ticket(await ticketRepo.getTicketById(newTicketId));
-    recalculateTicket(newTicketReloaded);
-    await ticketRepo.saveTicket(newTicketReloaded);
-
-    publish(EventTopicNames.TicketCreated, { Ticket: newTicketReloaded, reason: 'split' });
-
-    return {
-      sourceTicket: await ticketRepo.getTicketById(sourceTicketId),
-      newTicket: await ticketRepo.getTicketById(newTicketId),
-    };
   }
 
   // ===================================================================
   // REFUND — POST /api/tickets/:id/refund
   // Body: { amount: number, reason?: string }
-  // Creates a new "refund" ticket linked to the original, with negative
-  // AccountTransaction amounts (auto-reversed).
+  // Reverses the last payment on the original ticket (in-place, per SambaPOS).
+  // Does NOT create a separate refund ticket.
+  // ATOMIC: single transaction.
   // ===================================================================
   async refundTicket(originalTicketId, amount, reason = '') {
     if (typeof amount !== 'number' || amount <= 0) {
       throw new ValidationError('amount must be a positive number');
     }
 
-    const originalRow = await ticketRepo.getTicketById(originalTicketId);
-    if (!originalRow) throw new NotFoundError(`Ticket ${originalTicketId} not found`);
-    if (!originalRow.IsClosed) {
-      throw new ConflictError(`Ticket ${originalTicketId} must be closed before refunding`);
-    }
+    return withTransaction(async (trx) => {
+      const originalRow = await trx('Tickets').where({ Id: originalTicketId }).first();
+      if (!originalRow) throw new NotFoundError(`Ticket ${originalTicketId} not found`);
+      if (!originalRow.IsClosed) {
+        throw new ConflictError(`Ticket ${originalTicketId} must be closed before refunding`);
+      }
 
-    const department = await db('Departments').where({ Id: originalRow.DepartmentId }).first();
-    const ticketType = await db('TicketTypes').where({ Id: originalRow.TicketTypeId }).first();
+      // Check the ticket has payments to reverse
+      const payments = await trx('Payments').where({ TicketId: originalTicketId }).orderBy('Id', 'desc');
+      if (payments.length === 0) {
+        throw new ConflictError(`Ticket ${originalTicketId} has no payments to refund`);
+      }
 
-    // Create a new "refund" ticket with negative total
-    const refundTicket = TicketBuilder.create(
-      { ...ticketType, TaxIncluded: ticketType.TaxIncluded ? true : false },
-      department
-    ).withExchangeRate(originalRow.ExchangeRate).build();
+      // Verify refund amount doesn't exceed total paid
+      const totalPaid = payments.reduce((sum, p) => sum + Number(p.Amount || 0), 0);
+      if (amount > totalPaid) {
+        throw new ValidationError(`Refund amount ${amount} exceeds total paid ${totalPaid}`);
+      }
 
-    // Mark as refund in TicketStates
-    refundTicket.TicketStates = JSON.stringify([
-      { StateName: 'Status', State: 'Refunded', Quantity: 0 },
-      { StateName: 'RefundOf', State: String(originalTicketId), Quantity: 0 },
-    ]);
-    refundTicket.Note = `Refund of ticket #${originalTicketId}. Reason: ${reason || 'customer request'}`;
-    refundTicket.TotalAmount = -amount;
-    refundTicket.RemainingAmount = -amount;
+      // Load the full ticket with orders for recalculation
+      const fullTicketRow = await ticketRepo.getTicketById(originalTicketId);
+      const originalTicket = new Ticket(fullTicketRow);
 
-    const refundId = await ticketRepo.saveTicket(refundTicket);
+      // Reopen the ticket (un-close it)
+      originalTicket.IsClosed = false;
 
-    // Reverse a payment on the original ticket (auto-reversal via negative amount)
-    const originalTicket = new Ticket(originalRow);
-    if (originalTicket.Payments.length > 0) {
-      const payment = originalTicket.Payments[0];
-      // Load the full PaymentType with its AccountTransactionType for reversal
-      const paymentTypeRow = await db('PaymentTypes').where({ Id: payment.PaymentTypeId }).first();
-      const accountTxnType = paymentTypeRow?.AccountTransactionTypeId
-        ? await db('AccountTransactionTypes').where({ Id: paymentTypeRow.AccountTransactionTypeId }).first()
+      // Add a negative payment (auto-reversal via AccountTransaction.updateAmount)
+      const lastPayment = payments[0];
+      const paymentType = await trx('PaymentTypes').where({ Id: lastPayment.PaymentTypeId }).first();
+      const accountTxnType = paymentType?.AccountTransactionTypeId
+        ? await trx('AccountTransactionTypes').where({ Id: paymentType.AccountTransactionTypeId }).first()
         : null;
-      if (paymentTypeRow && accountTxnType) {
-        // Reversal: same AccountTransactionType, negative amount
+
+      if (paymentType && accountTxnType) {
         originalTicket.addPayment(
-          { ...paymentTypeRow, AccountTransactionType: accountTxnType },
-          { Name: payment.Name, Id: payment.AccountTransactionId },
-          -amount,
-          originalRow.ExchangeRate,
-          1
+          { ...paymentType, AccountTransactionType: accountTxnType },
+          { Name: lastPayment.Name, Id: lastPayment.AccountTransactionId },
+          -amount,   // negative amount triggers auto-reversal
+          originalRow.ExchangeRate || 1,
+          0   // system user for refund
         );
       }
-    }
 
-    await ticketRepo.saveTicket(originalTicket);
+      // Update ticket state to reflect refund
+      let ticketStates = [];
+      try { ticketStates = JSON.parse(originalTicket.TicketStates || '[]'); } catch {}
+      const tsIdx = ticketStates.findIndex(s => s.StateName === 'Status');
+      if (tsIdx >= 0) ticketStates[tsIdx].State = 'Refunded';
+      else ticketStates.push({ StateName: 'Status', State: 'Refunded' });
+      originalTicket.TicketStates = JSON.stringify(ticketStates);
 
-    publish(EventTopicNames.TicketCreated, { Ticket: refundTicket, reason: 'refund' });
+      // Add note about the refund
+      const refundNote = `Refund: $${amount.toFixed(2)} — ${reason || 'customer request'} — ${new Date().toISOString()}`;
+      originalTicket.Note = (originalTicket.Note || '') + '\n' + refundNote;
 
-    return {
-      refundTicket: await ticketRepo.getTicketById(refundId),
-      originalTicket: await ticketRepo.getTicketById(originalTicketId),
-    };
+      // Save using the same transaction
+      await ticketRepo.saveTicket(originalTicket, trx);
+
+      publish(EventTopicNames.PaymentProcessed, {
+        Ticket: originalTicket,
+        PaymentTypeName: 'Refund',
+        ProcessedAmount: -amount,
+        Reason: reason,
+      });
+
+      return {
+        refundedTicketId: originalTicketId,
+        refundAmount: amount,
+        reason,
+      };
+    }).then(async ({ refundedTicketId, refundAmount, reason }) => {
+      return {
+        refundedTicket: await ticketRepo.getTicketById(refundedTicketId),
+        refundAmount,
+        reason,
+      };
+    });
   }
 
   // ===================================================================
   // MERGE — POST /api/tickets/merge
   // Body: { sourceTicketIds: number[] }
-  // Combines multiple open tickets into a single new ticket.
+  // Clones orders/payments/calculations from source tickets into a new
+  // merged ticket, then closes the sources (orders remain on sources for audit).
+  // ATOMIC: single transaction.
   // ===================================================================
   async mergeTickets(sourceTicketIds) {
     if (!Array.isArray(sourceTicketIds) || sourceTicketIds.length < 2) {
       throw new ValidationError('At least 2 source ticket IDs required');
     }
 
-    // Load all source tickets
-    const sources = [];
-    for (const id of sourceTicketIds) {
-      const t = await ticketRepo.getTicketById(id);
-      if (!t) throw new NotFoundError(`Ticket ${id} not found`);
-      if (t.IsClosed) throw new ConflictError(`Ticket ${id} is closed`);
-      sources.push(t);
-    }
-
-    // All sources must share the same Department + TicketType
-    const firstDept = sources[0].DepartmentId;
-    const firstType = sources[0].TicketTypeId;
-    for (const s of sources) {
-      if (s.DepartmentId !== firstDept || s.TicketTypeId !== firstType) {
-        throw new ValidationError('All tickets must share the same Department and TicketType');
+    return withTransaction(async (trx) => {
+      // Load all source tickets
+      const sources = [];
+      for (const id of sourceTicketIds) {
+        const t = await ticketRepo.getTicketById(id);
+        if (!t) throw new NotFoundError(`Ticket ${id} not found`);
+        if (t.IsClosed) throw new ConflictError(`Ticket ${id} is closed`);
+        sources.push(t);
       }
-    }
 
-    // Step 1: Create the merged ticket (own transaction)
-    const department = await db('Departments').where({ Id: firstDept }).first();
-    const ticketType = await db('TicketTypes').where({ Id: firstType }).first();
-    const merged = TicketBuilder.create(
-      { ...ticketType, TaxIncluded: ticketType.TaxIncluded ? true : false },
-      department
-    ).withExchangeRate(sources[0].ExchangeRate).build();
-
-    const mergedId = await ticketRepo.saveTicket(merged);
-
-    // Step 2: Move all orders/payments/calculations/entities to merged ticket
-    // (separate transaction, no nested saveTicket)
-    await withTransaction(async (trx) => {
-      await trx.raw('PRAGMA defer_foreign_keys = ON');
+      const firstDept = sources[0].DepartmentId;
+      const firstType = sources[0].TicketTypeId;
       for (const s of sources) {
-        await trx('Orders').where({ TicketId: s.Id }).update({ TicketId: mergedId });
-        await trx('Payments').where({ TicketId: s.Id }).update({ TicketId: mergedId });
-        await trx('Calculations').where({ TicketId: s.Id }).update({ TicketId: mergedId });
-        await trx('TicketEntities').where({ TicketId: s.Id }).update({ TicketId: mergedId });
+        if (s.DepartmentId !== firstDept || s.TicketTypeId !== firstType) {
+          throw new ValidationError('All tickets must share the same Department and TicketType');
+        }
+      }
 
-        // Mark source tickets as closed (merged)
+      // Create the merged ticket
+      const department = await trx('Departments').where({ Id: firstDept }).first();
+      const ticketType = await trx('TicketTypes').where({ Id: firstType }).first();
+      const merged = TicketBuilder.create(
+        { ...ticketType, TaxIncluded: ticketType.TaxIncluded ? true : false },
+        department
+      ).withExchangeRate(sources[0].ExchangeRate).build();
+
+      // Save merged ticket in the SAME transaction
+      const mergedId = await ticketRepo.saveTicket(merged, trx);
+
+      // Clone orders from each source into the merged ticket (keep originals for audit)
+      for (const s of sources) {
+        const orders = await trx('Orders').where({ TicketId: s.Id });
+        for (const o of orders) {
+          // Clone the order row with a new Id, pointing to the merged ticket
+          const { Id, ...orderData } = o;
+          await trx('Orders').insert({
+            ...orderData,
+            TicketId: mergedId,
+            // Reset locked state for the new ticket
+            Locked: 0,
+          });
+        }
+
+        // Clone payments
+        const payments = await trx('Payments').where({ TicketId: s.Id });
+        for (const p of payments) {
+          const { Id, ...paymentData } = p;
+          await trx('Payments').insert({ ...paymentData, TicketId: mergedId });
+        }
+
+        // Clone calculations
+        const calcs = await trx('Calculations').where({ TicketId: s.Id });
+        for (const c of calcs) {
+          const { Id, ...calcData } = c;
+          await trx('Calculations').insert({ ...calcData, TicketId: mergedId });
+        }
+
+        // Clone ticket entities
+        const entities = await trx('TicketEntities').where({ TicketId: s.Id });
+        for (const e of entities) {
+          const { Id, ...entityData } = e;
+          await trx('TicketEntities').insert({ ...entityData, TicketId: mergedId });
+        }
+
+        // Mark source tickets as closed (merged) — orders remain for audit
         await trx('Tickets').where({ Id: s.Id }).update({
           IsClosed: 1,
+          IsLocked: 1,
           TicketStates: JSON.stringify([
             { StateName: 'Status', State: 'Merged', Quantity: 0 },
             { StateName: 'MergedInto', State: String(mergedId), Quantity: 0 },
@@ -334,19 +401,27 @@ class TicketServiceExtended {
           LastUpdateTime: new Date().toISOString(),
         });
       }
+
+      // Recalculate merged ticket
+      const mergedRow = await trx('Tickets').where({ Id: mergedId }).first();
+      const mergedOrders = await trx('Orders').where({ TicketId: mergedId });
+      mergedRow.Orders = mergedOrders;
+      const mergedReloaded = new Ticket(mergedRow);
+      recalculateTicket(mergedReloaded);
+      await ticketRepo.saveTicket(mergedReloaded, trx);
+
+      publish(EventTopicNames.TicketCreated, { Ticket: mergedReloaded, reason: 'merge' });
+
+      return {
+        mergedTicketId: mergedId,
+        closedSourceTicketIds: sourceTicketIds,
+      };
+    }).then(async ({ mergedTicketId, closedSourceTicketIds }) => {
+      return {
+        mergedTicket: await ticketRepo.getTicketById(mergedTicketId),
+        closedSourceTicketIds,
+      };
     });
-
-    // Step 3: Recalculate merged ticket
-    const mergedReloaded = new Ticket(await ticketRepo.getTicketById(mergedId));
-    recalculateTicket(mergedReloaded);
-    await ticketRepo.saveTicket(mergedReloaded);
-
-    publish(EventTopicNames.TicketCreated, { Ticket: mergedReloaded, reason: 'merge' });
-
-    return {
-      mergedTicket: await ticketRepo.getTicketById(mergedId),
-      closedSourceTicketIds: sourceTicketIds,
-    };
   }
 }
 

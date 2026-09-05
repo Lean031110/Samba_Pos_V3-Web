@@ -272,49 +272,85 @@ class TicketService {
 
   /**
    * Close a ticket.
+   * Per SambaPOS V3: assign TicketNumber, assign OrderNumber to new orders,
+   * lock the ticket (IsLocked=true), close it, release tables.
+   * ATOMIC: all in one transaction.
    * @param {number} ticketId
    * @param {{userId: number, username: string}} user — from req.user (JWT)
    */
   async closeTicket(ticketId, user = { userId: 0, username: 'system' }) {
-    const ticketRow = await ticketRepo.getTicketById(ticketId);
-    if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
-    if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
+    return withTransaction(async (trx) => {
+      const ticketRow = await ticketRepo.getTicketById(ticketId);
+      if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
+      if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
 
-    const ticket = new Ticket(ticketRow);
+      const ticket = new Ticket(ticketRow);
 
-    // Verify the ticket can be closed
-    if (!ticket.canCloseTicket()) {
-      throw new ConflictError(
-        `Ticket ${ticketId} cannot be closed: remaining amount ${ticket.RemainingAmount} > 0`,
-        { remainingAmount: ticket.RemainingAmount }
-      );
-    }
+      // Verify the ticket can be closed
+      if (!ticket.canCloseTicket()) {
+        throw new ConflictError(
+          `Ticket ${ticketId} cannot be closed: remaining amount ${ticket.RemainingAmount} > 0`,
+          { remainingAmount: ticket.RemainingAmount }
+        );
+      }
 
-    // Assign ticket number if not yet assigned
-    if (!ticket.TicketNumber) {
-      const ticketType = await db('TicketTypes').where({ Id: ticketRow.TicketTypeId }).first();
-      const ticketNumber = await ticketRepo.getNextNumeratorString(ticketType.TicketNumeratorId);
-      ticket.TicketNumber = ticketNumber;
-    }
+      // Assign ticket number if not yet assigned
+      if (!ticket.TicketNumber) {
+        const ticketType = await trx('TicketTypes').where({ Id: ticketRow.TicketTypeId }).first();
+        const numerator = await trx('Numerators').where({ Id: ticketType.TicketNumeratorId }).first();
+        if (numerator) {
+          const nextNumber = numerator.Number + 1;
+          await trx('Numerators').where({ Id: numerator.Id, Number: numerator.Number })
+            .update({ Number: nextNumber });
+          const fmt = numerator.NumberFormat || '#';
+          ticket.TicketNumber = fmt === '#' ? String(nextNumber)
+            : nextNumber.toString().padStart(fmt.replace(/[^0]/g, '').length || 4, '0');
+        }
+      }
 
-    // Lock + close
-    ticket.lockTicket();
-    ticket.close();
+      // Assign OrderNumber to orders that don't have one yet
+      const ticketType2 = await trx('TicketTypes').where({ Id: ticketRow.TicketTypeId }).first();
+      if (ticketType2?.OrderNumeratorId) {
+        const orderNumerator = await trx('Numerators').where({ Id: ticketType2.OrderNumeratorId }).first();
+        if (orderNumerator) {
+          const nextOrderNumber = orderNumerator.Number + 1;
+          await trx('Numerators').where({ Id: orderNumerator.Id, Number: orderNumerator.Number })
+            .update({ Number: nextOrderNumber });
+          // Assign to all orders with OrderNumber=0
+          for (const order of ticket.Orders) {
+            if (!order.OrderNumber || order.OrderNumber === 0) {
+              order.OrderNumber = nextOrderNumber;
+            }
+          }
+        }
+      }
 
-    ticket.Id = ticketId;
-    await ticketRepo.saveTicket(ticket);
+      // Lock the ticket: set _shouldLock so lockTicket() flips IsLocked=true
+      ticket._shouldLock = true;
+      ticket.lockTicket();
+      ticket.close();
 
-    // Release any linked tables
-    for (const te of ticket.TicketEntities) {
-      await tableRepo.updateEntityState(te.EntityId, 'Status', 'Available', '');
-    }
+      ticket.Id = ticketId;
+      // Save using the SAME transaction
+      await ticketRepo.saveTicket(ticket, trx);
 
-    const saved = await ticketRepo.getTicketById(ticketId);
+      // Release any linked tables (in the same transaction)
+      for (const te of ticket.TicketEntities) {
+        await trx('EntityStateValues').where({ EntityId: te.EntityId }).update({
+          EntityStates: JSON.stringify([{
+            StateName: 'Status', State: 'Available', StateValue: '',
+            LastUpdateTime: new Date().toISOString(), Quantity: 0,
+          }]),
+        });
+      }
 
-    // Publish TicketClosed event
-    publish(EventTopicNames.TicketClosed, { Ticket: saved });
-
-    return saved;
+      return { ticketId, savedVersion: ticket.Version };
+    }).then(async ({ ticketId }) => {
+      // Read outside the transaction (after commit)
+      const saved = await ticketRepo.getTicketById(ticketId);
+      publish(EventTopicNames.TicketClosed, { Ticket: saved });
+      return saved;
+    });
   }
 
   /**

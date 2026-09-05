@@ -126,7 +126,7 @@ function verifyLedgerBalance(ticket, results) {
 
 async function setupReferenceData() {
   // Look up seed data we'll need
-  const admin = await db('Users').where({ PinCode: '1234' }).first();
+  const admin = await db('Users').where({ Name: 'Administrator' }).first();
   const ticketType = await db('TicketTypes').where({ Name: 'Ticket' }).first();
   const department = await db('Departments').where({ Name: 'Restaurant' }).first();
   const saleTxnType = await db('AccountTransactionTypes').where({ Name: 'Sale Transaction' }).first();

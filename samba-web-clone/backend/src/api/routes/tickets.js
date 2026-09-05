@@ -171,14 +171,14 @@ router.post('/:id/split', auditLog('ticket.split', 'Ticket'), async (req, res, n
   } catch (err) { next(err); }
 });
 
-// POST /api/tickets/:id/refund — refund a closed ticket
+// POST /api/tickets/:id/refund — refund a closed ticket (in-place reversal)
 router.post('/:id/refund', auditLog('ticket.refund', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
     const { amount, reason } = req.body || {};
     const result = await ticketServiceExt.refundTicket(id, amount, reason);
-    res.status(201).json({ data: result });
+    res.json({ data: result });
   } catch (err) { next(err); }
 });
 

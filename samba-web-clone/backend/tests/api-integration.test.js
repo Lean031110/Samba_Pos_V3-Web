@@ -220,7 +220,7 @@ describe('Health Check', () => {
     const res = await authGet('/health');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.status, 'ok');
-    assert.strictEqual(res.body.service, 'samba-web-clone');
+    assert.strictEqual(res.body.service, 'samba-pos-web-clone');
     ok('GET /health → 200 (status: ok)');
   });
 
@@ -694,13 +694,13 @@ describe('Sprint 5 — Split, Refund, Merge', () => {
     await authPost(`/api/tickets/${refundOriginalId}/payments`).send({ paymentTypeId: testPaymentTypeId, amount: 8.50 });
     await authPost(`/api/tickets/${refundOriginalId}/close`);
 
-    // Refund
+    // Refund — in-place reversal (no separate refund ticket)
     const refundRes = await authPost(`/api/tickets/${refundOriginalId}/refund`)
       .send({ amount: 5.00, reason: 'Customer was dissatisfied' });
-    assert.strictEqual(refundRes.status, 201);
-    assert.ok(refundRes.body.data.refundTicket.Id > 0);
-    assert.strictEqual(Number(refundRes.body.data.refundTicket.TotalAmount), -5.00);
-    ok(`REFUND: original ${refundOriginalId} → refund ticket ${refundRes.body.data.refundTicket.Id} (-$5.00)`);
+    assert.strictEqual(refundRes.status, 200);
+    assert.ok(refundRes.body.data.refundedTicket.Id > 0);
+    assert.strictEqual(refundRes.body.data.refundAmount, 5.00);
+    ok(`REFUND: original ${refundOriginalId} refunded $${refundRes.body.data.refundAmount} (in-place)`);
   });
 
   test('MERGE: two open tickets combine into one', async () => {

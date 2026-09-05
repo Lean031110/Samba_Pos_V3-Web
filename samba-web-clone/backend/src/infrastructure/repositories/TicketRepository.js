@@ -183,12 +183,15 @@ class TicketRepository {
    *   - All Payments, ChangePayments, Calculations, PaidItems, TicketEntities
    *
    * Uses a single transaction with PRAGMA defer_foreign_keys = ON.
+   * If an external transaction (trx) is provided, uses it instead of
+   * creating a new one — enables atomic multi-ticket operations.
    *
    * @param {TicketRow} ticket
+   * @param {import('knex').Knex.Transaction} [externalTrx] — optional external transaction
    * @returns {Promise<number>} the ticket Id
    */
-  async saveTicket(ticket) {
-    return withTransaction(async (trx) => {
+  async saveTicket(ticket, externalTrx = null) {
+    const doWork = async (trx) => {
       const now = new Date().toISOString();
       const ticketRow = {
         Id: ticket.Id || undefined,
@@ -320,7 +323,14 @@ class TicketRepository {
       }
 
       return ticketId;
-    });
+    };
+
+    // If an external transaction is provided, use it directly (no new transaction)
+    if (externalTrx) {
+      return doWork(externalTrx);
+    }
+    // Otherwise create a new transaction
+    return withTransaction(doWork);
   }
 
   /**
