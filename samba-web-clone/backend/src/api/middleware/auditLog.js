@@ -34,6 +34,11 @@ function auditLog(action, entityType = null) {
           const table = entityType === 'Ticket' ? 'Tickets'
                       : entityType === 'Payment' ? 'Payments'
                       : entityType === 'Order' ? 'Orders'
+                      : entityType === 'KitchenOrder' ? 'KitchenOrders'
+                      : entityType === 'InventoryItem' ? 'InventoryItems'
+                      : entityType === 'Product' ? 'MenuItems'
+                      : entityType === 'User' ? 'Users'
+                      : entityType === 'Printer' ? 'Printers'
                       : null;
           if (table) {
             beforeState = await db(table).where({ Id: id }).first();

@@ -24,14 +24,20 @@ const KITCHEN_STATES = {
   VOIDED: 'VOIDED',
 };
 
-// State machine: valid transitions
+// State machine: valid transitions via updateState (generic)
+// NOTE: SERVED→READY is ONLY allowed via recallOrder, NOT via updateState
 const VALID_TRANSITIONS = {
   NEW:       ['ACCEPTED', 'VOIDED'],
   ACCEPTED:  ['PREPARING', 'READY', 'VOIDED'],
   PREPARING: ['READY', 'VOIDED'],
   READY:     ['SERVED', 'VOIDED'],
-  SERVED:    ['READY'],  // only via RECALL
-  VOIDED:    [],         // terminal
+  SERVED:    [],  // terminal for updateState — only recallOrder can go SERVED→READY
+  VOIDED:    [],  // terminal
+};
+
+// Transitions allowed ONLY via recallOrder
+const RECALL_TRANSITIONS = {
+  SERVED: ['READY'],
 };
 
 class KitchenService {
@@ -187,10 +193,11 @@ class KitchenService {
    * Validate state transition per state machine.
    * @param {string} currentState
    * @param {string} newState
+   * @param {object} [transitionsMap] — optional custom transitions (e.g., RECALL_TRANSITIONS)
    * @throws ConflictError if transition is invalid
    */
-  _validateTransition(currentState, newState) {
-    const allowed = VALID_TRANSITIONS[currentState];
+  _validateTransition(currentState, newState, transitionsMap = VALID_TRANSITIONS) {
+    const allowed = transitionsMap[currentState];
     if (!allowed || !allowed.includes(newState)) {
       throw new ConflictError(
         `Invalid state transition: ${currentState} → ${newState}. ` +
@@ -284,12 +291,45 @@ class KitchenService {
    * Recall (reopen) a SERVED order — set back to READY.
    */
   async recallOrder(kitchenOrderId, userId = 0, expectedVersion = null, trx = null) {
-    const order = await this._conn(trx)('KitchenOrders').where({ Id: kitchenOrderId }).first();
+    const conn = this._conn(trx);
+    const order = await conn('KitchenOrders').where({ Id: kitchenOrderId }).first();
     if (!order) throw new NotFoundError(`Kitchen order ${kitchenOrderId} not found`);
-    if (order.State !== KITCHEN_STATES.SERVED) {
-      throw new ConflictError(`Can only recall SERVED orders (current: ${order.State})`);
+
+    // Validate using RECALL_TRANSITIONS (allows SERVED→READY)
+    this._validateTransition(order.State, KITCHEN_STATES.READY, RECALL_TRANSITIONS);
+
+    // Directly update state, bypassing updateOrderState's VALID_TRANSITIONS check
+    const now = new Date().toISOString();
+    const update = { State: KITCHEN_STATES.READY, ReadyAt: now };
+
+    if (expectedVersion !== null) {
+      update.Version = expectedVersion + 1;
+      const updated = await conn('KitchenOrders')
+        .where({ Id: kitchenOrderId, Version: expectedVersion })
+        .update(update);
+      if (updated === 0) {
+        throw new ConflictError(`OPTIMISTIC_LOCK_CONFLICT: Kitchen order ${kitchenOrderId} was modified by another terminal`);
+      }
+    } else {
+      await conn('KitchenOrders').where({ Id: kitchenOrderId }).update(update);
     }
-    return this.updateOrderState(kitchenOrderId, KITCHEN_STATES.READY, userId, expectedVersion, trx);
+
+    // Update item states
+    await conn('KitchenOrderItems').where({ KitchenOrderId: kitchenOrderId }).update({ State: KITCHEN_STATES.READY });
+
+    // Publish realtime event
+    publish('KitchenOrderUpdated', {
+      kitchenOrderId,
+      orderId: order.OrderId,
+      ticketId: order.TicketId,
+      newState: KITCHEN_STATES.READY,
+      userId,
+      action: 'recall',
+    });
+
+    const updated = await conn('KitchenOrders').where({ Id: kitchenOrderId }).first();
+    const items = await conn('KitchenOrderItems').where({ KitchenOrderId: kitchenOrderId });
+    return { ...updated, Items: items };
   }
 
   /**
