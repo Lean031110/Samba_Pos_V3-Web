@@ -16,6 +16,7 @@ const express = require('express');
 const { TicketService } = require('../services/TicketService');
 const { TicketServiceExtended } = require('../services/TicketServiceExtended');
 const { ValidationError } = require('../middleware/errorHandler');
+const { auditLog } = require('../middleware/auditLog');
 
 const router = express.Router();
 const ticketService = new TicketService();
@@ -50,7 +51,7 @@ router.post('/', async (req, res, next) => {
 
 // POST /api/tickets/merge — merge multiple tickets into one
 // NOTE: must be defined BEFORE /:id routes to avoid path conflict
-router.post('/merge', async (req, res, next) => {
+router.post('/merge', auditLog('ticket.merge', 'Ticket'), async (req, res, next) => {
   try {
     const { sourceTicketIds } = req.body || {};
     const result = await ticketServiceExt.mergeTickets(sourceTicketIds);
@@ -64,7 +65,7 @@ router.post('/:id/orders', async (req, res, next) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
     const { menuItemId, quantity, portionName } = req.body || {};
-    const ticket = await ticketService.addOrder(id, { menuItemId, quantity, portionName });
+    const ticket = await ticketService.addOrder(id, { menuItemId, quantity, portionName }, req.user);
     res.json({ data: ticket });
   } catch (err) { next(err); }
 });
@@ -75,28 +76,28 @@ router.post('/:id/calculations', async (req, res, next) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
     const { calculationTypeId, amount } = req.body || {};
-    const ticket = await ticketService.addCalculation(id, { calculationTypeId, amount });
+    const ticket = await ticketService.addCalculation(id, { calculationTypeId, amount }, req.user);
     res.json({ data: ticket });
   } catch (err) { next(err); }
 });
 
 // POST /api/tickets/:id/payments — process payment
-router.post('/:id/payments', async (req, res, next) => {
+router.post('/:id/payments', auditLog('payment.process', 'Payment'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const { paymentTypeId, amount, tenderedAmount } = req.body || {};
-    const ticket = await ticketService.addPayment(id, { paymentTypeId, amount, tenderedAmount });
+    const { paymentTypeId, amount, tenderedAmount, idempotencyKey } = req.body || {};
+    const ticket = await ticketService.addPayment(id, { paymentTypeId, amount, tenderedAmount, idempotencyKey }, req.user);
     res.json({ data: ticket });
   } catch (err) { next(err); }
 });
 
 // POST /api/tickets/:id/close — close ticket
-router.post('/:id/close', async (req, res, next) => {
+router.post('/:id/close', auditLog('ticket.close', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const ticket = await ticketService.closeTicket(id);
+    const ticket = await ticketService.closeTicket(id, req.user);
     res.json({ data: ticket });
   } catch (err) { next(err); }
 });
@@ -127,7 +128,7 @@ router.post('/:id/note', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/gift — mark orders as Gift (CalculatePrice=false)
-router.post('/:id/gift', async (req, res, next) => {
+router.post('/:id/gift', auditLog('ticket.gift', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -139,7 +140,7 @@ router.post('/:id/gift', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/void — void the entire ticket
-router.post('/:id/void', async (req, res, next) => {
+router.post('/:id/void', auditLog('ticket.void', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -160,7 +161,7 @@ router.post('/:id/tags', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/split — split ticket (move orders to new ticket)
-router.post('/:id/split', async (req, res, next) => {
+router.post('/:id/split', auditLog('ticket.split', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -171,7 +172,7 @@ router.post('/:id/split', async (req, res, next) => {
 });
 
 // POST /api/tickets/:id/refund — refund a closed ticket
-router.post('/:id/refund', async (req, res, next) => {
+router.post('/:id/refund', auditLog('ticket.refund', 'Ticket'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');

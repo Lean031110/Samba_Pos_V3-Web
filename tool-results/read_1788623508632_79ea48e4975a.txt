@@ -1,0 +1,529 @@
+     1→// =====================================================================
+     2→// seed.js — Initial data (mandatory for behavioral parity with SambaPOS V3)
+     3→// =====================================================================
+     4→// Per Architect's directive: ALL inserts run inside ONE transaction.
+     5→// If any insert fails, rollback the entire seed.
+     6→//
+     7→// Mirrors: Samba.Presentation.Services/Common/DataGeneration/DataCreationService.cs
+     8→//         + RuleGenerator.GenerateSystemRules(workspace)
+     9→// =====================================================================
+    10→
+    11→/**
+    12→ * @param {import('knex').Knex} knex
+    13→ */
+    14→async function seed(knex) {
+    15→  console.log('[seed] Starting transactional seed...');
+    16→
+    17→  // ---- Open a single transaction wrapping ALL inserts ----
+    18→  await knex.transaction(async (trx) => {
+    19→    // Inside a transaction, defer FK checks so out-of-order inserts work
+    20→    await trx.raw('PRAGMA defer_foreign_keys = ON');
+    21→
+    22→    // -----------------------------------------------------------------
+    23→    // 1. AccountTypes (5)
+    24→    // -----------------------------------------------------------------
+    25→    await trx('AccountTypes').insert([
+    26→      { Name: 'Sales Accounts',      DefaultFilterType: 0, WorkingRule: 0, SortOrder: 10 },
+    27→      { Name: 'Receivable Accounts', DefaultFilterType: 0, WorkingRule: 0, SortOrder: 20 },
+    28→      { Name: 'Payment Accounts',    DefaultFilterType: 0, WorkingRule: 0, SortOrder: 30 },
+    29→      { Name: 'Discount Accounts',   DefaultFilterType: 0, WorkingRule: 0, SortOrder: 40 },
+    30→      { Name: 'Customer Accounts',   DefaultFilterType: 0, WorkingRule: 0, SortOrder: 50 },
+    31→    ]);
+    32→    const [salesATId, receivableATId, paymentATId, discountATId, customerATId] =
+    33→      await trx('AccountTypes').orderBy('Id').pluck('Id');
+    34→
+    35→    // -----------------------------------------------------------------
+    36→    // 2. Accounts (7)
+    37→    // -----------------------------------------------------------------
+    38→    await trx('Accounts').insert([
+    39→      { Name: 'Sales',        AccountTypeId: salesATId },
+    40→      { Name: 'Receivables',  AccountTypeId: receivableATId },
+    41→      { Name: 'Cash',         AccountTypeId: paymentATId },
+    42→      { Name: 'Credit Card',  AccountTypeId: paymentATId },
+    43→      { Name: 'Voucher',      AccountTypeId: paymentATId },
+    44→      { Name: 'Discount',     AccountTypeId: discountATId },
+    45→      { Name: 'Rounding',     AccountTypeId: discountATId },
+    46→    ]);
+    47→    const [salesAccId, receivableAccId, cashAccId, ccAccId, voucherAccId, discountAccId, roundingAccId] =
+    48→      await trx('Accounts').orderBy('Id').pluck('Id');
+    49→
+    50→    // -----------------------------------------------------------------
+    51→    // 3. AccountTransactionTypes (7)
+    52→    // -----------------------------------------------------------------
+    53→    await trx('AccountTransactionTypes').insert([
+    54→      { Name: 'Discount Transaction',         SortOrder: 10,
+    55→        SourceAccountTypeId: receivableATId, TargetAccountTypeId: discountATId,
+    56→        DefaultSourceAccountId: receivableAccId, DefaultTargetAccountId: discountAccId },
+    57→      { Name: 'Rounding Transaction',         SortOrder: 20,
+    58→        SourceAccountTypeId: receivableATId, TargetAccountTypeId: discountATId,
+    59→        DefaultSourceAccountId: receivableAccId, DefaultTargetAccountId: roundingAccId },
+    60→      { Name: 'Sale Transaction',             SortOrder: 30,
+    61→        SourceAccountTypeId: salesATId, TargetAccountTypeId: receivableATId,
+    62→        DefaultSourceAccountId: salesAccId, DefaultTargetAccountId: receivableAccId },
+    63→      { Name: 'Payment Transaction',          SortOrder: 40,
+    64→        SourceAccountTypeId: receivableATId, TargetAccountTypeId: paymentATId,
+    65→        DefaultSourceAccountId: receivableAccId, DefaultTargetAccountId: cashAccId },
+    66→      { Name: 'Customer Account Transaction', SortOrder: 50,
+    67→        SourceAccountTypeId: receivableATId, TargetAccountTypeId: customerATId,
+    68→        DefaultSourceAccountId: receivableAccId, DefaultTargetAccountId: 0 },
+    69→      { Name: 'Customer Cash Payment',        SortOrder: 60,
+    70→        SourceAccountTypeId: customerATId, TargetAccountTypeId: paymentATId,
+    71→        DefaultSourceAccountId: 0, DefaultTargetAccountId: cashAccId },
+    72→      { Name: 'Customer Credit Card Payment', SortOrder: 70,
+    73→        SourceAccountTypeId: customerATId, TargetAccountTypeId: paymentATId,
+    74→        DefaultSourceAccountId: 0, DefaultTargetAccountId: ccAccId },
+    75→    ]);
+    76→    const [discountTxnId, roundingTxnId, saleTxnId, paymentTxnId,
+    77→           customerAcctTxnId, custCashTxnId, custCcTxnId] =
+    78→      await trx('AccountTransactionTypes').orderBy('Id').pluck('Id');
+    79→
+    80→    // -----------------------------------------------------------------
+    81→    // 4. Numerators (2)
+    82→    // -----------------------------------------------------------------
+    83→    await trx('Numerators').insert([
+    84→      { Name: 'Ticket Numerator', Number: 0, NumberFormat: '#' },
+    85→      { Name: 'Order Numerator',  Number: 0, NumberFormat: '#' },
+    86→    ]);
+    87→    const [ticketNumId, orderNumId] = await trx('Numerators').orderBy('Id').pluck('Id');
+    88→
+    89→    // -----------------------------------------------------------------
+    90→    // 5. WarehouseType + Warehouse
+    91→    // -----------------------------------------------------------------
+    92→    const [whTypeId] = await trx('WarehouseTypes').insert({ Name: 'Warehouses' });
+    93→    const [warehouseId] = await trx('Warehouses').insert({
+    94→      Name: 'Local Warehouse', WarehouseTypeId: whTypeId, SortOrder: 10,
+    95→    });
+    96→
+    97→    // -----------------------------------------------------------------
+    98→    // 6. CalculationTypes (2) + CalculationSelectors (2)
+    99→    // -----------------------------------------------------------------
+   100→    await trx('CalculationTypes').insert([
+   101→      { Name: 'Discount', SortOrder: 10, CalculationMethod: 0, Amount: 0, MaxAmount: 0,
+   102→        IncludeTax: 0, DecreaseAmount: 1, UsePlainSum: 0, ToggleCalculation: 0,
+   103→        AccountTransactionTypeId: discountTxnId },
+   104→      { Name: 'Round',    SortOrder: 20, CalculationMethod: 2, Amount: 0, MaxAmount: 0,
+   105→        IncludeTax: 1, DecreaseAmount: 1, UsePlainSum: 0, ToggleCalculation: 0,
+   106→        AccountTransactionTypeId: roundingTxnId },
+   107→    ]);
+   108→    const [discountCtId, roundCtId] = await trx('CalculationTypes').orderBy('Id').pluck('Id');
+   109→
+   110→    await trx('CalculationSelectors').insert([
+   111→      { Name: 'Discount', ButtonHeader: '%',     ButtonColor: 'Gainsboro', FontSize: 30, SortOrder: 10 },
+   112→      { Name: 'Round',    ButtonHeader: 'Round', ButtonColor: 'Gainsboro', FontSize: 30, SortOrder: 20 },
+   113→    ]);
+   114→    const [discountCsId, roundCsId] = await trx('CalculationSelectors').orderBy('Id').pluck('Id');
+   115→
+   116→    await trx('CalculationSelectorCalculationTypes').insert([
+   117→      { CalculationSelectorId: discountCsId, CalculationTypeId: discountCtId },
+   118→      { CalculationSelectorId: roundCsId,    CalculationTypeId: roundCtId },
+   119→    ]);
+   120→    await trx('CalculationSelectorMaps').insert([
+   121→      { TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+   122→        CalculationSelectorId: discountCsId },
+   123→      { TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+   124→        CalculationSelectorId: roundCsId },
+   125→    ]);
+   126→
+   127→    // -----------------------------------------------------------------
+   128→    // 7. ScreenMenu (1)
+   129→    // -----------------------------------------------------------------
+   130→    const [screenMenuId] = await trx('ScreenMenus').insert({
+   131→      Name: 'Menu', CategoryColumnCount: 1, CategoryColumnWidthRate: 25,
+   132→    });
+   133→
+   134→    // -----------------------------------------------------------------
+   135→    // 8. TicketType (1)
+   136→    // -----------------------------------------------------------------
+   137→    await trx('TicketTypes').insert({
+   138→      Name: 'Ticket', SortOrder: 10, ScreenMenuId: screenMenuId, TaxIncluded: 1,
+   139→      TicketNumeratorId: ticketNumId, OrderNumeratorId: orderNumId,
+   140→      SaleTransactionTypeId: saleTxnId,
+   141→    });
+   142→    const [ticketTypeId] = await trx('TicketTypes').orderBy('Id').pluck('Id');
+   143→
+   144→    // -----------------------------------------------------------------
+   145→    // 9. EntityTypes (2): Customers + Tables
+   146→    // -----------------------------------------------------------------
+   147→    await trx('EntityTypes').insert([
+   148→      { Name: 'Customers', SortOrder: 10, EntityName: 'Customer', AccountTypeId: customerATId,
+   149→        WarehouseTypeId: 0, AccountNameTemplate: '[Name]-[Phone]', PrimaryFieldName: 'Name' },
+   150→      { Name: 'Tables',    SortOrder: 20, EntityName: 'Table',    AccountTypeId: 0,
+   151→        WarehouseTypeId: 0, PrimaryFieldName: 'Name' },
+   152→    ]);
+   153→    const [customersEtId, tablesEtId] = await trx('EntityTypes').orderBy('Id').pluck('Id');
+   154→
+   155→    await trx('EntityCustomFields').insert({
+   156→      Name: 'Phone', FieldType: 0, EditingFormat: '(###) ### ####',
+   157→      ValueSource: null, Hidden: 0, EntityTypeId: customersEtId,
+   158→    });
+   159→
+   160→    await trx('EntityTypeAssignments').insert([
+   161→      { TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: ticketTypeId,
+   162→        EntityTypeId: tablesEtId, EntityTypeName: 'Tables',
+   163→        AskBeforeCreatingTicket: 0, State: null, CopyToNewTickets: 1, SortOrder: 10 },
+   164→      { TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: ticketTypeId,
+   165→        EntityTypeId: customersEtId, EntityTypeName: 'Customers',
+   166→        AskBeforeCreatingTicket: 0, State: null, CopyToNewTickets: 0, SortOrder: 20 },
+   167→    ]);
+   168→
+   169→    // -----------------------------------------------------------------
+   170→    // 10. Department (1)
+   171→    // -----------------------------------------------------------------
+   172→    await trx('Departments').insert({
+   173→      Name: 'Restaurant', SortOrder: 10, PriceTag: null,
+   174→      WarehouseId: warehouseId, TicketTypeId: ticketTypeId,
+   175→      ScreenMenuId: screenMenuId, TicketCreationMethod: 0,
+   176→    });
+   177→    const [departmentId] = await trx('Departments').orderBy('Id').pluck('Id');
+   178→
+   179→    // -----------------------------------------------------------------
+   180→    // 11. UserRoles + Users (admin / 1234)
+   181→    // -----------------------------------------------------------------
+   182→    await trx('UserRoles').insert({
+   183→      Name: 'Admin', IsAdmin: 1, DepartmentId: departmentId,
+   184→    });
+   185→    const [userRoleId] = await trx('UserRoles').orderBy('Id').pluck('Id');
+   186→
+   187→    await trx('Users').insert({
+   188→      Name: 'Administrator', PinCode: '1234', UserRoleId: userRoleId,
+   189→    });
+   190→
+   191→    // -----------------------------------------------------------------
+   192→    // 12. PaymentTypes (4) + PaymentTypeMaps
+   193→    // -----------------------------------------------------------------
+   194→    await trx('PaymentTypes').insert([
+   195→      { Name: 'Cash',            SortOrder: 10, ButtonColor: 'Gainsboro', FontSize: 40,
+   196→        AccountTransactionTypeId: paymentTxnId, AccountId: cashAccId },
+   197→      { Name: 'Credit Card',     SortOrder: 20, ButtonColor: 'Gainsboro', FontSize: 40,
+   198→        AccountTransactionTypeId: paymentTxnId, AccountId: ccAccId },
+   199→      { Name: 'Voucher',         SortOrder: 30, ButtonColor: 'Gainsboro', FontSize: 40,
+   200→        AccountTransactionTypeId: paymentTxnId, AccountId: voucherAccId },
+   201→      { Name: 'Customer Account',SortOrder: 40, ButtonColor: 'Gainsboro', FontSize: 40,
+   202→        AccountTransactionTypeId: customerAcctTxnId, AccountId: null },
+   203→    ]);
+   204→    const ptIds = await trx('PaymentTypes').orderBy('Id').pluck('Id');
+   205→    for (const ptId of ptIds) {
+   206→      await trx('PaymentTypeMaps').insert({
+   207→        TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0, PaymentTypeId: ptId,
+   208→      });
+   209→    }
+   210→
+   211→    // -----------------------------------------------------------------
+   212→    // 13. Printers (3) + PrinterTemplates (3) + PrintJobs (2) + PrinterMaps (2)
+   213→    // -----------------------------------------------------------------
+   214→    await trx('Printers').insert([
+   215→      { Name: 'Ticket Printer',  ShareName: 'Ticket Printer',  PrinterType: 0, CodePage: 857, CharsPerLine: 42 },
+   216→      { Name: 'Kitchen Printer', ShareName: 'Kitchen Printer', PrinterType: 0, CodePage: 857, CharsPerLine: 42 },
+   217→      { Name: 'Invoice Printer', ShareName: 'Invoice Printer', PrinterType: 0, CodePage: 857, CharsPerLine: 42 },
+   218→    ]);
+   219→    const [ticketPrinterId, kitchenPrinterId] =
+   220→      await trx('Printers').orderBy('Id').pluck('Id');
+   221→
+   222→    const defaultTicketTemplate = [
+   223→      '<L00>Ticket: {TICKET NUMBER}',
+   224→      '<L00>Date: {DATE} {TIME}',
+   225→      '<F>',
+   226→      '{ORDERS}',
+   227→      '<F>',
+   228→      '<J00>Total|{TOTAL AMOUNT}',
+   229→      '<F>',
+   230→      '<C00>Thank you!',
+   231→      '<cut>',
+   232→    ].join('\n');
+   233→
+   234→    const defaultKitchenTemplate = [
+   235→      '<C00>**Kitchen Order**',
+   236→      '<L00>Ticket: {TICKET NUMBER}',
+   237→      '<F>',
+   238→      '{ORDERS}',
+   239→      '<cut>',
+   240→    ].join('\n');
+   241→
+   242→    const defaultReceiptTemplate = [
+   243→      '<L00>{ENTITY NAME:Customer}',
+   244→      '<L00>{TICKET NUMBER}',
+   245→      '<F>',
+   246→      '{ORDERS}',
+   247→      '<F>',
+   248→      '<J00>Total|{TOTAL AMOUNT}',
+   249→      '<J00>Paid|{PAYMENT TOTAL}',
+   250→      '<J00>Change|{CHANGE AMOUNT}',
+   251→      '<cut>',
+   252→    ].join('\n');
+   253→
+   254→    await trx('PrinterTemplates').insert([
+   255→      { Name: 'Ticket Template',           Template: defaultTicketTemplate,   MergeLines: 0 },
+   256→      { Name: 'Kitchen Order Template',    Template: defaultKitchenTemplate,  MergeLines: 1 },
+   257→      { Name: 'Customer Receipt Template', Template: defaultReceiptTemplate,  MergeLines: 0 },
+   258→    ]);
+   259→    const [ticketTplId, kitchenTplId, receiptTplId] =
+   260→      await trx('PrinterTemplates').orderBy('Id').pluck('Id');
+   261→
+   262→    await trx('PrintJobs').insert([
+   263→      { Name: 'Print Bill',                      WhatToPrint: 0, UseForPaidTickets: 0, ExcludeTax: 0 },
+   264→      { Name: 'Print Orders to Kitchen Printer', WhatToPrint: 0, UseForPaidTickets: 0, ExcludeTax: 0 },
+   265→    ]);
+   266→    const [printBillJobId, kitchenJobId] = await trx('PrintJobs').orderBy('Id').pluck('Id');
+   267→
+   268→    await trx('PrinterMaps').insert([
+   269→      { PrintJobId: printBillJobId, MenuItemGroupCode: null, MenuItemId: 0,
+   270→        PrinterId: ticketPrinterId, PrinterTemplateId: ticketTplId },
+   271→      { PrintJobId: kitchenJobId,   MenuItemGroupCode: null, MenuItemId: 0,
+   272→        PrinterId: kitchenPrinterId, PrinterTemplateId: kitchenTplId },
+   273→    ]);
+   274→
+   275→    // -----------------------------------------------------------------
+   276→    // 14. Terminal (1)
+   277→    // -----------------------------------------------------------------
+   278→    await trx('Terminals').insert({
+   279→      Name: 'Server', IsDefault: 1, AutoLogout: 0,
+   280→      ReportPrinterId: ticketPrinterId, TransactionPrinterId: ticketPrinterId,
+   281→    });
+   282→
+   283→    // -----------------------------------------------------------------
+   284→    // 15. AccountScreens + AccountScreenValues
+   285→    // -----------------------------------------------------------------
+   286→    const [accountScreenId] = await trx('AccountScreens').insert({
+   287→      Name: 'General', Filter: 0, DisplayAsTree: 0, SortOrder: 10,
+   288→      AutomationCommandMapData: null,
+   289→    });
+   290→    await trx('AccountScreenValues').insert([
+   291→      { AccountScreenId: accountScreenId, AccountTypeId: salesATId,
+   292→        AccountTypeName: 'Sales Accounts', DisplayDetails: 1, SortOrder: 10 },
+   293→      { AccountScreenId: accountScreenId, AccountTypeId: receivableATId,
+   294→        AccountTypeName: 'Receivable Accounts', DisplayDetails: 1, SortOrder: 20 },
+   295→      { AccountScreenId: accountScreenId, AccountTypeId: discountATId,
+   296→        AccountTypeName: 'Discount Accounts', DisplayDetails: 1, SortOrder: 30 },
+   297→      { AccountScreenId: accountScreenId, AccountTypeId: paymentATId,
+   298→        AccountTypeName: 'Payment Accounts', DisplayDetails: 1, SortOrder: 40 },
+   299→    ]);
+   300→
+   301→    // -----------------------------------------------------------------
+   302→    // 16. AccountTransactionDocumentTypes (2)
+   303→    // -----------------------------------------------------------------
+   304→    await trx('AccountTransactionDocumentTypes').insert([
+   305→      { Name: 'Customer Cash', ButtonHeader: 'Cash', ButtonColor: 'Gainsboro',
+   306→        MasterAccountTypeId: customerATId, DefaultAmount: '[Balance]',
+   307→        DescriptionTemplate: 'Cash Payment',
+   308→        BatchCreateDocuments: 0, Filter: 0, SortOrder: 10, PrinterTemplateId: receiptTplId },
+   309→      { Name: 'Customer Credit Card', ButtonHeader: 'Credit Card', ButtonColor: 'Gainsboro',
+   310→        MasterAccountTypeId: customerATId, DefaultAmount: '[Balance]',
+   311→        DescriptionTemplate: 'Credit Card Payment',
+   312→        BatchCreateDocuments: 0, Filter: 0, SortOrder: 20, PrinterTemplateId: receiptTplId },
+   313→    ]);
+   314→    const [custCashDtId, custCcDtId] =
+   315→      await trx('AccountTransactionDocumentTypes').orderBy('Id').pluck('Id');
+   316→
+   317→    await trx('AccountTransactionDocumentTypeAccountTransactionTypes').insert([
+   318→      { AccountTransactionDocumentTypeId: custCashDtId, AccountTransactionTypeId: custCashTxnId },
+   319→      { AccountTransactionDocumentTypeId: custCcDtId,   AccountTransactionTypeId: custCcTxnId },
+   320→    ]);
+   321→    await trx('AccountTransactionDocumentTypeMaps').insert([
+   322→      { TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+   323→        AccountTransactionDocumentTypeId: custCashDtId },
+   324→      { TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+   325→        AccountTransactionDocumentTypeId: custCcDtId },
+   326→    ]);
+   327→
+   328→    // -----------------------------------------------------------------
+   329→    // 17. InventoryTransactionType (1) + DocumentType (1)
+   330→    // -----------------------------------------------------------------
+   331→    await trx('InventoryTransactionTypes').insert({
+   332→      Name: 'Purchase',
+   333→      SourceWarehouseTypeId: 0, TargetWarehouseTypeId: whTypeId,
+   334→      DefaultSourceWarehouseId: 0, DefaultTargetWarehouseId: warehouseId,
+   335→      SortOrder: 10,
+   336→    });
+   337→    const [invTxnTypeId] = await trx('InventoryTransactionTypes').orderBy('Id').pluck('Id');
+   338→
+   339→    await trx('InventoryTransactionDocumentTypes').insert({
+   340→      Name: 'Purchase Transaction',
+   341→      SourceEntityTypeId: 0, TargetEntityTypeId: 0,
+   342→      DefaultSourceEntityId: 0, DefaultTargetEntityId: 0,
+   343→      SortOrder: 10,
+   344→      AccountTransactionTypeId: null, InventoryTransactionTypeId: invTxnTypeId,
+   345→    });
+   346→
+   347→    // -----------------------------------------------------------------
+   348→    // 18. AutomationCommands (9)
+   349→    // -----------------------------------------------------------------
+   350→    await trx('AutomationCommands').insert([
+   351→      { Name: 'Close Ticket',  ButtonHeader: 'Close Ticket',  Color: 'RoyalBlue',   FontSize: 30, SortOrder: 10, ToggleValues: 0, Values: '' },
+   352→      { Name: 'Settle',        ButtonHeader: 'Settle',        Color: '#FF9800',     FontSize: 30, SortOrder: 20, ToggleValues: 0, Values: '' },
+   353→      { Name: 'Print Bill',    ButtonHeader: 'Print Bill',    Color: 'Gainsboro',   FontSize: 30, SortOrder: 30, ToggleValues: 0, Values: '' },
+   354→      { Name: 'Unlock Ticket', ButtonHeader: 'Unlock',        Color: 'Gainsboro',   FontSize: 30, SortOrder: 40, ToggleValues: 0, Values: '' },
+   355→      { Name: 'Add Ticket',    ButtonHeader: 'Add Ticket',    Color: 'Gainsboro',   FontSize: 30, SortOrder: 50, ToggleValues: 0, Values: '' },
+   356→      { Name: 'Gift',          ButtonHeader: 'Gift',          Color: 'Purple',      FontSize: 30, SortOrder: 60, ToggleValues: 0, Values: '' },
+   357→      { Name: 'Cancel Gift',   ButtonHeader: 'Cancel Gift',   Color: 'Gainsboro',   FontSize: 30, SortOrder: 70, ToggleValues: 0, Values: '' },
+   358→      { Name: 'Void',          ButtonHeader: 'Void',          Color: 'Red',         FontSize: 30, SortOrder: 80, ToggleValues: 0, Values: '' },
+   359→      { Name: 'Cancel Void',   ButtonHeader: 'Cancel Void',   Color: 'Gainsboro',   FontSize: 30, SortOrder: 90, ToggleValues: 0, Values: '' },
+   360→    ]);
+   361→    const acIds = await trx('AutomationCommands').orderBy('Id').pluck('Id');
+   362→    const [closeTicketAcId, settleAcId, printBillAcId, unlockTicketAcId, addTicketAcId,
+   363→          giftAcId, cancelGiftAcId, voidAcId, cancelVoidAcId] = acIds;
+   364→    for (const acId of acIds) {
+   365→      await trx('AutomationCommandMaps').insert({
+   366→        TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+   367→        AutomationCommandId: acId,
+   368→        DisplayOnTicket: 1, DisplayOnPayment: 0, DisplayOnOrders: 0,
+   369→        DisplayOnTicketList: 0, DisplayUnderTicket: 0, DisplayUnderTicket2: 0,
+   370→        DisplayOnCommandSelector: 0,
+   371→        EnabledStates: '*', VisibleStates: '*',
+   372→      });
+   373→    }
+   374→
+   375→    // -----------------------------------------------------------------
+   376→    // 19. AppActions (13)
+   377→    // -----------------------------------------------------------------
+   378→    await trx('AppActions').insert([
+   379→      { Name: 'Update Order',           ActionType: 'UpdateOrder',           Parameter: '{}',                                                                  SortOrder: 10 },
+   380→      { Name: 'Update Ticket Status',   ActionType: 'UpdateTicketStatus',    Parameter: '{"StateName":"Status","State":"New","StateValue":""}',                SortOrder: 20 },
+   381→      { Name: 'Update Order Status',    ActionType: 'UpdateOrderStatus',     Parameter: '{"StateName":"Status","State":"New","StateValue":""}',                SortOrder: 30 },
+   382→      { Name: 'Update Order Gift State',ActionType: 'UpdateOrderGiftState',  Parameter: '{"StateName":"GiftStatus","State":"","StateValue":""}',               SortOrder: 40 },
+   383→      { Name: 'Update Entity State',    ActionType: 'UpdateEntityState',     Parameter: '{"EntityTypeName":"Tables","StateName":"Status","State":"Available","StateValue":""}', SortOrder: 50 },
+   384→      { Name: 'Create Ticket',          ActionType: 'CreateTicket',          Parameter: '{}',                                                                  SortOrder: 60 },
+   385→      { Name: 'Close Ticket',           ActionType: 'CloseTicket',           Parameter: '{}',                                                                  SortOrder: 70 },
+   386→      { Name: 'Display Payment Screen', ActionType: 'DisplayPaymentScreen',  Parameter: '{}',                                                                  SortOrder: 80 },
+   387→      { Name: 'Execute Print Bill Job', ActionType: 'ExecutePrintJob',       Parameter: '{"PrintJobName":"Print Bill","Copies":1,"PrintTicket":true,"HighPriority":false}', SortOrder: 90 },
+   388→      { Name: 'Execute Kitchen Print',  ActionType: 'ExecutePrintJob',       Parameter: '{"PrintJobName":"Print Orders to Kitchen Printer","Copies":1,"PrintTicket":true,"HighPriority":true}', SortOrder: 100 },
+   389→      { Name: 'Lock Ticket',            ActionType: 'LockTicket',            Parameter: '{}',                                                                  SortOrder: 110 },
+   390→      { Name: 'Unlock Ticket',          ActionType: 'UnlockTicket',          Parameter: '{}',                                                                  SortOrder: 120 },
+   391→      { Name: 'Mark Ticket As Closed',  ActionType: 'MarkTicketAsClosed',    Parameter: '{}',                                                                  SortOrder: 130 },
+   392→    ]);
+   393→    const actIds = await trx('AppActions').orderBy('Id').pluck('Id');
+   394→    const [updOrderAct, updTicketStatusAct, updOrderStatusAct, updGiftAct, updEntityAct,
+   395→          createTicketAct, closeTicketAct, displayPaymentAct, execBillAct, execKitchenAct,
+   396→          lockTicketAct, unlockTicketAct, markClosedAct] = actIds;
+   397→
+   398→    // -----------------------------------------------------------------
+   399→    // 20. AppRules (19) — the system automation rules
+   400→    // -----------------------------------------------------------------
+   401→    const ruleDefs = [
+   402→      { Name: 'New Ticket Creating Rule',        EventName: 'TicketCreating',        SortOrder: 10,
+   403→        actions: [
+   404→          { actionId: updTicketStatusAct, name: 'Update Ticket Status', paramValues: 'StateName=Status#State=New#StateValue=', sortOrder: 10 },
+   405→        ]},
+   406→      { Name: 'New Order Adding Rule',           EventName: 'OrderAdded',            SortOrder: 20,
+   407→        actions: [
+   408→          { actionId: execKitchenAct, name: 'Execute Kitchen Print', paramValues: '', sortOrder: 10 },
+   409→        ]},
+   410→      { Name: 'Ticket Payment Check',            EventName: 'BeforeTicketClosing',   SortOrder: 30,
+   411→        actions: [
+   412→          { actionId: markClosedAct, name: 'Mark Ticket As Closed', paramValues: '', sortOrder: 10 },
+   413→        ]},
+   414→      { Name: 'Ticket Moved Rule',               EventName: 'TicketMoved',           SortOrder: 40,
+   415→        actions: [
+   416→          { actionId: updEntityAct, name: 'Update Entity State', paramValues: 'EntityTypeName=Tables#StateName=Status#State=Available#StateValue=', sortOrder: 10 },
+   417→        ]},
+   418→      { Name: 'Ticket Closing Rule',             EventName: 'TicketClosing',         SortOrder: 50,
+   419→        actions: [
+   420→          { actionId: lockTicketAct, name: 'Lock Ticket', paramValues: '', sortOrder: 10 },
+   421→          { actionId: execBillAct,   name: 'Execute Print Bill Job', paramValues: '', sortOrder: 20 },
+   422→        ]},
+   423→      { Name: 'Gift Rule',                       EventName: 'GiftRequested',         SortOrder: 60,
+   424→        actions: [
+   425→          { actionId: updGiftAct, name: 'Update Order Gift State', paramValues: 'StateName=GiftStatus#State=Gift#StateValue=', sortOrder: 10 },
+   426→        ]},
+   427→      { Name: 'Cancel Gift Rule',                EventName: 'CancelGiftRequested',   SortOrder: 70,
+   428→        actions: [
+   429→          { actionId: updGiftAct, name: 'Update Order Gift State', paramValues: 'StateName=GiftStatus#State=#StateValue=', sortOrder: 10 },
+   430→        ]},
+   431→      { Name: 'Void Rule',                       EventName: 'VoidRequested',         SortOrder: 80,
+   432→        actions: [
+   433→          { actionId: updOrderStatusAct, name: 'Update Order Status', paramValues: 'StateName=Status#State=Void#StateValue=', sortOrder: 10 },
+   434→        ]},
+   435→      { Name: 'Cancel Void Rule',                EventName: 'CancelVoidRequested',   SortOrder: 90,
+   436→        actions: [
+   437→          { actionId: updOrderStatusAct, name: 'Update Order Status', paramValues: 'StateName=Status#State=Submitted#StateValue=', sortOrder: 10 },
+   438→        ]},
+   439→      { Name: 'Update New Order Entity Color',   EventName: 'TicketOpened',          SortOrder: 100,
+   440→        actions: [
+   441→          { actionId: updEntityAct, name: 'Update Entity State', paramValues: 'EntityTypeName=Tables#StateName=Status#State=New Orders#StateValue=', sortOrder: 10 },
+   442→        ]},
+   443→      { Name: 'Update Available Entity Color',   EventName: 'TicketClosed',          SortOrder: 110,
+   444→        actions: [
+   445→          { actionId: updEntityAct, name: 'Update Entity State', paramValues: 'EntityTypeName=Tables#StateName=Status#State=Available#StateValue=', sortOrder: 10 },
+   446→        ]},
+   447→      { Name: 'Update Moved Entity Color',       EventName: 'TicketMoving',          SortOrder: 120,
+   448→        actions: [
+   449→          { actionId: updEntityAct, name: 'Update Entity State', paramValues: 'EntityTypeName=Tables#StateName=Status#State=Bill Requested#StateValue=', sortOrder: 10 },
+   450→        ]},
+   451→      { Name: 'Print Bill Rule',                 EventName: 'PrintBillRequested',    SortOrder: 130,
+   452→        actions: [
+   453→          { actionId: execBillAct, name: 'Execute Print Bill Job', paramValues: '', sortOrder: 10 },
+   454→        ]},
+   455→      { Name: 'Unlock Ticket Rule',              EventName: 'UnlockTicketRequested', SortOrder: 140,
+   456→        actions: [
+   457→          { actionId: unlockTicketAct, name: 'Unlock Ticket', paramValues: '', sortOrder: 10 },
+   458→        ]},
+   459→      { Name: 'Create Ticket Rule',              EventName: 'CreateTicketRequested', SortOrder: 150,
+   460→        actions: [
+   461→          { actionId: createTicketAct, name: 'Create Ticket', paramValues: '', sortOrder: 10 },
+   462→        ]},
+   463→      { Name: 'Update Merged Tickets State',     EventName: 'TicketMerged',          SortOrder: 160,
+   464→        actions: [
+   465→          { actionId: updTicketStatusAct, name: 'Update Ticket Status', paramValues: 'StateName=Status#State=Merged#StateValue=', sortOrder: 10 },
+   466→        ]},
+   467→      { Name: 'Close Ticket Rule',               EventName: 'CloseTicketRequested',  SortOrder: 170,
+   468→        actions: [
+   469→          { actionId: closeTicketAct, name: 'Close Ticket', paramValues: '', sortOrder: 10 },
+   470→        ]},
+   471→      { Name: 'Settle Rule',                     EventName: 'SettleRequested',       SortOrder: 180,
+   472→        actions: [
+   473→          { actionId: displayPaymentAct, name: 'Display Payment Screen', paramValues: '', sortOrder: 10 },
+   474→        ]},
+   475→      { Name: 'Payment Processed Rule',          EventName: 'PaymentProcessed',      SortOrder: 190,
+   476→        actions: [
+   477→          { actionId: execBillAct, name: 'Execute Print Bill Job', paramValues: '', sortOrder: 10 },
+   478→        ]},
+   479→    ];
+   480→
+   481→    for (const rule of ruleDefs) {
+   482→      const [ruleId] = await trx('AppRules').insert({
+   483→        Name: rule.Name,
+   484→        EventName: rule.EventName,
+   485→        EventConstraints: '[]',
+   486→        CustomConstraint: null,
+   487→        RuleConstraints: '[]',
+   488→        ConstraintMatch: 0,
+   489→        SortOrder: rule.SortOrder,
+   490→      });
+   491→      await trx('AppRuleMaps').insert({
+   492→        TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+   493→        AppRuleId: ruleId,
+   494→      });
+   495→      for (const ac of rule.actions) {
+   496→        await trx('ActionContainers').insert({
+   497→          Name: ac.name,
+   498→          AppActionId: ac.actionId,
+   499→          AppRuleId: ruleId,
+   500→          ParameterValues: ac.paramValues,
+   501→          CustomConstraint: null,
+   502→          SortOrder: ac.sortOrder,
+   503→        });
+   504→      }
+   505→    }
+   506→
+   507→    // -----------------------------------------------------------------
+   508→    // 21. States (initial set)
+   509→    // -----------------------------------------------------------------
+   510→    await trx('States').insert([
+   511→      { Name: 'New Orders',       GroupName: 'Status', StateType: 2, Color: 'DarkBlue'    },
+   512→      { Name: 'Available',        GroupName: 'Status', StateType: 0, Color: 'LightGreen'  },
+   513→      { Name: 'Bill Requested',   GroupName: 'Status', StateType: 0, Color: 'Orange'      },
+   514→      { Name: 'New',              GroupName: 'Status', StateType: 1, Color: 'LightSkyBlue' },
+   515→      { Name: 'Unpaid',           GroupName: 'Status', StateType: 1, Color: 'OrangeRed'    },
+   516→      { Name: 'Locked',           GroupName: 'Status', StateType: 1, Color: 'Gray'         },
+   517→      { Name: 'IsClosed',         GroupName: 'Status', StateType: 1, Color: 'DarkGreen'    },
+   518→      { Name: 'Gift',             GroupName: 'GStatus',StateType: 2, Color: 'Bisque'       },
+   519→      { Name: 'Status',           GroupName: 'Status', StateType: 2, Color: 'Gainsboro'    },
+   520→    ]);
+   521→
+   522→    console.log('[seed] All inserts completed. Committing transaction...');
+   523→  });
+   524→
+   525→  console.log('[seed] Transactional seed completed successfully.');
+   526→}
+   527→
+   528→module.exports = { seed };
+   529→

@@ -37,15 +37,29 @@ const PaymentView = {
     this._renderOrders();
     this._renderSummary();
 
-    // Load payment types from backend (we don't have a dedicated endpoint yet,
-    // so we use the seeded ones via the DB. For now, hardcode the seeded IDs.)
-    this._paymentTypes = [
-      { Id: 1, Name: 'Cash',            ButtonColor: 'Gainsboro', Icon: 'fa-money-bill' },
-      { Id: 2, Name: 'Credit Card',     ButtonColor: 'Gainsboro', Icon: 'fa-credit-card' },
-      { Id: 3, Name: 'Voucher',         ButtonColor: 'Gainsboro', Icon: 'fa-ticket' },
-      { Id: 4, Name: 'Customer Account',ButtonColor: 'Gainsboro', Icon: 'fa-user' },
-    ];
+    // Fetch payment types from backend (no hardcoded IDs)
+    try {
+      const res = await Api.getPaymentTypes();
+      this._paymentTypes = (res.data || []).map(pt => ({
+        Id: pt.Id,
+        Name: pt.Name,
+        ButtonColor: pt.ButtonColor || 'Gainsboro',
+        Icon: this._iconForPaymentType(pt.Name),
+      }));
+    } catch (err) {
+      window.App.toast('Cannot load payment types: ' + err.message, 'error');
+      this._paymentTypes = [];
+    }
     this._renderPaymentTypes();
+  },
+
+  _iconForPaymentType(name) {
+    const n = (name || '').toLowerCase();
+    if (n.includes('cash'))      return 'fa-money-bill';
+    if (n.includes('card') || n.includes('credit')) return 'fa-credit-card';
+    if (n.includes('voucher'))   return 'fa-ticket';
+    if (n.includes('account') || n.includes('customer')) return 'fa-user';
+    return 'fa-money-bill-wave';
   },
 
   _renderOrders() {
@@ -125,13 +139,25 @@ const PaymentView = {
   },
 
   async _processPayment(paymentType) {
+    // Prevent double-click: disable all payment buttons during processing
+    if (this._processing) return;
+    this._processing = true;
+    this._setButtonsDisabled(true);
+
     const remaining = Number(this._ticket.RemainingAmount || 0);
     const amount = this._tendered > 0 ? Math.min(this._tendered, remaining) : remaining;
     if (amount <= 0) {
-      return window.App.toast('Nothing to pay', 'warn');
+      window.App.toast('Nothing to pay', 'warn');
+      this._processing = false;
+      this._setButtonsDisabled(false);
+      return;
     }
     try {
-      const res = await Api.addPayment(this._ticket.Id, { paymentTypeId: paymentType.Id, amount });
+      const res = await Api.addPayment(this._ticket.Id, {
+        paymentTypeId: paymentType.Id,
+        amount,
+        tenderedAmount: this._tendered > amount ? this._tendered : undefined,
+      });
       window.store.setState({ currentTicket: res.data }, 'payment-processed');
       this._ticket = res.data;
       this._tendered = 0;
@@ -145,7 +171,18 @@ const PaymentView = {
       }
     } catch (err) {
       window.App.toast('Payment failed: ' + err.message, 'error');
+    } finally {
+      this._processing = false;
+      this._setButtonsDisabled(false);
     }
+  },
+
+  _setButtonsDisabled(disabled) {
+    const buttons = this.typesEl.querySelectorAll('flex-button');
+    buttons.forEach(btn => {
+      if (disabled) btn.setAttribute('disabled', '');
+      else btn.removeAttribute('disabled');
+    });
   },
 
   async _closeAndReturn() {

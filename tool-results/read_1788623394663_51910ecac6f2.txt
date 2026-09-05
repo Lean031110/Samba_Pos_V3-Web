@@ -1,0 +1,1992 @@
+     1→     1→# BUSINESS RULES ENGINE — SambaPOS V3
+     2→     2→
+     3→     3→> Pseudocode for the web clone. Every line that affects money or state is annotated with the
+     4→     4→> original C# source: `file:line`. The web-clone developer should translate this pseudocode
+     5→     5→> 1:1 into TypeScript/JavaScript (using `decimal.js` for monetary math — **never `number`**).
+     6→     6→>
+     7→     7→> Source repo: `/home/z/my-project/samba-web-clone/source/`
+     8→     8→> Critical files:
+     9→     9→> - `Samba.Domain/Models/Tickets/Ticket.cs` (862 lines — heart of the system)
+    10→    10→> - `Samba.Domain/Models/Tickets/Order.cs` (528 lines)
+    11→    11→> - `Samba.Domain/Models/Tickets/Calculation.cs` (67 lines — the discount/service/rounding engine)
+    12→    12→> - `Samba.Domain/Models/Tickets/TaxValue.cs` (66 lines — the tax formula)
+    13→    13→> - `Samba.Domain/Models/Tickets/ProductTimerValue.cs` (69 lines — time-based pricing)
+    14→    14→> - `Samba.Domain/Models/Accounts/AccountTransaction.cs` (234 lines — double-entry with auto-reverse)
+    15→    15→> - `Samba.Domain/Builders/TicketBuilder.cs` (151 lines)
+    16→    16→> - `Samba.Domain/Builders/OrderBuilder.cs` (192 lines)
+    17→    17→> - `Samba.Presentation.Services/Implementations/TicketModule/TicketService.cs`
+    18→    18→> - `Samba.Presentation.Services/Implementations/TicketModule/PaymentEditor.cs`
+    19→    19→> - `Samba.Services/Implementations/PrinterModule/Tools/LinePrinter.cs` (ESC/POS)
+    20→    20→> - `Samba.Infrastructure/Settings/LocalSettings.cs` (`Decimals = 2`)
+    21→    21→
+    22→    22→---
+    23→    23→
+    24→    24→## 0. Global Constants & Helpers
+    25→    25→
+    26→    26→```pseudo
+    27→    27→# Source: Samba.Infrastructure/Settings/LocalSettings.cs:78
+    28→    28→DECIMALS = 2                  # hardcoded; do NOT change without understanding the implications
+    29→    29→
+    30→    30→# Source: decimal.Round(value, n) in C# defaults to MidpointRounding.ToEven (banker's rounding)
+    31→    31→# Source: decimal.Round(value, n, MidpointRounding.AwayFromZero) uses schoolbook rounding
+    32→    32→# CRITICAL: SambaPOS mixes both modes — preserve exactly!
+    33→    33→
+    34→    34→function roundBankers(value, decimals = DECIMALS):
+    35→    35→    # JS equivalent:
+    36→    36→    # const f = Math.pow(10, decimals);
+    37→    37→    # const n = value * f;
+    38→    38→    # const isHalf = Math.abs(n % 1) === 0.5;
+    39→    39→    # if (isHalf) return Math.sign(n) * Math.round(Math.abs(n) % 2 === 0 ? Math.floor(Math.abs(n)) : Math.ceil(Math.abs(n))) / f;
+    40→    40→    # return Math.round(n) / f;
+    41→    41→    # OR: use decimal.js with Decimal.ROUND_HALF_EVEN
+    42→    42→    return Decimal.round(value, decimals, ROUND_HALF_EVEN)
+    43→    43→
+    44→    44→function roundAway(value, decimals = DECIMALS):
+    45→    45→    # JS equivalent: Math.sign(value) * Math.round(Math.abs(value) * Math.pow(10, decimals)) / Math.pow(10, decimals)
+    46→    46→    # OR: decimal.js with Decimal.ROUND_HALF_UP
+    47→    47→    return Decimal.round(value, decimals, ROUND_HALF_UP)   # HALF_UP matches AwayFromZero for positives
+    48→    48→
+    49→    49→# Auto-contrast foreground (used by FlexButton and table tiles)
+    50→    50→function pickForeground(hexColor):
+    51→    51→    r = parseHex(hexColor, 0, 2)
+    52→    52→    g = parseHex(hexColor, 2, 2)
+    53→    53→    b = parseHex(hexColor, 4, 2)
+    54→    54→    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    55→    55→    return luma < 128 ? '#FFFFFF' : '#000000'
+    56→    56→```
+    57→    57→
+    58→    58→---
+    59→    59→
+    60→    60→## 1. Ticket Lifecycle State Machine
+    61→    61→
+    62→    62→**Source:** `Ticket.cs` (no formal state machine; encoded as `(IsClosed, IsLocked)` booleans + JSON `TicketStates`).
+    63→    63→
+    64→    64→```
+    65→    65→                                  ┌──────────────┐
+    66→    66→                                  │     New      │  (Id=0, IsClosed=false, IsLocked=false)
+    67→    67→                                  │ TicketBuilder│
+    68→    68→                                  │   .Build()   │
+    69→    69→                                  └──────┬───────┘
+    70→    70→                                         │ Order added / Tag set / Entity linked
+    71→    71→                                         ▼
+    72→    72→                                  ┌──────────────┐
+    73→    73→                                  │     Open     │  (Orders > 0, IsClosed=false, IsLocked=false)
+    74→    74→                                  │   (Active)   │
+    75→    75→                                  └──────┬───────┘
+    76→    76→                                         │ CloseTicket() + LockTicket()
+    77→    77→                       ┌─────────────────┘  OR  user clicks "Pay" then "Close"
+    78→    78→                       ▼
+    79→    79→                  ┌──────────┐
+    80→    80→                  │  Locked  │  (IsLocked=true; Orders have Locked=true;
+    81→    81→                  └────┬─────┘   adding items requires AddItemsToLockedTickets permission)
+    82→    82→                       │
+    83→    83→                       │ GetRemainingAmount() == 0
+    84→    84→                       ▼
+    85→    85→                  ┌──────────┐
+    86→    86→                  │   Paid   │  (still IsClosed=false, but RemainingAmount=0)
+    87→    87→                  └────┬─────┘
+    88→    88→                       │ MarkTicketAsClosed action fires (typically on TicketClosing event)
+    89→    89→                       │ Ticket.Close()  [Ticket.cs:79]
+    90→    90→                       │   requires: RemainingAmount == 0 AND !HasActiveTimers()
+    91→    91→                       ▼
+    92→    92→                  ┌──────────┐
+    93→    93→                  │  Closed  │  (IsClosed=true; PaidItems cleared;
+    94→    94→                  └──────────┘   zero-amount AccountTransactions removed)
+    95→    95→```
+    96→    96→
+    97→    97→### Derived predicates
+    98→    98→
+    99→    99→```pseudo
+   100→   100→function isTicketNew(ticket):    return ticket.Id == 0
+   101→   101→function isTicketOpen(ticket):   return !ticket.IsClosed && !ticket.IsLocked && ticket.Orders.length > 0
+   102→   102→function isTicketLocked(ticket): return ticket.IsLocked == true
+   103→   103→function isTicketPaid(ticket):   return !ticket.IsClosed && ticket.GetRemainingAmount() == 0 && ticket.Payments.length > 0
+   104→   104→function isTicketClosed(ticket): return ticket.IsClosed == true
+   105→   105→```
+   106→   106→
+   107→   107→### OrderState state machine (free-form JSON)
+   108→   108→
+   109→   109→States are stored as JSON in `Order.OrderStates` and named by convention. The built-in automation rules use `Status` as the group name:
+   110→   110→
+   111→   111→| State | Trigger | Effect |
+   112→   112→|-------|---------|--------|
+   113→   113→| New | OrderBuilder.Build() | Default |
+   114→   114→| Submitted | OrderNumber assigned at CloseTicket | (implicit) |
+   115→   115→| Void | `UpdateOrderState` action with `Status=Void` | `CalculatePrice=false` (excluded from totals) |
+   116→   116→| Gift | `UpdateOrderState` action with `Status=Gift` | `CalculatePrice=false` + visual indicator |
+   117→   117→| Cancelled | `UpdateOrderState` action with `Status=Cancelled` | Excluded from reports |
+   118→   118→
+   119→   119→---
+   120→   120→
+   121→   121→## 2. CreateTicket Flow
+   122→   122→
+   123→   123→**Source:** `PosViewModel.cs:290` → `TicketService.cs:111` → `TicketService.cs:124` → `TicketBuilder.cs:33` → `Ticket.cs:26`
+   124→   124→
+   125→   125→### Step-by-step pseudocode
+   126→   126→
+   127→   127→```pseudo
+   128→   128→# ENTRY POINTS:
+   129→   129→# 1. UI button on dashboard → EventTopicNames.CreateTicket → PosViewModel.CreateTicket()
+   130→   130→# 2. Entity selected with no open ticket → PosViewModel.OnEntitySelectedForTicket → OpenTicket(0)
+   131→   131→# 3. Automation action "CreateTicket" → ActionProcessors.CreateTicket
+   132→   132→
+   133→   133→function PosViewModel.CreateTicket():                                # [PosViewModel.cs:290]
+   134→   134→    if SelectedTicket != null:
+   135→   135→        capturedEntities = SelectedTicket.TicketEntities
+   136→   136→            .Where(te => te.EntityTypeAssignment.CopyToNewTickets).ToList()
+   137→   137→        CloseTicket()                                                # see Section 7
+   138→   138→    OpenTicket(0)                                                    # [PosViewModel.cs:450]
+   139→   139→    foreach entity in capturedEntities:
+   140→   140→        _ticketService.UpdateEntity(SelectedTicket, entity)          # [TicketService.cs:104]
+   141→   141→
+   142→   142→function PosViewModel.OpenTicket(ticketId):                          # [PosViewModel.cs:450]
+   143→   143→    _applicationStateSetter.SetApplicationLocked(true)
+   144→   144→    SelectedTicket = _ticketService.OpenTicket(ticketId)             # [TicketService.cs:111]
+   145→   145→
+   146→   146→function TicketService.OpenTicket(ticketId):                         # [TicketService.cs:111]
+   147→   147→    Debug.Assert(_applicationState.CurrentDepartment != null)
+   148→   148→    if ticketId == 0:
+   149→   149→        ticket = CreateTicket()                                      # [TicketService.cs:124]
+   150→   150→    else:
+   151→   151→        ticket = _ticketDao.OpenTicket(ticketId)                     # [TicketDao.cs:40]
+   152→   152→        # EF Load with Includes:
+   153→   153→        #   Orders, ProductTimerValue, TicketEntities, Calculations,
+   154→   154→        #   Payments, PaidItems, ChangePayments
+   155→   155→    _applicationState.NotifyEvent("TicketOpened", {Ticket, OrderCount: ticket.Orders.Count})
+   156→   156→    return ticket
+   157→   157→
+   158→   158→function TicketService.CreateTicket():                               # [TicketService.cs:124]
+   159→   159→    account = _cacheService.GetAccountById(
+   160→   160→        _applicationState.CurrentTicketType.SaleTransactionType.DefaultTargetAccountId)
+   161→   161→    result = TicketBuilder.Create(
+   162→   162→        _applicationState.CurrentTicketType,
+   163→   163→        _applicationState.CurrentDepartment.Model)                   # [TicketBuilder.cs:28]
+   164→   164→        .WithExchangeRate(GetExchangeRate(account))
+   165→   165→        .WithCalculations(
+   166→   166→            _applicationState.GetCalculationSelectors()
+   167→   167→                .Where(x => string.IsNullOrEmpty(x.ButtonHeader))    # auto-applied calcs only
+   168→   168→                .SelectMany(y => y.CalculationTypes))
+   169→   169→        .Build()                                                     # [TicketBuilder.cs:33]
+   170→   170→    _applicationState.NotifyEvent("TicketCreated", {Ticket: result, TicketTypeName: result.TicketType.Name})
+   171→   171→    return result
+   172→   172→
+   173→   173→function TicketBuilder.Build():                                      # [TicketBuilder.cs:33]
+   174→   174→    if _ticketType == null or _department == null: throw
+   175→   175→
+   176→   176→    result = new Ticket {                                            # [Ticket.cs:26]
+   177→   177→        TicketTypeId:        _ticketType.Id,
+   178→   178→        DepartmentId:        _department.Id,
+   179→   179→        ExchangeRate:        _exchangeRate,                  # default 1
+   180→   180→        TaxIncluded:         _ticketType.TaxIncluded,
+   181→   181→        TransactionDocument: new AccountTransactionDocument(),
+   182→   182→        Date:                DateTime.Now,
+   183→   183→        LastPaymentDate:     DateTime.Now,
+   184→   184→        LastOrderDate:       DateTime.Now,
+   185→   185→        LastUpdateTime:      DateTime.Now,
+   186→   186→        IsClosed:            false,
+   187→   187→        IsLocked:            false,
+   188→   188→        TicketNumber:        null,                  # assigned at first Save (CloseTicket)
+   189→   189→        TicketTags:          null,                  # null until first SetTagValue
+   190→   190→        TicketStates:        null,                  # null until first SetStateValue
+   191→   191→    }
+   192→   192→
+   193→   193→    foreach orderData in _orders:
+   194→   194→        result.AddOrder(orderData.Order, orderData.TaxTemplates, orderData.Template, orderData.UserName)
+   195→   195→                                                                     # [Ticket.cs:232]
+   196→   196→    foreach calc in _calculations:
+   197→   197→        result.AddCalculation(calc, calc.Amount)                     # [Ticket.cs:379]
+   198→   198→
+   199→   199→    result.Recalculate()                                             # [Ticket.cs:656] — see Section 4
+   200→   200→    return result
+   201→   201→```
+   202→   202→
+   203→   203→### Ticket Number Generation (deferred to first Save)
+   204→   204→
+   205→   205→```pseudo
+   206→   206→function TicketService.UpdateTicketNumber(ticket, numerator):       # [TicketService.cs:238]
+   207→   207→    if ticket.TicketNumber == null:
+   208→   208→        ticket.TicketNumber = _settingService.GetNextString(numerator.Id)
+   209→   209→                                                                     # [SettingService.cs:84]
+   210→   210→        # SettingDao.GetNextString atomically increments Numerator.Number
+   211→   211→        # with optimistic-concurrency retry on DbUpdateConcurrencyException
+   212→   212→                                                                     # [SettingDao.cs:22]
+   213→   213→        # Returns Number.ToString(NumberFormat) e.g. "0001"
+   214→   214→                                                                     # [Numerator.cs:12]
+   215→   215→        # Update the sale AccountTransaction description to include ticket number
+   216→   216→        saleTxn = ticket.TransactionDocument.AccountTransactions
+   217→   217→            .FirstOrDefault(a => a.AccountTransactionTypeId
+   218→   218→                == ticket.TicketType.SaleTransactionType.Id)
+   219→   219→        if saleTxn != null:
+   220→   220→            saleTxn.UpdateDescription("{name} [#{ticketNumber}]")   # [AccountTransaction.cs]
+   221→   221→```
+   222→   222→
+   223→   223→### WorkPeriod linking
+   224→   224→
+   225→   225→**IMPORTANT:** WorkPeriod is **NOT** a foreign key. The link is implicit via `Ticket.Date` falling within `[WorkPeriod.StartDate, WorkPeriod.EndDate]`. Reports filter on this date range. The "current work period" is held in memory by `IApplicationState.CurrentWorkPeriod`.
+   226→   226→
+   227→   227→### Department linking
+   228→   228→
+   229→   229→Set at `TicketBuilder.Build()` time: `ticket.DepartmentId = _department.Id`. The Department carries `WarehouseId`, `TicketTypeId`, `ScreenMenuId`, `PriceTag`, `TicketCreationMethod` — these are read at runtime via `_applicationState.CurrentDepartment`.
+   230→   230→
+   231→   231→### Table linking
+   232→   232→
+   233→   233→There is **no `Table` entity** in SambaPOS V3. Tables are `Entity` rows whose `EntityType.Name == "Tables"` (or similar). Linking happens via `Ticket.UpdateEntity(...)`:
+   234→   234→
+   235→   235→```pseudo
+   236→   236→function Ticket.UpdateEntity(entity):                                # [Ticket.cs:620]
+   237→   237→    existing = TicketEntities.FirstOrDefault(te => te.EntityTypeId == entity.EntityTypeId)
+   238→   238→    if existing != null:
+   239→   239→        if entity.Id == 0:
+   240→   240→            TicketEntities.Remove(existing)        # unlink
+   241→   241→        else:
+   242→   242→            existing.EntityId = entity.Id
+   243→   243→            existing.EntityName = entity.Name
+   244→   244→            existing.EntityCustomData = entity.CustomData
+   245→   245→            existing.AccountId = entity.AccountId
+   246→   246→            existing.AccountTypeId = entity.EntityType.AccountTypeId
+   247→   247→    elif entity.Id > 0:
+   248→   248→        TicketEntities.Add(new TicketEntity {                       # [TicketEntity.cs:10]
+   249→   249→            EntityTypeId: entity.EntityTypeId,
+   250→   250→            EntityId: entity.Id,
+   251→   251→            AccountId: entity.AccountId,
+   252→   252→            AccountTypeId: entity.EntityType.AccountTypeId,
+   253→   253→            EntityName: entity.Name,
+   254→   254→            EntityCustomData: entity.CustomData,
+   255→   255→        })
+   256→   256→```
+   257→   257→
+   258→   258→---
+   259→   259→
+   260→   260→## 3. AddItem Flow
+   261→   261→
+   262→   262→**Source:** User taps product button → `MenuItemSelectorViewModel.OnMenuItemCommandExecute` → `PosViewModel.OnMenuItemSelected` → `TicketOrdersViewModel.AddOrder` → `TicketService.AddOrder` → `Ticket.AddOrder` → `OrderBuilder.Build` → `TicketService.RecalculateTicket`.
+   263→   263→
+   264→   264→```pseudo
+   265→   265→# USER taps a product button in MenuItemSelectorView
+   266→   266→function MenuItemSelectorViewModel.OnMenuItemCommandExecute(screenMenuItem):  # [MenuItemSelectorViewModel.cs:259]
+   267→   267→    selectedMultiplier = parseNumeric(NumeratorValue) ?? 1
+   268→   268→    quantity = selectedMultiplier > 1
+   269→   269→        ? selectedMultiplier
+   270→   270→        : (screenMenuItem.Quantity > 1 ? screenMenuItem.Quantity : 1)
+   271→   271→    data = new ScreenMenuItemData {
+   272→   272→        ScreenMenuItem: screenMenuItem,
+   273→   273→        Quantity: quantity,
+   274→   274→    }
+   275→   275→    data.PublishEvent("ScreenMenuItemDataSelected")
+   276→   276→
+   277→   277→function PosViewModel.OnMenuItemSelected(event):                    # [PosViewModel.cs:274]
+   278→   278→    if SelectedTicket == null:
+   279→   279→        OpenTicket(0)
+   280→   280→        if _lastSelectedEntity != null:
+   281→   281→            _ticketService.UpdateEntity(SelectedTicket, _lastSelectedEntity)
+   282→   282→    _ticketOrdersViewModel.AddOrder(data)
+   283→   283→    DisplaySingleTicket()
+   284→   284→
+   285→   285→function TicketOrdersViewModel.AddOrder(data):                      # [TicketOrdersViewModel.cs:130]
+   286→   286→    ClearSelectedOrders()
+   287→   287→    order = _ticketService.AddOrder(SelectedTicket,
+   288→   288→        data.ScreenMenuItem.MenuItemId,
+   289→   289→        data.Quantity,
+   290→   290→        data.ScreenMenuItem.ItemPortion,
+   291→   291→        "")                                                          # [TicketService.cs:618]
+   292→   292→    if order != null:
+   293→   293→        # Apply screen-menu-item-defined tags / states / automation commands
+   294→   294→        UpdateOrderTags(SelectedTicket, order, data.ScreenMenuItem.OrderTags)   # [TicketOrdersViewModel.cs:151]
+   295→   295→        UpdateOrderStates(SelectedTicket, order, data.ScreenMenuItem.OrderStates)  # [TicketOrdersViewModel.cs:180]
+   296→   296→        ExecuteAutomationCommand(SelectedTicket, order,
+   297→   297→            data.ScreenMenuItem.AutomationCommand,
+   298→   298→            data.ScreenMenuItem.AutomationCommandValue)              # [TicketOrdersViewModel.cs:196]
+   299→   299→        UpdateOrderColor(order)
+   300→   300→        if data.ScreenMenuItem.AutoSelect:
+   301→   301→            order.ToggleSelection()
+   302→   302→
+   303→   303→function TicketService.AddOrder(ticket, menuItemId, quantity, portionName, orderState):  # [TicketService.cs:618]
+   304→   304→    # ---- Permission check ----
+   305→   305→    if ticket.IsLocked && !user.HasPermission("AddItemsToLockedTickets"): return null
+   306→   306→    if ticket.IsClosed: return null   # CanSubmit == !IsClosed
+   307→   307→
+   308→   308→    # ---- Lookup menu item + portion + price tag + timer + tax templates ----
+   309→   309→    menuItem   = _cacheService.GetMenuItem(x => x.Id == menuItemId)
+   310→   310→    portion    = _cacheService.GetMenuItemPortion(menuItemId, portionName)   # [CacheService.cs:92]
+   311→   311→                                                              # returns first portion if name not found
+   312→   312→    priceTag   = _applicationState.CurrentDepartment.PriceTag
+   313→   313→    timer      = _applicationState.GetProductTimer(menuItemId)
+   314→   314→    taxTemps   = _applicationState.GetTaxTemplates(menuItemId).ToList()
+   315→   315→
+   316→   316→    # ---- Build the Order via fluent builder ----
+   317→   317→    order = ticket.AddOrder(
+   318→   318→        _applicationState.CurrentTicketType.SaleTransactionType,
+   319→   319→        _applicationState.CurrentDepartment.Model,
+   320→   320→        _applicationState.CurrentLoggedInUser.Name,
+   321→   321→        menuItem, taxTemps, portion, priceTag, timer)               # [Ticket.cs:214]
+   322→   322→
+   323→   323→    # ---- Apply quantity (handle portion multiplier for qty > 9) ----
+   324→   324→    order.Quantity = quantity > 9
+   325→   325→        ? round(quantity / portion.Multiplier, 3)
+   326→   326→        : quantity
+   327→   327→    order.ResetSelectedQuantity()                                    # [Order.cs:339]
+   328→   328→
+   329→   329→    # ---- Apply default order state from screen menu item ----
+   330→   330→    SetOrderState(order, orderState)                                 # [TicketService.cs:643]
+   331→   331→
+   332→   332→    # ---- Recalculate ticket ----
+   333→   333→    RecalculateTicket(ticket)                                        # [TicketService.cs:330]
+   334→   334→
+   335→   335→    # ---- Fire automation event ----
+   336→   336→    _applicationState.NotifyEvent("OrderAdded", {
+   337→   337→        Ticket, Order, MenuItemName, PortionName, Quantity, Price: order.GetPrice()
+   338→   338→    })
+   339→   339→
+   340→   340→    return order
+   341→   341→
+   342→   342→function Ticket.AddOrder(template, department, userName, menuItem, taxTemplates, portion, priceTag, timer):
+   343→   343→                                                                    # [Ticket.cs:214]
+   344→   344→    UnLock()                                                        # [Ticket.cs:77]  re-opens if !IsClosed
+   345→   345→    order = OrderBuilder.Create()
+   346→   346→        .WithDepartment(department)
+   347→   347→        .ForMenuItem(menuItem)              # also picks first portion if none
+   348→   348→        .WithUserName(userName)
+   349→   349→        .WithTaxTemplates(taxTemplates)
+   350→   350→        .WithPortion(portion)
+   351→   351→        .WithPriceTag(priceTag)
+   352→   352→        .WithAccountTransactionType(template)
+   353→   353→        .WithProductTimer(timer)
+   354→   354→        .Build()                                                    # [OrderBuilder.cs:48]
+   355→   355→
+   356→   356→    # Add order to collection + ensure AccountTransactions exist
+   357→   357→    AddOrder(order, taxTemplates, template, userName)               # [Ticket.cs:232]
+   358→   358→        # 1. TransactionDocument.AddSingletonTransaction(template.Id, template, GetTicketAccounts())
+   359→   359→        #    → creates the SALE AccountTransaction once per ticket
+   360→   360→        #    [AccountTransactionDocument.cs:41]
+   361→   361→        # 2. foreach taxTemplate in taxTemplates:
+   362→   362→        #        TransactionDocument.AddSingletonTransaction(
+   363→   363→        #            taxTemplate.AccountTransactionType.Id,
+   364→   364→        #            taxTemplate.AccountTransactionType,
+   365→   365→        #            GetTicketAccounts())
+   366→   366→        #    → creates one TAX AccountTransaction per tax template
+   367→   367→        # 3. Orders.Add(order)
+   368→   368→        # 4. LastModifiedUserName = userName
+   369→   369→
+   370→   370→    return order
+   371→   371→
+   372→   372→function OrderBuilder.Build():                                      # [OrderBuilder.cs:48]
+   373→   373→    order = new Order()
+   374→   374→    order.UpdateMenuItem(_userName, _menuItem, _taxTemplates, _portion, _priceTag, _quantity)
+   375→   375→                                                                    # [Order.cs:133]
+   376→   376→    order.DepartmentId = _department.Id
+   377→   377→    order.WarehouseId  = _department.WarehouseId
+   378→   378→    order.AccountTransactionTypeId = _accountTransactionType.Id
+   379→   379→    order.UpdateProductTimer(_productTimer)                         # [Order.cs:403]
+   380→   380→    order.CalculatePrice = true  # default
+   381→   381→    return order
+   382→   382→
+   383→   383→function Order.UpdateMenuItem(userName, menuItem, taxTemplates, portion, priceTag, quantity):
+   384→   384→                                                                    # [Order.cs:133]
+   385→   385→    MenuItemId   = menuItem.Id
+   386→   386→    MenuItemName = menuItem.Name
+   387→   387→    UpdatePortion(portion, priceTag, taxTemplates)                  # [Order.cs:146]
+   388→   388→    Quantity     = quantity
+   389→   389→    SelectedQuantity = quantity
+   390→   390→    PortionCount = menuItem.Portions.Count
+   391→   391→    CreatingUserName = userName
+   392→   392→    CreatedDateTime = DateTime.Now
+   393→   393→
+   394→   394→function Order.UpdatePortion(portion, priceTag, taxTemplates):      # [Order.cs:146]
+   395→   395→    PortionName = portion.Name
+   396→   396→    UpdateTaxTemplates(taxTemplates)                                # [Order.cs:360]
+   397→   397→        # TaxValues.Clear()
+   398→   398→        # foreach template in taxTemplates:
+   399→   399→        #     TaxValues.Add(new TaxValue(template))   [TaxValue.cs:15]
+   400→   400→        #         TaxRate = template.Rate
+   401→   401→        #         Rounding = template.Rounding
+   402→   402→        #         TaxTemplateName = template.Name
+   403→   403→        #         TaxTempleteAccountTransactionTypeId = template.AccountTransactionType.Id
+   404→   404→        # Taxes = JSON serialize TaxValues (with [DataMember] short names)
+   405→   405→    # ---- PRICE LOOKUP ----
+   406→   406→    if priceTag != null and priceTag != "":
+   407→   407→        price = portion.Prices.SingleOrDefault(p => p.PriceTag == priceTag)
+   408→   408→        if price != null and price.Price > 0:
+   409→   409→            UpdatePrice(price.Price, price.PriceTag)                # [Order.cs:354]
+   410→   410→            return
+   411→   411→        # else fall through to base price
+   412→   412→    UpdatePrice(portion.Price, "")   # base price (default MenuItemPrice)
+   413→   413→```
+   414→   414→
+   415→   415→### Portion selection (post-add)
+   416→   416→
+   417→   417→User picks portion via long-press / context menu → `TicketViewModel` calls:
+   418→   418→```pseudo
+   419→   419→_ticketService.UpdateOrderPrice(order, portionName, priceTag)       # [TicketService.cs:597]
+   420→   420→    order.UpdatePortion(portion, priceTag, null)                    # [Order.cs:146]
+   421→   421→```
+   422→   422→
+   423→   423→### Modifier (OrderTag) addition
+   424→   424→
+   425→   425→```pseudo
+   426→   426→function TicketService.TagOrders(ticket, orders, orderTagGroup, orderTag, tagNote):  # [TicketService.cs:423]
+   427→   427→    foreach order in orders:
+   428→   428→        if orderTagGroup.MaxSelectedItems == 1:
+   429→   429→            # Remove existing tags in the same group
+   430→   430→            existing = order.OrderTagValues.Where(otv => otv.OrderTagGroupId == orderTagGroup.Id).ToList()
+   431→   431→            existing.ForEach(otv => order.OrderTagValues.Remove(otv))
+   432→   432→        order.ToggleOrderTag(orderTagGroup, orderTag, userId, tagNote)  # [Order.cs:232]
+   433→   433→            # if tag absent: create OrderTagValue {Price: orderTag.Price, Quantity: 1, TaxFree: group.TaxFree,
+   434→   434→            #                                       AddTagPriceToOrderPrice: group.AddTagPriceToOrderPrice, ...}
+   435→   435→            # if tag present:
+   436→   436→            #     if MaxSelectedItems == 1: remove tag
+   437→   437→            #     else: tag.Quantity++ (until MaxQuantity if > 0)
+   438→   438→    RecalculateTicket(ticket)
+   439→   439→```
+   440→   440→
+   441→   441→### Quantity change
+   442→   442→
+   443→   443→Direct mutation:
+   444→   444→```pseudo
+   445→   445→# PosViewModel / TicketViewModel:
+   446→   446→order.Quantity += delta   # or order.Quantity = newValue
+   447→   447→order.ResetSelectedQuantity()
+   448→   448→RefreshSelectedOrders()
+   449→   449→RecalculateTicket(ticket)
+   450→   450→```
+   451→   451→
+   452→   452→For locked orders, only `SelectedQuantity` is mutated (used for partial-payment selection).
+   453→   453→
+   454→   454→---
+   455→   455→
+   456→   456→## 4. CalculateTotals Algorithm (THE MASTER ALGORITHM)
+   457→   457→
+   458→   458→**Source:** `Ticket.GetSum()` at `Ticket.cs:308` and `Ticket.Recalculate()` at `Ticket.cs:656`. Every code path that mutates `Orders`, `Calculations`, or `Payments` ends with a call to `TicketService.RecalculateTicket` (`TicketService.cs:330`) which calls `Ticket.Recalculate()`.
+   459→   459→
+   460→   460→### 4.1 Order of operations (FINAL ANSWER)
+   461→   461→
+   462→   462→```
+   463→   463→1. Sum ticket items           →  plainSum    = Σ order.GetTotal()              [Ticket.cs:413]
+   464→   464→2. Apply pre-tax discounts    →  preTaxSvc   = CalculateServices(!IncludeTax)  [Ticket.cs:311]
+   465→   465→                                (Calculations sorted by Order; DecreaseAmount makes negative)
+   466→   466→3. Apply tax                  →  tax         = CalculateTax(plainSum, preTaxSvc) [Ticket.cs:348]
+   467→   467→                                If TaxIncluded: tax already inside price (extracted, not added)
+   468→   468→                                If !TaxIncluded: tax added on top
+   469→   469→                                Rounding: per-line via TaxValue.Rounding (MidpointRounding.AwayFromZero)
+   470→   470→                                Then rounded to 2 dp at ticket level (MidpointRounding.ToEven — banker's!)
+   471→   471→4. Apply post-tax services    →  postTaxSvc  = CalculateServices(IncludeTax)   [Ticket.cs:314]
+   472→   472→                                (applied to plainSum + preTaxSvc + tax)
+   473→   473→5. Round                      →  decimal.Round(…, 2) at every step
+   474→   474→                                Also: AccountTransaction.Amount rounded with MidpointRounding.AwayFromZero
+   475→   475→                                                              [AccountTransaction.cs:203]
+   476→   476→6. Set TotalAmount            →  TotalAmount = plainSum + preTaxSvc + tax + postTaxSvc
+   477→   477→                                                              [Ticket.cs:688]
+   478→   478→                                RemainingAmount = Round(GetSum() - GetPaymentAmount() + GetChangeAmount(), 2)
+   479→   479→                                                              [Ticket.cs:436]
+   480→   480→```
+   481→   481→
+   482→   482→### 4.2 `calculateTicketTotals(ticket)` — full pseudocode
+   483→   483→
+   484→   484→```pseudo
+   485→   485→function calculateTicketTotals(ticket):
+   486→   486→    # ====================================================================
+   487→   487→    # STEP 1: Sum ticket items (plainSum)
+   488→   488→    # ====================================================================
+   489→   489→    # Source: Ticket.GetPlainSum()  [Ticket.cs:413]
+   490→   490→    plainSum = 0
+   491→   491→    for order in ticket.Orders:
+   492→   492→        if order.CalculatePrice:
+   493→   493→            plainSum += order.GetTotal()                            # [Order.cs:507]
+   494→   494→            #   GetTotal() = CalculatePrice ? GetValue() : 0
+   495→   495→            #   GetValue() = GetPrice() * Quantity
+   496→   496→            # Source: Order.GetPrice()  [Order.cs:466]
+   497→   497→            #   = Price + Σ(OrderTagValues.Price * OrderTagValues.Quantity)
+   498→   498→            #   + (ProductTimerValue.GetPrice(...) if timer present)
+   499→   499→
+   500→   500→    # ====================================================================
+   501→   501→    # STEP 2: Apply pre-tax discounts/services
+   502→   502→    # ====================================================================
+   503→   503→    # Source: Ticket.CalculateServices(calculations, sum)  [Ticket.cs:354]
+   504→   504→    # Iterates Calculations WHERE IncludeTax == false, ORDERED BY calc.Order (SortOrder)
+   505→   505→    preTaxServices = 0
+   506→   506→    currentSum = plainSum
+   507→   507→    for calc in ticket.Calculations.Where(c => c.IncludeTax == false).OrderBy(c => c.Order):
+   508→   508→        sumValue = calc.UsePlainSum
+   509→   509→            ? ticket.Orders
+   510→   510→                .Where(o => o.DecreaseInventory || o.IncreaseInventory)
+   511→   511→                .Sum(o => o.GetVisibleValue())                     # [Order.cs:497]
+   512→   512→            : plainSum
+   513→   513→
+   514→   514→        # Source: Calculation.Update(sumValue, currentSum, decimals)  [Calculation.cs:22]
+   515→   515→        calcAmount = computeCalculationAmount(calc, sumValue, currentSum)
+   516→   516→        calcAmount = roundBankers(calcAmount, DECIMALS)             # banker's rounding
+   517→   517→        if calc.DecreaseAmount and calcAmount > 0:
+   518→   518→            calcAmount = -calcAmount
+   519→   519→        calc.CalculationAmount = calcAmount
+   520→   520→
+   521→   521→        preTaxServices += calcAmount
+   522→   522→        currentSum     += calcAmount
+   523→   523→
+   524→   524→        # Update the singleton AccountTransaction for this calculation
+   525→   525→        # Source: Calculation.UpdateCalculationTransaction  [Calculation.cs:57]
+   526→   526→        ticket.TransactionDocument.UpdateSingletonTransactionAmount(
+   527→   527→            calc.AccountTransactionTypeId, calc.Name,
+   528→   528→            abs(calcAmount), ticket.ExchangeRate)
+   529→   529→
+   530→   530→        # Auto-remove zero-amount calcs (except type 5 = scripted)
+   531→   531→        if calc.Amount == 0 and calc.CalculationType != 5:
+   532→   532→            ticket.Calculations.Remove(calc)
+   533→   533→
+   534→   534→    preTaxServices = roundBankers(preTaxServices, DECIMALS)         # banker's
+   535→   535→
+   536→   536→    # ====================================================================
+   537→   537→    # STEP 3: Apply tax
+   538→   538→    # ====================================================================
+   539→   539→    # Source: Ticket.CalculateTax(plainSum, preTaxServices)  [Ticket.cs:348]
+   540→   540→    if ticket.TaxIncluded:
+   541→   541→        # Tax is already embedded in Price; we don't add it again here.
+   542→   542→        # (Per-line tax extraction happens below in reports.)
+   543→   543→        tax = 0
+   544→   544→    else:
+   545→   545→        tax = 0
+   546→   546→        for order in ticket.Orders:
+   547→   547→            if order.CalculatePrice:
+   548→   548→                # Source: Order.GetTotalTaxAmount(taxIncluded, plainSum, preTaxServices)  [Order.cs:378]
+   549→   549→                # = Σ TaxValues.GetTaxAmount(...) * order.Quantity
+   550→   550→                taxablePrice = order.GetTaxablePrice()              # [Order.cs:475]
+   551→   551→                #   = Price + Σ(OrderTagValues.Where(!TaxFree).Price * OrderTagValues.Quantity)
+   552→   552→                #   + (ProductTimerValue.GetPrice(...) if timer)
+   553→   553→                totalRate = Σ order.TaxValues.Sum(t => t.TaxRate)   # e.g. 8+5=13 for compound
+   554→   554→                for tv in order.TaxValues:
+   555→   555→                    price = taxablePrice
+   556→   556→                    if preTaxServices != 0:
+   557→   557→                        # Proportionally allocate pre-tax services to this order's price
+   558→   558→                        price += (price * preTaxServices) / plainSum
+   559→   559→                    # Source: TaxValue.GetTax(taxIncluded, price, totalRate)  [TaxValue.cs:41]
+   560→   560→                    if tv.TaxRate > 0:
+   561→   561→                        taxAmount = (price * tv.TaxRate) / 100
+   562→   562→                    else:
+   563→   563→                        taxAmount = 0
+   564→   564→                    # NOTE: TaxValue.Rounding only applies when TaxIncluded=true
+   565→   565→                    # (for TaxIncluded=false, no per-line rounding — full precision kept)
+   566→   566→                    tax += taxAmount * order.Quantity
+   567→   567→        tax = roundBankers(tax, DECIMALS)                           # banker's (NOT AwayFromZero)
+   568→   568→
+   569→   569→    # ====================================================================
+   570→   570→    # STEP 4: Apply post-tax services (IncludeTax=true)
+   571→   571→    # ====================================================================
+   572→   572→    # Applied to (plainSum + preTaxServices + tax)
+   573→   573→    newBase = plainSum + preTaxServices + tax
+   574→   574→    postTaxServices = 0
+   575→   575→    currentSum = newBase
+   576→   576→    for calc in ticket.Calculations.Where(c => c.IncludeTax == true).OrderBy(c => c.Order):
+   577→   577→        sumValue = calc.UsePlainSum
+   578→   578→            ? ticket.Orders
+   579→   579→                .Where(o => o.DecreaseInventory || o.IncreaseInventory)
+   580→   580→                .Sum(o => o.GetVisibleValue())
+   581→   581→            : newBase
+   582→   582→        calcAmount = computeCalculationAmount(calc, sumValue, currentSum)
+   583→   583→        calcAmount = roundBankers(calcAmount, DECIMALS)
+   584→   584→        if calc.DecreaseAmount and calcAmount > 0:
+   585→   585→            calcAmount = -calcAmount
+   586→   586→        calc.CalculationAmount = calcAmount
+   587→   587→        postTaxServices += calcAmount
+   588→   588→        currentSum      += calcAmount
+   589→   589→        ticket.TransactionDocument.UpdateSingletonTransactionAmount(
+   590→   590→            calc.AccountTransactionTypeId, calc.Name,
+   591→   591→            abs(calcAmount), ticket.ExchangeRate)
+   592→   592→        if calc.Amount == 0 and calc.CalculationType != 5:
+   593→   593→            ticket.Calculations.Remove(calc)
+   594→   594→    postTaxServices = roundBankers(postTaxServices, DECIMALS)
+   595→   595→
+   596→   596→    # ====================================================================
+   597→   597→    # STEP 5: Round (already done at each step above)
+   598→   598→    # ====================================================================
+   599→   599→    # AccountTransaction.Amount is rounded with MidpointRounding.AwayFromZero
+   600→   600→    # Source: AccountTransaction.cs:203
+   601→   601→
+   602→   602→    # ====================================================================
+   603→   603→    # STEP 6: Set TotalAmount and RemainingAmount
+   604→   604→    # ====================================================================
+   605→   605→    # Source: Ticket.Recalculate()  [Ticket.cs:688]
+   606→   606→    ticket.TotalAmount = plainSum + preTaxServices + tax + postTaxServices
+   607→   607→
+   608→   608→    # Source: Ticket.GetRemainingAmount()  [Ticket.cs:436]
+   609→   609→    paymentAmount    = Σ ticket.Payments.Sum(p => p.Amount)
+   610→   610→    changePaymentAmt = Σ ticket.ChangePayments.Sum(c => c.Amount)
+   611→   611→    ticket.RemainingAmount = roundBankers(
+   612→   612→        ticket.TotalAmount - paymentAmount + changePaymentAmt, DECIMALS)
+   613→   613→
+   614→   614→    # ====================================================================
+   615→   615→    # ALSO: Update AccountTransaction amounts for sale + tax
+   616→   616→    # ====================================================================
+   617→   617→    # Source: Ticket.Recalculate()  [Ticket.cs:660-684]
+   618→   618→
+   619→   619→    # 1. SALE AccountTransaction (one per order group by AccountTransactionTypeId)
+   620→   620→    for orderGroup in ticket.Orders.GroupBy(o => o.AccountTransactionTypeId):
+   621→   621→        transaction = ticket.TransactionDocument.AccountTransactions
+   622→   622→            .SingleOrDefault(t => t.AccountTransactionTypeId == orderGroup.Key)
+   623→   623→        if transaction != null:
+   624→   624→            # amount = sum of tax-excluded order values
+   625→   625→            amount = Σ orderGroup.Sum(o => GetTaxExcludedSum(o))   # [Ticket.cs:328]
+   626→   626→                # If TaxIncluded:
+   627→   627→                #   GetTaxExcludedSum = o.GetTotal() - o.GetTotalTaxAmount(true, plainSum, preTaxServices)
+   628→   628→                # If !TaxIncluded:
+   629→   629→                #   GetTaxExcludedSum = o.GetTotal()  (tax not in price)
+   630→   630→            transaction.UpdateAccounts(ticket.GetTicketAccounts()) # [AccountTransaction.cs]
+   631→   631→            transaction.UpdateAmount(amount, ticket.ExchangeRate)   # [AccountTransaction.cs:193]
+   632→   632→
+   633→   633→    # 2. TAX AccountTransactions (one per TaxTemplate.AccountTransactionType.Id)
+   634→   634→    for taxId in ticket.GetTaxIds():                                # [Ticket.cs:648]
+   635→   635→        transaction = ticket.TransactionDocument.AccountTransactions
+   636→   636→            .Single(t => t.AccountTransactionTypeId == taxId)
+   637→   637→        transaction.UpdateAccounts(ticket.GetTicketAccounts())
+   638→   638→        # Source: Ticket.GetTaxTotal(taxId, preTaxServices, plainSum)  [Ticket.cs:691]
+   639→   639→        # NOTE: This uses MidpointRounding.AwayFromZero (different from CalculateTax!)
+   640→   640→        taxAmountForTemplate = Σ ticket.Orders.Sum(o =>
+   641→   641→            o.GetTotalTaxAmount(ticket.TaxIncluded, plainSum, preTaxServices, taxId))
+   642→   642→        taxAmountForTemplate = roundAway(taxAmountForTemplate, 2)   # AWAY FROM ZERO (schoolbook)
+   643→   643→        transaction.UpdateAmount(taxAmountForTemplate, ticket.ExchangeRate)
+   644→   644→
+   645→   645→    return {
+   646→   646→        plainSum,
+   647→   647→        preTaxServices,
+   648→   648→        tax,
+   649→   649→        postTaxServices,
+   650→   650→        totalAmount:     ticket.TotalAmount,
+   651→   651→        remainingAmount: ticket.RemainingAmount,
+   652→   652→        paymentAmount,
+   653→   653→        changePaymentAmt,
+   654→   654→    }
+   655→   655→```
+   656→   656→
+   657→   657→### 4.3 `computeCalculationAmount(calc, sum, currentSum)` — THE 5 calculation types
+   658→   658→
+   659→   659→```pseudo
+   660→   660→# Source: Calculation.Update(sum, currentSum, decimals)  [Calculation.cs:22]
+   661→   661→function computeCalculationAmount(calc, sum, currentSum):
+   662→   662→    switch calc.CalculationType:
+   663→   663→        case 0:
+   664→   664→            # PERCENTAGE OF PLAIN SUM
+   665→   665→            # Example: 10% discount on ticket total
+   666→   666→            return calc.Amount > 0 ? (sum * calc.Amount) / 100 : 0
+   667→   667→
+   668→   668→        case 1:
+   669→   669→            # PERCENTAGE OF RUNNING SUM (compounded — sees previous calc's effect)
+   670→   670→            # Example: 10% service charge applied AFTER a discount was already subtracted
+   671→   671→            return calc.Amount > 0 ? (currentSum * calc.Amount) / 100 : 0
+   672→   672→
+   673→   673→        case 3:
+   674→   674→            # TARGET AMOUNT (final total should be exactly `Amount`)
+   675→   675→            # Example: "Round to $50" by setting target
+   676→   676→            if calc.Amount == currentSum:
+   677→   677→                calc.Amount = 0
+   678→   678→                return 0
+   679→   679→            if currentSum > 0 and calc.DecreaseAmount and calc.Amount > currentSum:
+   680→   680→                # Discount cannot exceed the current sum — zero it out
+   681→   681→                calc.Amount = 0
+   682→   682→                return 0
+   683→   683→            if currentSum > 0 and (not calc.DecreaseAmount) and calc.Amount < currentSum:
+   684→   684→                # Surcharge cannot be less than current sum — zero it out
+   685→   685→                calc.Amount = 0
+   686→   686→                return 0
+   687→   687→            return calc.Amount - currentSum
+   688→   688→
+   689→   689→        case 4:
+   690→   690→            # ROUNDING (to nearest multiple of `Amount`)
+   691→   691→            # Example: round to nearest 0.05 (nickel rounding for cash)
+   692→   692→            if calc.Amount > 0:
+   693→   693→                # Round to nearest multiple (AwayFromZero for the .5 case)
+   694→   694→                result = (roundAway(currentSum / calc.Amount, 0) * calc.Amount) - currentSum
+   695→   695→            else:
+   696→   696→                # Amount < 0: always round DOWN (truncate)
+   697→   697→                result = (trunc(currentSum / calc.Amount) * calc.Amount) - currentSum
+   698→   698→            if calc.DecreaseAmount and result > 0: result = 0
+   699→   699→            if (not calc.DecreaseAmount) and result < 0: result = 0
+   700→   700→            return result
+   701→   701→
+   702→   702→        case 2:
+   703→   703→            # Unused — falls through to default
+   704→   704→        case 5:
+   705→   705→            # SCRIPTED — Amount is pre-computed by ExpressionService
+   706→   706→            # before RecalculateTicket() is called.
+   707→   707→            # Source: TicketService.cs:333-334
+   708→   708→            #   calc.Amount = _expressionService.EvalCommand(
+   709→   709→            #       "Calculation", "_" + calc.Name, {Ticket = ticket}, 0m)
+   710→   710→        default:
+   711→   711→            # FIXED AMOUNT (manual)
+   712→   712→            return calc.Amount
+   713→   713→```
+   714→   714→
+   715→   715→### 4.4 `TaxValue.GetTax(...)` — THE tax formula
+   716→   716→
+   717→   717→```pseudo
+   718→   718→# Source: TaxValue.cs:41-65
+   719→   719→function TaxValue.GetTax(taxIncluded, price, totalRate):
+   720→   720→    if taxIncluded and totalRate > 0:
+   721→   721→        # Tax is INCLUDED in the price — extract it
+   722→   722→        # totalRate = sum of ALL applicable tax rates on this order
+   723→   723→        # (needed because the price includes all taxes, must distribute proportionally)
+   724→   724→        if Rounding > 0:
+   725→   725→            # Per-line rounding with MidpointRounding.AwayFromZero
+   726→   726→            return roundAway((price * TaxRate) / (100 + totalRate), Rounding)
+   727→   727→        else:
+   728→   728→            # No per-line rounding — full precision kept
+   729→   729→            return (price * TaxRate) / (100 + totalRate)
+   730→   730→    elif TaxRate > 0:
+   731→   731→        # Tax ADDED ON TOP of the price
+   732→   732→        # (no per-line rounding — CalculationType=4 rounding happens at ticket level)
+   733→   733→        return (price * TaxRate) / 100
+   734→   734→    else:
+   735→   735→        return 0
+   736→   736→
+   737→   737→function TaxValue.GetTaxAmount(taxIncluded, price, totalRate, plainSum, preTaxServices):
+   738→   738→    # Source: TaxValue.cs:59-65
+   739→   739→    if preTaxServices != 0:
+   740→   740→        # Proportionally allocate pre-tax services to this order's taxable price
+   741→   741→        price += (price * preTaxServices) / plainSum
+   742→   742→    return GetTax(taxIncluded, price, totalRate)
+   743→   743→```
+   744→   744→
+   745→   745→### 4.5 `TicketService.RecalculateTicket(ticket)` — the wrapper
+   746→   746→
+   747→   747→```pseudo
+   748→   748→# Source: TicketService.cs:330
+   749→   749→function TicketService.RecalculateTicket(ticket):
+   750→   750→    previousTotal = ticket.TotalAmount
+   751→   751→
+   752→   752→    # Refresh scripted (type 5) calculations first
+   753→   753→    ticket.Calculations
+   754→   754→        .Where(c => c.CalculationType == 5)
+   755→   755→        .ToList()
+   756→   756→        .ForEach(c => c.Amount = _expressionService.EvalCommand(
+   757→   757→            "Calculation", "_" + c.Name, {Ticket: ticket}, 0m))
+   758→   758→
+   759→   759→    ticket.Recalculate()    # [Ticket.cs:656] — calls GetSum, CalculateServices, CalculateTax, etc.
+   760→   760→
+   761→   761→    if previousTotal != ticket.TotalAmount:
+   762→   762→        _applicationState.NotifyEvent("TicketTotalChanged", {
+   763→   763→            Ticket,
+   764→   764→            PreviousTotal:    previousTotal,
+   765→   765→            TicketTotal:      ticket.GetSum(),
+   766→   766→            DiscountTotal:    ticket.GetPreTaxServicesTotal(),
+   767→   767→            PaymentTotal:     ticket.GetPaymentAmount(),
+   768→   768→            RemainingAmount:  ticket.GetRemainingAmount(),
+   769→   769→        })
+   770→   770→```
+   771→   771→
+   772→   772→---
+   773→   773→
+   774→   774→## 5. Payment Flow
+   775→   775→
+   776→   776→**Source:** `PaymentEditorViewModel.cs:97` → `PaymentEditor.cs:58` → `TicketService.cs:199` → `Ticket.cs:251`.
+   777→   777→
+   778→   778→```pseudo
+   779→   779→# USER opens payment screen (typically by clicking "Pay" button which fires
+   780→   780→# the "DisplayPaymentScreen" automation action OR PosViewModel navigates).
+   781→   781→
+   782→   782→function PaymentEditorViewModel.Prepare(ticket):                   # [PaymentEditorViewModel.cs:170]
+   783→   783→    _paymentEditor.SelectedTicket = ticket
+   784→   784→    _orderSelectorViewModel.UpdateTicket(ticket)      # for partial payments
+   785→   785→    _numberPadViewModel.ResetValues()
+   786→   786→    _numberPadViewModel.LastTenderedAmount = PaymentDueAmount
+   787→   787→    _commandButtonsViewModel.Update()                 # refresh payment type buttons
+   788→   788→    _foreignCurrencyButtonsViewModel.UpdateCurrencyButtons()
+   789→   789→
+   790→   790→# USER taps a PaymentType button.
+   791→   791→function PaymentEditorViewModel.OnMakePayment(paymentType):        # [PaymentEditorViewModel.cs:97]
+   792→   792→    if !CanMakePayment(paymentType): return
+   793→   793→    SubmitPayment(paymentType)
+   794→   794→
+   795→   795→function CanMakePayment(paymentType):                              # [PaymentEditorViewModel.cs:68]
+   796→   796→    if SelectedTicket.IsClosed: return false
+   797→   797→    if tenderedValue == 0: return false
+   798→   798→    if SelectedTicket.GetRemainingAmount() == 0: return false
+   799→   799→    if AccountMode and tendered > paymentDue: return false    # need an account attached
+   800→   800→    if paymentType.Account == null and !CanAcceptAccountTxnType(paymentType): return false
+   801→   801→    return true
+   802→   802→
+   803→   803→function SubmitPayment(paymentType):                              # [PaymentEditorViewModel.cs:97]
+   804→   804→    paymentDue = _tenderedValueViewModel.GetPaymentDueValue()
+   805→   805→    tendered   = _tenderedValueViewModel.GetTenderedValue()
+   806→   806→
+   807→   807→    if abs(paymentDue - SelectedTicket.GetRemainingAmount()) <= 0.01:
+   808→   808→        paymentDue = SelectedTicket.GetRemainingAmount()
+   809→   809→    if tendered == 0 or abs(paymentDue - tendered) <= 0.01:
+   810→   810→        tendered = paymentDue
+   811→   811→
+   812→   812→    if tendered <= paymentDue:
+   813→   813→        # Exact or partial payment — no change needed
+   814→   814→        SubmitPaymentAmount(paymentType, null, paymentDue, tendered)
+   815→   815→        return
+   816→   816→
+   817→   817→    # tendered > paymentDue — change needed
+   818→   818→    changeTemplates = GetChangePaymentTypes(paymentType)            # [PaymentEditorViewModel.cs:163]
+   819→   819→        # = _applicationState.GetChangePaymentTypes()
+   820→   820→        #     .Where(c => c.AccountTransactionType.TargetAccountTypeId
+   821→   821→        #                 == paymentType.AccountTransactionType.SourceAccountTypeId)
+   822→   822→    if changeTemplates.Count < 2:
+   823→   823→        SubmitPaymentAmount(paymentType, changeTemplates.SingleOrDefault(),
+   824→   824→                            paymentDue, tendered)
+   825→   825→    else:
+   826→   826→        # Show modal: user picks which change payment type
+   827→   827→        _changeTemplatesViewModel.Display(changeTemplates, tendered, paymentDue,
+   828→   828→                                           paymentType, _selectChangePaymentTypeCommand)
+   829→   829→        # On selection → OnSelectChangePaymentType → SubmitPaymentAmount(...)
+   830→   830→
+   831→   831→function SubmitPaymentAmount(paymentType, changeTemplate, paymentDue, tendered):
+   832→   832→                                                                  # [PaymentEditorViewModel.cs:131]
+   833→   833→    returningAmount = tendered - paymentDue    # change to give back
+   834→   834→    paidAmount = (changeTemplate == null)
+   835→   835→        ? tendered - returningAmount
+   836→   836→        : tendered
+   837→   837→    paymentAmount = paymentDue > paidAmount
+   838→   838→        ? paymentDue - paidAmount
+   839→   839→        : _paymentEditor.GetRemainingAmount()
+   840→   840→
+   841→   841→    _orderSelectorViewModel.UpdateSelectedTicketPaidItems()    # for line-item payments
+   842→   842→    _paymentEditor.UpdateTicketPayment(paymentType, changeTemplate,
+   843→   843→                                        paymentDue, paidAmount, tendered)   # [PaymentEditor.cs:58]
+   844→   844→    _tenderedValueViewModel.UpdatePaymentAmount(paymentAmount)
+   845→   845→
+   846→   846→    if returningAmount == 0 and GetRemainingAmount() == 0:
+   847→   847→        OnClosePaymentScreen("")                               # [PaymentEditorViewModel.cs:91]
+   848→   848→    else:
+   849→   849→        if returningAmount > 0:
+   850→   850→            _returningAmountViewModel.PublishEvent("Activate")
+   851→   851→        if paymentDue <= paidAmount:
+   852→   852→            _orderSelectorViewModel.PersistSelectedItems()
+   853→   853→        _numberPadViewModel.ResetValues()
+   854→   854→
+   855→   855→function PaymentEditor.UpdateTicketPayment(paymentType, changeTemplate,
+   856→   856→                                            paymentDue, paidAmount, tendered):
+   857→   857→                                                                  # [PaymentEditor.cs:58]
+   858→   858→    paymentAccount = paymentType.Account
+   859→   859→        ?? _ticketService.GetAccountForPayment(ticket, paymentType)  # [TicketService.cs:230]
+   860→   860→        # = first TicketEntity whose EntityType.AccountTypeId matches
+   861→   861→        #   paymentType.AccountTransactionType.TargetAccountTypeId
+   862→   862→
+   863→   863→    if paymentDue > ticket.GetRemainingAmount() and paidAmount > ticket.GetRemainingAmount():
+   864→   864→        # ---- Account-mode: split between ticket balance and account balance ----
+   865→   865→        activeAccount = _accountBalances.GetActiveAccount()
+   866→   866→        if activeAccount != null:
+   867→   867→            ticketAmount  = ticket.GetRemainingAmount()
+   868→   868→            accountAmount = paidAmount - ticketAmount
+   869→   869→            accountBalance = getAccountBalance(activeAccount.Id)
+   870→   870→            if accountAmount > accountBalance:
+   871→   871→                accountAmount = accountBalance
+   872→   872→            if ticketAmount > 0:
+   873→   873→                _ticketService.AddPayment(ticket, paymentType, paymentAccount,
+   874→   874→                                          ticketAmount, tendered - accountAmount)
+   875→   875→            if accountAmount > 0:
+   876→   876→                _ticketService.AddAccountTransaction(ticket, activeAccount, paymentAccount,
+   877→   877→                                                     accountAmount, ticket.ExchangeRate)
+   878→   878→        _accountBalances.Refresh()
+   879→   879→    else:
+   880→   880→        # ---- Normal payment ----
+   881→   881→        _ticketService.AddPayment(ticket, paymentType, paymentAccount, paidAmount, tendered)
+   882→   882→        if paidAmount > paymentDue and changeTemplate != null:
+   883→   883→            _ticketService.AddChangePayment(ticket, changeTemplate, changeTemplate.Account,
+   884→   884→                                             paidAmount - paymentDue)   # [TicketService.cs:218]
+   885→   885→
+   886→   886→function TicketService.AddPayment(ticket, paymentType, account, amount, tendered):
+   887→   887→                                                                  # [TicketService.cs:199]
+   888→   888→    if account == null: return
+   889→   889→    remainingAmount = ticket.GetRemainingAmount()
+   890→   890→    changeAmount = tendered > remainingAmount ? tendered - remainingAmount : 0
+   891→   891→
+   892→   892→    # Source: Ticket.AddPayment  [Ticket.cs:251]
+   893→   893→    exchangeRate = GetExchangeRate(account)    # 1 if no foreign currency
+   894→   894→    userId = _applicationState.CurrentLoggedInUser.Id
+   895→   895→
+   896→   896→    # Create AccountTransaction (double-entry)
+   897→   897→    # Source: AccountTransactionDocument.AddNewTransaction  [AccountTransactionDocument.cs:33]
+   898→   898→    transaction = new AccountTransaction {
+   899→   899→        Name = paymentType.AccountTransactionType.Name,
+   900→   900→        AccountTransactionTypeId = paymentType.AccountTransactionType.Id,
+   901→   901→        SourceAccountTypeId = paymentType.AccountTransactionType.SourceAccountTypeId,
+   902→   902→        TargetAccountTypeId = paymentType.AccountTransactionType.TargetAccountTypeId,
+   903→   903→        SourceTransactionValue = new AccountTransactionValue {
+   904→   904→            AccountId: paymentType.AccountTransactionType.DefaultSourceAccountId,
+   905→   905→            AccountTypeId: paymentType.AccountTransactionType.SourceAccountTypeId,
+   906→   906→        },
+   907→   907→        TargetTransactionValue = new AccountTransactionValue {
+   908→   908→            AccountId: paymentType.AccountTransactionType.DefaultTargetAccountId,
+   909→   909→            AccountTypeId: paymentType.AccountTransactionType.TargetAccountTypeId,
+   910→   910→        },
+   911→   911→    }
+   912→   912→    transaction.UpdateAccounts(ticket.GetTicketAccounts(account))   # override defaults with ticket entities
+   913→   913→    transaction.UpdateAmount(amount, exchangeRate)                  # [AccountTransaction.cs:193]
+   914→   914→        # if amount < 0 and CanReverse(): transaction.Reverse()      [AccountTransaction.cs:177]
+   915→   915→        #   swaps SourceTransactionValue <-> TargetTransactionValue
+   916→   916→        #   sets IsReversed = true
+   917→   917→        # transaction.Amount = abs(amount)
+   918→   918→        # transaction.Amount = roundAway(amount, 2)  # AWAY FROM ZERO
+   919→   919→        # SourceTransactionValue: Debit=0, Credit=amount
+   920→   920→        # TargetTransactionValue: Credit=0, Debit=amount
+   921→   921→    transaction.UpdateDescription(transaction.Name + " [" + account.Name + "]")
+   922→   922→
+   923→   923→    payment = new Payment {
+   924→   924→        AccountTransaction: transaction,
+   925→   925→        Amount: amount,
+   926→   926→        Name: account.Name,
+   927→   927→        PaymentTypeId: paymentType.Id,
+   928→   928→        UserId: userId,
+   929→   929→        Date: DateTime.Now,
+   930→   930→    }
+   931→   931→    ticket.Payments.Add(payment)
+   932→   932→    ticket.TransactionDocument.AccountTransactions.Add(transaction)
+   933→   933→    ticket.LastPaymentDate = DateTime.Now
+   934→   934→    ticket.RemainingAmount = ticket.GetRemainingAmount()
+   935→   935→
+   936→   936→    # Fire automation event
+   937→   937→    # Source: TicketService.cs:205-215
+   938→   938→    _applicationState.NotifyEvent("PaymentProcessed", {
+   939→   939→        Ticket,
+   940→   940→        PaymentTypeName: paymentType.Name,
+   941→   941→        TenderedAmount: tendered,
+   942→   942→        ProcessedAmount: tendered - changeAmount,
+   943→   943→        ChangeAmount: changeAmount,
+   944→   944→        SelectedQuantity: ticket.PaidItems.Sum(p => p.Quantity),
+   945→   945→        RemainingAmount: ticket.GetRemainingAmount(),
+   946→   946→    })
+   947→   947→
+   948→   948→function TicketService.AddChangePayment(ticket, changePaymentType, account, amount):
+   949→   949→                                                                  # [TicketService.cs:218]
+   950→   950→    # Mirrors AddPayment but creates a ChangePayment row + ChangePaymentType.AccountTransactionType
+   951→   951→    exchangeRate = GetExchangeRate(account)
+   952→   952→    userId = _applicationState.CurrentLoggedInUser.Id
+   953→   953→
+   954→   954→    transaction = new AccountTransaction { ... }     # same pattern as AddPayment
+   955→   955→    transaction.UpdateAccounts(ticket.GetTicketAccounts(account))
+   956→   956→    transaction.UpdateAmount(amount, exchangeRate)
+   957→   957→    transaction.UpdateDescription(transaction.Name + " [" + account.Name + "]")
+   958→   958→
+   959→   959→    changePayment = new ChangePayment {
+   960→   960→        AccountTransaction: transaction,
+   961→   961→        Amount: amount,
+   962→   962→        Name: account.Name,
+   963→   963→        ChangePaymentTypeId: changePaymentType.Id,
+   964→   964→        UserId: userId,
+   965→   965→    }
+   966→   966→    ticket.ChangePayments.Add(changePayment)
+   967→   967→    ticket.TransactionDocument.AccountTransactions.Add(transaction)
+   968→   968→```
+   969→   969→
+   970→   970→### 5.1 Change calculation
+   971→   971→
+   972→   972→```pseudo
+   973→   973→changeAmount = tenderedAmount > remainingAmount
+   974→   974→    ? tenderedAmount - remainingAmount
+   975→   975→    : 0
+   976→   976→# Source: TicketService.cs:203
+   977→   977→```
+   978→   978→
+   979→   979→### 5.2 Table release
+   980→   980→
+   981→   981→**No explicit "release table" call.** The Entity (table) is considered free when no open ticket references it:
+   982→   982→
+   983→   983→```pseudo
+   984→   984→# Source: TicketServiceBase.cs:45
+   985→   985→function GetOpenTicketIds(entityId):
+   986→   986→    return _ticketDao.GetOpenTickets()
+   987→   987→        .Where(t => t.TicketEntities.Any(te => te.EntityId == entityId))
+   988→   988→        .Select(t => t.Id)
+   989→   989→        .ToList()
+   990→   990→```
+   991→   991→
+   992→   992→Once `Ticket.IsClosed = true`, the table is automatically released by the next call to `GetOpenTickets(entityId)`.
+   993→   993→
+   994→   994→---
+   995→   995→
+   996→   996→## 6. Refund / Void / Split Logic
+   997→   997→
+   998→   998→### 6.1 Void Ticket Item
+   999→   999→
+  1000→  1000→```pseudo
+  1001→  1001→function voidTicketItem(ticket, order):
+  1002→  1002→    # Two cases: unsaved order (Id == 0) vs saved order (Id > 0)
+  1003→  1003→    # Source: TicketViewModel.OnCancelItemCommand  [TicketViewModel.cs:540]
+  1004→  1004→    # Source: TicketService.CancelSelectedOrders   [TicketService.cs:609]
+  1005→  1005→    # Source: Ticket.CancelOrders                  [Ticket.cs:473]
+  1006→  1006→
+  1007→  1007→    if order.Id == 0:
+  1008→  1008→        # ---- Case A: Unsaved order — physically remove ----
+  1009→  1009→        notifyEvent("OrderCancelled", {
+  1010→  1010→            Ticket: ticket, Order: order,
+  1011→  1011→            MenuItemName: order.MenuItemName, Quantity: order.Quantity
+  1012→  1012→        })
+  1013→  1013→
+  1014→  1014→        ticket.UnLock()                                # [Ticket.cs:77]
+  1015→  1015→        ticket.RemoveOrder(order)                      # [Ticket.cs:269]
+  1016→  1016→            # ticket.Orders.Remove(order)
+  1017→  1017→            # txnId = order.AccountTransactionTypeId
+  1018→  1018→            # if no other Order in ticket.Orders uses txnId:
+  1019→  1019→            #     foreach at in TransactionDocument.AccountTransactions
+  1020→  1020→            #              .Where(a => a.AccountTransactionTypeId == txnId):
+  1021→  1021→            #         TransactionDocument.AccountTransactions.Remove(at)
+  1022→  1022→        recalculateTicket(ticket)
+  1023→  1023→    else:
+  1024→  1024→        # ---- Case B: Saved order — flag as Cancelled, do NOT remove ----
+  1025→  1025→        # SambaPOS keeps saved orders for audit.
+  1026→  1026→
+  1027→  1027→        # Option B1: Set OrderState "Status=Cancelled"
+  1028→  1028→        # Source: TicketService.UpdateOrderStates  [TicketService.cs:526]
+  1029→  1029→        order.SetStateValue(
+  1030→  1030→            groupName: "Status",
+  1031→  1031→            groupOrder: 99,
+  1032→  1032→            state: "Cancelled",
+  1033→  1033→            stateOrder: 99,
+  1034→  1034→            stateValue: "",
+  1035→  1035→            userId: currentLoggedInUser.Id
+  1036→  1036→        )   # Source: Order.SetStateValue  [Order.cs:276]
+  1037→  1037→            # sv = OrderStateValues.SingleOrDefault(s => s.StateName == "Status")
+  1038→  1038→            # if sv == null: OrderStateValues.Add(new {StateName:"Status", State:"Cancelled"})
+  1039→  1039→            # else: sv.State = "Cancelled"
+  1040→  1040→            # sv.LastUpdateTime = DateTime.Now
+  1041→  1041→            # OrderStates = JSON serialize OrderStateValues (short DataMember names)
+  1042→  1042→
+  1043→  1043→        notifyEvent("OrderStateUpdated", {
+  1044→  1044→            Ticket, Order, StateName: "Status", State: "Cancelled", PreviousState: null
+  1045→  1045→        })
+  1046→  1046→
+  1047→  1047→        # Option B2 (alternative): set CalculatePrice = false
+  1048→  1048→        # This makes GetTotal() return 0, excluding it from plainSum.
+  1049→  1049→        # order.CalculatePrice = false
+  1050→  1050→
+  1051→  1051→        recalculateTicket(ticket)
+  1052→  1052→
+  1053→  1053→function canCancelSelectedOrders(ticket, selectedOrders):
+  1054→  1054→    # Source: Ticket.CanCancelSelectedOrders  [Ticket.cs:487]
+  1055→  1055→    if selectedOrders.length == 0: return false
+  1056→  1056→    if not selectedOrders.All(o => not o.Locked): return false
+  1057→  1057→    if selectedOrders.Any(o => o.Id > 0): return false  # saved orders can't be removed
+  1058→  1058→    if selectedOrders.Any(o => not ticket.Orders.Contains(o)): return false
+  1059→  1059→    return true
+  1060→  1060→```
+  1061→  1061→
+  1062→  1062→### 6.2 Void Ticket
+  1063→  1063→
+  1064→  1064→```pseudo
+  1065→  1065→function voidTicket(ticket):
+  1066→  1066→    # NO single VoidTicket method. Pattern:
+  1067→  1067→    # 1. Re-open the ticket
+  1068→  1068→    ticket.UnLock()    # [Ticket.cs:77]
+  1069→  1069→    # 2. Reverse all payments
+  1070→  1070→    for payment in ticket.Payments:
+  1071→  1071→        payment.AccountTransaction.Reverse()         # [AccountTransaction.cs:177]
+  1072→  1072→            # swaps SourceTransactionValue <-> TargetTransactionValue
+  1073→  1073→            # sets IsReversed = true
+  1074→  1074→            # debits/credits flip
+  1075→  1075→    # 3. Optionally set ticket state "Status=Refunded"
+  1076→  1076→    ticket.SetStateValue("Status", 0, "Refunded", 0, "", userId)
+  1077→  1077→    # 4. Persist
+  1078→  1078→    TicketService.CloseTicket(ticket)                # [TicketService.cs:139]
+  1079→  1079→```
+  1080→  1080→
+  1081→  1081→In practice, this is exposed via a custom automation rule (no built-in UI button).
+  1082→  1082→
+  1083→  1083→### 6.3 Split Ticket
+  1084→  1084→
+  1085→  1085→**Implemented as MoveOrders to targetTicketId=0.** No separate `SplitTicket` method.
+  1086→  1086→
+  1087→  1087→```pseudo
+  1088→  1088→function splitTicket(ticket, itemsToMove):
+  1089→  1089→    # itemsToMove: list of { order, selectedQuantity }
+  1090→  1090→    # Source: TicketService.MoveOrders  [TicketService.cs:302]
+  1091→  1091→    # Source: PosViewModel.OnTicketEventReceived(MoveSelectedOrders)  [PosViewModel.cs:178]
+  1092→  1092→
+  1093→  1093→    # ---- Step 1: Extract selected orders (handles partial-quantity splits) ----
+  1094→  1094→    # Source: Ticket.ExtractSelectedOrders  [Ticket.cs:705]
+  1095→  1095→    ordersToMove = []
+  1096→  1096→    for item in itemsToMove:
+  1097→  1097→        order = item.order
+  1098→  1098→        if item.selectedQuantity > 0 and item.selectedQuantity < order.Quantity:
+  1099→  1099→            # Partial quantity — clone the order
+  1100→  1100→            # Source: Ticket.FixOrder  [Ticket.cs:734]
+  1101→  1101→            clonedOrder = cloneOrder(ticket, order)  # [Ticket.cs:532]
+  1102→  1102→                # = ObjectCloner.Clone(order)
+  1103→  1103→                # clonedOrder.CreatedDateTime = DateTime.Now
+  1104→  1104→                # clonedOrder.Quantity = 0
+  1105→  1105→                # clonedOrder.ResetSelectedQuantity()
+  1106→  1106→                # ticket.Orders.Add(clonedOrder)
+  1107→  1107→            clonedOrder.Id = 0
+  1108→  1108→            clonedOrder.Quantity = item.selectedQuantity
+  1109→  1109→            clonedOrder.ResetSelectedQuantity()
+  1110→  1110→            order.Quantity -= item.selectedQuantity
+  1111→  1111→            order.ResetSelectedQuantity()
+  1112→  1112→            ordersToMove.append(clonedOrder)
+  1113→  1113→        else:
+  1114→  1114→            ordersToMove.append(order)
+  1115→  1115→
+  1116→  1116→    # ---- Step 2: Move orders ----
+  1117→  1117→    return moveOrders(ticket, ordersToMove, targetTicketId = 0)
+  1118→  1118→
+  1119→  1119→function moveOrders(sourceTicket, selectedOrders, targetTicketId):
+  1120→  1120→    # Source: TicketService.MoveOrders  [TicketService.cs:302]
+  1121→  1121→    notifyEvent("TicketMoving", {Ticket: sourceTicket})
+  1122→  1122→    for order in selectedOrders:
+  1123→  1123→        notifyEvent("OrderMoving", {
+  1124→  1124→            Ticket: sourceTicket, Order: order,
+  1125→  1125→            MenuItemName: order.MenuItemName, Quantity: order.Quantity
+  1126→  1126→        })
+  1127→  1127→
+  1128→  1128→    # Clone orders (deep copy)
+  1129→  1129→    clonedOrders = selectedOrders.map(o => ObjectCloner.Clone2(o))
+  1130→  1130→
+  1131→  1131→    # Remove from source
+  1132→  1132→    # Source: Ticket.RemoveOrders  [Ticket.cs:748]
+  1133→  1133→    for order in selectedOrders:
+  1134→  1134→        sourceTicket.RemoveOrder(order)   # [Ticket.cs:269]
+  1135→  1135→
+  1136→  1136→    # Save source ticket (closes it with fewer orders)
+  1137→  1137→    closeTicket(sourceTicket)             # [TicketService.cs:139]
+  1138→  1138→
+  1139→  1139→    # Open (or create) target ticket
+  1140→  1140→    targetTicket = openTicket(targetTicketId)   # [TicketService.cs:111]
+  1141→  1141→        # if targetTicketId == 0: CreateTicket() — new ticket
+  1142→  1142→        # else: _ticketDao.OpenTicket(targetTicketId)
+  1143→  1143→
+  1144→  1144→    # Add cloned orders to target
+  1145→  1145→    for clonedOrder in clonedOrders:
+  1146→  1146→        clonedOrder.TicketId = 0
+  1147→  1147→        targetTicket.Orders.Add(clonedOrder)
+  1148→  1148→        notifyEvent("OrderMoved", {
+  1149→  1149→            Ticket: targetTicket, Order: clonedOrder,
+  1150→  1150→            MenuItemName: clonedOrder.MenuItemName, Quantity: clonedOrder.Quantity,
+  1151→  1151→            OldTicketNumber: sourceTicket.TicketNumber,
+  1152→  1152→        })
+  1153→  1153→
+  1154→  1154→    # Refresh AccountTransactions on target
+  1155→  1155→    # Source: TicketService.RefreshAccountTransactions  [TicketService.cs:509]
+  1156→  1156→    refreshAccountTransactions(targetTicket)
+  1157→  1157→        # foreach orderGroup in targetTicket.Orders.GroupBy(o => o.AccountTransactionTypeId):
+  1158→  1158→        #     if TransactionDocument has no AccountTransaction with that Id:
+  1159→  1159→        #         transaction = TransactionDocument.AddNewTransaction(template, accounts)
+  1160→  1160→        #         transaction.Reversable = false
+  1161→  1161→        # foreach taxId in targetTicket.GetTaxIds():
+  1162→  1162→        #     TransactionDocument.AddSingletonTransaction(taxId, taxTemplate, accounts)
+  1163→  1163→
+  1164→  1164→    targetTicket.LastOrderDate = DateTime.Now
+  1165→  1165→    notifyEvent("TicketMoved", {Ticket: targetTicket, OldTicketNumber: sourceTicket.TicketNumber})
+  1166→  1166→
+  1167→  1167→    # Save target ticket
+  1168→  1168→    result = closeTicket(targetTicket)   # [TicketService.cs:139]
+  1169→  1169→        # assigns TicketNumber if new
+  1170→  1170→        # calls MergeOrdersAndUpdateOrderNumbers if orders have OrderNumber == 0
+  1171→  1171→        # calls LockTicket
+  1172→  1172→        # _ticketDao.Save(targetTicket)
+  1173→  1173→
+  1174→  1174→    return result.TicketId
+  1175→  1175→```
+  1176→  1176→
+  1177→  1177→### 6.4 Refund
+  1178→  1178→
+  1179→  1179→Handled by the same `AddPayment` flow with a negative amount or a specialized `PaymentType` whose `AccountTransactionType` is reversed:
+  1180→  1180→
+  1181→  1181→```pseudo
+  1182→  1182→function refundPayment(ticket, paymentType, amount):
+  1183→  1183→    # Option A: Reverse an existing payment
+  1184→  1184→    originalPayment = findPaymentToRefund(ticket)
+  1185→  1185→    originalPayment.AccountTransaction.Reverse()         # [AccountTransaction.cs:177]
+  1186→  1186→    ticket.RemovePayment(originalPayment)                 # [Ticket.cs:280]
+  1187→  1187→        # Payments.Remove(originalPayment)
+  1188→  1188→        # TransactionDocument.AccountTransactions.Remove(originalPayment.AccountTransaction)
+  1189→  1189→    recalculateTicket(ticket)
+  1190→  1190→
+  1191→  1191→    # Option B: Add a "Refund" payment type (negative direction)
+  1192→  1192→    addPayment(ticket, refundPaymentType, account, -amount, -amount)
+  1193→  1193→        # Ticket.AddPayment calls transaction.UpdateAmount(-amount, ...)
+  1194→  1194→        # which triggers Auto-Reverse if amount < 0 and CanReverse()
+  1195→  1195→        # [AccountTransaction.cs:195]
+  1196→  1196→```
+  1197→  1197→
+  1198→  1198→### 6.5 Merge Tickets
+  1199→  1199→
+  1200→  1200→```pseudo
+  1201→  1201→# Source: TicketService.MergeTickets  [TicketService.cs:254]
+  1202→  1202→function mergeTickets(ticketIds):
+  1203→  1203→    sourceTickets = ticketIds.map(id => openTicket(id))
+  1204→  1204→    newTicket = createTicket()
+  1205→  1205→    for source in sourceTickets:
+  1206→  1206→        # Clone Orders, Payments, ChangePayments, Tags, Entities, Logs
+  1207→  1207→        for order in source.Orders:
+  1208→  1208→            cloned = ObjectCloner.Clone2(order)
+  1209→  1209→            cloned.TicketId = 0
+  1210→  1210→            newTicket.Orders.Add(cloned)
+  1211→  1211→        # ... same for Payments, ChangePayments, Calculations, TicketEntities, TicketTags, ...
+  1212→  1212→        # Close source (effectively deleting its data after merge)
+  1213→  1213→        closeTicket(source)
+  1214→  1214→    result = closeTicket(newTicket)
+  1215→  1215→    return result.TicketId
+  1216→  1216→```
+  1217→  1217→
+  1218→  1218→---
+  1219→  1219→
+  1220→  1220→## 7. CloseTicket Flow
+  1221→  1221→
+  1222→  1222→**Source:** `PosViewModel.cs:456` → `TicketService.cs:139` → `Ticket.cs:522` (LockTicket) → `Ticket.cs:79` (Close).
+  1223→  1223→
+  1224→  1224→```pseudo
+  1225→  1225→function closeTicket(ticket):
+  1226→  1226→    # Source: PosViewModel.CloseTicket  [PosViewModel.cs:456]
+  1227→  1227→    # Source: TicketService.CloseTicket [TicketService.cs:139]
+  1228→  1228→
+  1229→  1229→    # ---- Step 0: Pre-close validation ----
+  1230→  1230→    if not ticket.CanCloseTicket():    # [Ticket.cs:758]
+  1231→  1231→        # CanCloseTicket returns true if:
+  1232→  1232→        #   GetRemainingAmount() == 0
+  1233→  1233→        #   OR TicketEntities.Count > 0
+  1234→  1234→        #   OR Orders.Count == 0
+  1235→  1235→        if not ticket.IsTaggedWithDefinedTags(getTicketTagGroupNames()):
+  1236→  1236→            return
+  1237→  1237→
+  1238→  1238→    # Check for print errors (zero-priced items, missing forced tags)
+  1239→  1239→    # Source: PosViewModel.GetPrintError  [PosViewModel.cs:505]
+  1240→  1240→    if ticket.Orders.Any(o => o.GetValue() == 0 and o.CalculatePrice):
+  1241→  1241→        return error("Can't complete operation when there is zero priced product")
+  1242→  1242→    if not ticket.IsClosed and ticket.Orders.Count > 0:
+  1243→  1243→        for tagGroup in getTicketTagGroups().Where(t => t.ForceValue):
+  1244→  1244→            if not isTaggedWith(ticket, tagGroup.Name):
+  1245→  1245→                return error("Tag {tagGroup.Name} can't be empty")
+  1246→  1246→
+  1247→  1247→    # ---- Step 1: Concurrency check ----
+  1248→  1248→    # Source: TicketDao.CheckConcurrency  [TicketDao.cs:35]
+  1249→  1249→    # Source: TicketConcurrencyValidator  [TicketDao.cs:146]
+  1250→  1250→    result = checkConcurrency(ticket)
+  1251→  1251→        # Compares:
+  1252→  1252→        #   - TicketEntities count and IDs match loaded ticket
+  1253→  1253→        #   - IsClosed matches loaded ticket
+  1254→  1254→        #   - LastPaymentDate matches
+  1255→  1255→        #   - GetSum() matches when RemainingAmount == 0
+  1256→  1256→    if result.ErrorMessage != "":
+  1257→  1257→        return result    # ticket was modified by another terminal
+  1258→  1258→
+  1259→  1259→    canSubmit = not result.changed and ticket.CanSubmit   # CanSubmit = !IsClosed
+  1260→  1260→
+  1261→  1261→    if canSubmit:
+  1262→  1262→        # ---- Step 2: Recalculate ticket ----
+  1263→  1263→        recalculateTicket(ticket)    # [TicketService.cs:330] — see Section 4
+  1264→  1264→
+  1265→  1265→        # ---- Step 3: Fire BeforeTicketClosing event ----
+  1266→  1266→        notifyEvent("BeforeTicketClosing", {
+  1267→  1267→            Ticket, TicketId: ticket.Id,
+  1268→  1268→            RemainingAmount: ticket.RemainingAmount,
+  1269→  1269→            TotalAmount: ticket.TotalAmount,
+  1270→  1270→        })
+  1271→  1271→
+  1272→  1272→        if ticket.Orders.Count > 0:
+  1273→  1273→            ticketType = getTicketTypeById(ticket.TicketTypeId)
+  1274→  1274→
+  1275→  1275→            # ---- Step 4: Assign OrderNumber to new orders ----
+  1276→  1276→            # Source: TicketService.cs:154-158
+  1277→  1277→            if ticket.Orders.Any(o => o.OrderNumber == 0):
+  1278→  1278→                # Atomically get next OrderNumber from Numerator (with optimistic-concurrency retry)
+  1279→  1279→                # Source: SettingService.GetNextNumber  [SettingService.cs:79]
+  1280→  1280→                # Source: SettingDao.GetNextNumber     [SettingDao.cs:40]
+  1281→  1281→                number = getNextNumber(ticketType.OrderNumerator.Id)
+  1282→  1282→                    # numerator.Number++ (atomic)
+  1283→  1283→                    # workspace.CommitChanges()
+  1284→  1284→                    # return numerator.Number
+  1285→  1285→
+  1286→  1286→                # Merge duplicate unlocked orders + assign OrderNumber
+  1287→  1287→                # Source: Ticket.MergeOrdersAndUpdateOrderNumbers  [Ticket.cs:498]
+  1288→  1288→                ticket.MergeOrdersAndUpdateOrderNumbers(number)
+  1289→  1289→                    # LastOrderDate = DateTime.Now
+  1290→  1290→                    # newOrders = ticket.Orders.Where(o => not o.Locked and o.Id == 0)
+  1291→  1291→                    # mergedOrders = OrderMerger.Merge(newOrders)    [OrderMerger.cs:30]
+  1292→  1292→                    #   groups by MenuItemId, PortionName, Price, CalculatePrice,
+  1293→  1293→                    #   IncreaseInventory, DecreaseInventory, OrderStates
+  1294→  1294→                    #   sums Quantity
+  1295→  1295→                    # remove non-merged new orders
+  1296→  1296→                    # foreach order in ticket.Orders.Where(o => o.OrderNumber == 0):
+  1297→  1297→                    #     order.OrderNumber = number
+  1298→  1298→
+  1299→  1299→            # ---- Step 5: Assign TicketNumber if new ----
+  1300→  1300→            # Source: TicketService.cs:160-164
+  1301→  1301→            if ticket.Id == 0:
+  1302→  1302→                updateTicketNumber(ticket, ticketType.TicketNumerator)   # [TicketService.cs:238]
+  1303→  1303→                # Persist new ticket
+  1304→  1304→                # Source: TicketDao.Save  [TicketDao.cs:30]
+  1305→  1305→                _ticketDao.Save(ticket)
+  1306→  1306→
+  1307→  1307→            # ---- Step 6: Fire TicketClosing event ----
+  1308→  1308→            # This event typically triggers automation rules that:
+  1309→  1309→            #   - ExecutePrintJob (print kitchen / receipt)
+  1310→  1310→            #   - MarkTicketAsClosed (set IsClosed=true)
+  1311→  1311→            #   - UpdateTicketState (Status=Closed)
+  1312→  1312→            notifyEvent("TicketClosing", {
+  1313→  1313→                Ticket, TicketId: ticket.Id,
+  1314→  1314→                RemainingAmount: ticket.RemainingAmount,
+  1315→  1315→                TotalAmount: ticket.TotalAmount,
+  1316→  1316→            })
+  1317→  1317→
+  1318→  1318→            # ---- Step 7: Lock ticket ----
+  1319→  1319→            # Source: Ticket.LockTicket  [Ticket.cs:522]
+  1320→  1320→            ticket.LockTicket()
+  1321→  1321→                # foreach order in ticket.Orders.Where(o => not o.Locked):
+  1322→  1322→                #     order.Locked = true
+  1323→  1323→                # if ticket._shouldLock: ticket.IsLocked = true
+  1324→  1324→                # ticket._shouldLock = false
+  1325→  1325→
+  1326→  1326→        # ---- Step 8: Clean up zero-amount account transactions (if closed) ----
+  1327→  1327→        # Source: Ticket.RemoveZeroAmountAccountTransactions  [Ticket.cs:816]
+  1328→  1328→        ticket.RemoveZeroAmountAccountTransactions()
+  1329→  1329→            # if not ticket.IsClosed: return   # no-op unless closed
+  1330→  1330→            # ticket.TransactionDocument.AccountTransactions
+  1331→  1331→            #     .Where(a => a.Amount == 0)
+  1332→  1332→            #     .ToList()
+  1333→  1333→            #     .ForEach(a => ticket.TransactionDocument.AccountTransactions.Remove(a))
+  1334→  1334→
+  1335→  1335→        # ---- Step 9: Save ticket ----
+  1336→  1336→        # Source: TicketService.cs:174-175
+  1337→  1337→        if ticket.Id > 0:
+  1338→  1338→            _ticketDao.Save(ticket)
+  1339→  1339→
+  1340→  1340→    # ---- Step 10: Notify EntityUpdated for each TicketEntity ----
+  1341→  1341→    # Source: TicketService.cs:180-193
+  1342→  1342→    if ticket.Id > 0:
+  1343→  1343→        for ticketEntity in ticket.TicketEntities:
+  1344→  1344→            entityType = getEntityTypeById(ticketEntity.EntityTypeId)
+  1345→  1345→            openCount = getOpenTicketIds(ticketEntity.EntityId).Count()
+  1346→  1346→            notifyEvent("EntityUpdated", {
+  1347→  1347→                EntityTypeId: ticketEntity.EntityTypeId,
+  1348→  1348→                EntityId: ticketEntity.EntityId,
+  1349→  1349→                EntityTypeName: entityType.Name,
+  1350→  1350→                OpenTicketCount: openCount,
+  1351→  1351→            })
+  1352→  1352→            # ^ This is what "releases the table" — when OpenTicketCount == 0,
+  1353→  1353→            #   the table is free.
+  1354→  1354→
+  1355→  1355→    # ---- Step 11: Mark as Closed (typically via automation) ----
+  1356→  1356→    # NOTE: CloseTicket itself does NOT set IsClosed = true!
+  1357→  1357→    # That is done by the MarkTicketAsClosed automation action:
+  1358→  1358→    # Source: MarkTicketAsClosed.cs:15  ticket.Close()
+  1359→  1359→    # Source: Ticket.Close()           [Ticket.cs:79]
+  1360→  1360→    #   if RemainingAmount == 0 and not HasActiveTimers():
+  1361→  1361→    #       IsClosed = true
+  1362→  1362→    #       PaidItems.Clear()
+  1363→  1363→
+  1364→  1364→    result.TicketId = ticket.Id
+  1365→  1365→    return result
+  1366→  1366→```
+  1367→  1367→
+  1368→  1368→---
+  1369→  1369→
+  1370→  1370→## 8. applyDiscount(ticket, discount)
+  1371→  1371→
+  1372→  1372→In SambaPOS V3, "discount" is just a `Calculation` with `DecreaseAmount=true`. There is no separate discount entity.
+  1373→  1373→
+  1374→  1374→```pseudo
+  1375→  1375→function applyDiscount(ticket, discount):
+  1376→  1376→    # discount = {
+  1377→  1377→    #   calculationTypeId, name, calculationMethod (0-5), amount,
+  1378→  1378→    #   includeTax (false for pre-tax discount), decreaseAmount (true),
+  1379→  1379→    #   usePlainSum, sortOrder, accountTransactionTypeId, toggleCalculation
+  1380→  1380→    # }
+  1381→  1381→    # Source: Ticket.AddCalculation(calculationType, amount)  [Ticket.cs:379]
+  1382→  1382→
+  1383→  1383→    # Find existing Calculation with same CalculationTypeId OR same AccountTransactionTypeId
+  1384→  1384→    existing = ticket.Calculations.SingleOrDefault(
+  1385→  1385→        c => c.CalculationTypeId == discount.calculationTypeId)
+  1386→  1386→    if existing == null:
+  1387→  1387→        existing = ticket.Calculations.SingleOrDefault(
+  1388→  1388→            c => c.AccountTransactionTypeId == discount.accountTransactionTypeId)
+  1389→  1389→
+  1390→  1390→    if existing == null:
+  1391→  1391→        # Create new Calculation
+  1392→  1392→        # Source: Ticket.cs:385-396
+  1393→  1393→        calc = new Calculation {
+  1394→  1394→            Amount: discount.amount,
+  1395→  1395→            Name: discount.name,
+  1396→  1396→            CalculationType: discount.calculationMethod,    # 0=%, 1=% running, 3=target, 4=round, 5=script
+  1397→  1397→            CalculationTypeId: discount.calculationTypeId,
+  1398→  1398→            IncludeTax: discount.includeTax,                # false for pre-tax discount
+  1399→  1399→            DecreaseAmount: discount.decreaseAmount,        # true for discount
+  1400→  1400→            UsePlainSum: discount.usePlainSum,
+  1401→  1401→            Order: discount.sortOrder,
+  1402→  1402→            AccountTransactionTypeId: discount.accountTransactionTypeId,
+  1403→  1403→        }
+  1404→  1404→        ticket.Calculations.Add(calc)
+  1405→  1405→        # Add singleton AccountTransaction for this calculation
+  1406→  1406→        # Source: AccountTransactionDocument.AddSingletonTransaction  [AccountTransactionDocument.cs:41]
+  1407→  1407→        ticket.TransactionDocument.AddSingletonTransaction(
+  1408→  1408→            calc.AccountTransactionTypeId,
+  1409→  1409→            discount.accountTransactionType,
+  1410→  1410→            ticket.GetTicketAccounts())
+  1411→  1411→    elif discount.toggleCalculation and existing.Amount == discount.amount:
+  1412→  1412→        # Toggle off
+  1413→  1413→        # Source: Ticket.cs:400-403
+  1414→  1414→        existing.Amount = 0
+  1415→  1415→    else:
+  1416→  1416→        # Update amount on existing
+  1417→  1417→        existing.Amount = discount.amount
+  1418→  1418→        existing.Name = discount.name
+  1419→  1419→
+  1420→  1420→    # If amount == 0 and not a scripted calc, remove it
+  1421→  1421→    # Source: Ticket.cs:406-410
+  1422→  1422→    if existing.Amount == 0 and existing.CalculationType != 5:
+  1423→  1423→        ticket.Calculations.Remove(existing)
+  1424→  1424→        existing.UpdateCalculationTransaction(
+  1425→  1425→            ticket.TransactionDocument, 0, ticket.ExchangeRate)   # [Calculation.cs:57]
+  1426→  1426→
+  1427→  1427→    # Recalculate the whole ticket
+  1428→  1428→    recalculateTicket(ticket)    # invokes Ticket.Recalculate() and notifies TicketTotalChanged
+  1429→  1429→
+  1430→  1430→    # If RemainingAmount goes negative (over-discount), auto-remove all button-header discounts
+  1431→  1431→    # Source: PaymentEditor.UpdateCalculations()  [PaymentEditor.cs:89-107]
+  1432→  1432→    if ticket.GetRemainingAmount() < 0:
+  1433→  1433→        for cSelector in calculationSelectors.Where(s => s.ButtonHeader != ""):
+  1434→  1434→            for ctemplate in cSelector.CalculationTypes:
+  1435→  1435→                while ticket.Calculations.Any(c => c.CalculationTypeId == ctemplate.Id):
+  1436→  1436→                    ticket.AddCalculation(ctemplate, 0)   # forces removal
+  1437→  1437→        recalculateTicket(ticket)
+  1438→  1438→```
+  1439→  1439→
+  1440→  1440→---
+  1441→  1441→
+  1442→  1442→## 9. applyTax(ticket, taxTemplate)
+  1443→  1443→
+  1444→  1444→Taxes are **always** defined per-MenuItem via `TaxTemplate` (referenced from `MenuItem` → `TaxTemplateMap` → `TaxTemplate`). There is no `applyTax(ticket, taxTemplate)` operation — taxes are applied at order-add time and recomputed during `RecalculateTicket`.
+  1445→  1445→
+  1446→  1446→```pseudo
+  1447→  1447→function applyTax(ticket, taxTemplate):
+  1448→  1448→    # TaxTemplate = {
+  1449→  1449→    #   id, name, rate (decimal, e.g. 8.0 for 8%),
+  1450→  1450→    #   rounding (int, 0 = no per-line rounding),
+  1451→  1451→    #   accountTransactionType (the Tax Payable AccountTransactionType)
+  1452→  1452→    # }
+  1453→  1453→    # Source: TaxTemplate.cs:7
+  1454→  1454→
+  1455→  1455→    # Tax is applied per-Order, not per-Ticket.
+  1456→  1456→    # Each Order has TaxValues populated at AddOrder time:
+  1457→  1457→    # Source: Order.UpdateTaxTemplates(taxTemplates)  [Order.cs:360]
+  1458→  1458→    #   TaxValues.Clear()
+  1459→  1459→    #   foreach template in taxTemplates:
+  1460→  1460→    #       TaxValues.Add(new TaxValue(template))   # [TaxValue.cs:15]
+  1461→  1461→    #           TaxRate = template.Rate
+  1462→  1462→    #           Rounding = template.Rounding
+  1463→  1463→    #           TaxTemplateName = template.Name
+  1464→  1464→    #           TaxTempleteAccountTransactionTypeId = template.AccountTransactionType.Id
+  1465→  1465→    #   Taxes = JSON serialize TaxValues (short DataMember names)
+  1466→  1466→
+  1467→  1467→    # If applying taxTemplate to existing orders (e.g. after menu change):
+  1468→  1468→    for order in ticket.Orders:
+  1469→  1469→        if not order.TaxValues.Any(tv => tv.TaxTemplateId == taxTemplate.id):
+  1470→  1470→            order.TaxValues.Add(new TaxValue(taxTemplate))
+  1471→  1471→            order.Taxes = JSON serialize order.TaxValues   # invalidate cache
+  1472→  1472→
+  1473→  1473→        # Ensure singleton AccountTransaction exists for this tax
+  1474→  1474→        # Source: Ticket.AddOrder()  [Ticket.cs:240-243]
+  1475→  1475→        ticket.TransactionDocument.AddSingletonTransaction(
+  1476→  1476→            taxTemplate.AccountTransactionType.Id,
+  1477→  1477→            taxTemplate.AccountTransactionType,
+  1478→  1478→            ticket.GetTicketAccounts())
+  1479→  1479→
+  1480→  1480→    # Recalculate — Ticket.Recalculate() will update the Tax AccountTransaction amounts
+  1481→  1481→    # Source: Ticket.Recalculate()  [Ticket.cs:673-684]
+  1482→  1482→    recalculateTicket(ticket)
+  1483→  1483→```
+  1484→  1484→
+  1485→  1485→---
+  1486→  1486→
+  1487→  1487→## 10. OrderMerger Logic (deduplication of identical orders)
+  1488→  1488→
+  1489→  1489→```pseudo
+  1490→  1490→# Source: OrderMerger.cs:8-28
+  1491→  1491→function OrderMerger.NewMerge(orders):
+  1492→  1492→    result = []
+  1493→  1493→    source = orders.ToList()
+  1494→  1494→
+  1495→  1495→    # Items with Quantity > 1 are NEVER merged (ban all of same MenuItemId)
+  1496→  1496→    bannedMenuItems = source.Where(x => x.Quantity > 1).Select(x => x.MenuItemId).Distinct()
+  1497→  1497→    result.AddRange(source.Where(x => bannedMenuItems.Contains(x.MenuItemId)))
+  1498→  1498→    result.ForEach(x => source.Remove(x))
+  1499→  1499→
+  1500→  1500→    while source.Any():
+  1501→  1501→        order1 = source.First()
+  1502→  1502→        source.Remove(order1)
+  1503→  1503→        matches = source.Where(x => CanMergeOrders(order1, x)).ToList()
+  1504→  1504→        matches.ForEach(x => source.Remove(x))
+  1505→  1505→        order1.Quantity += matches.Sum(x => x.Quantity)
+  1506→  1506→        result.Add(order1)
+  1507→  1507→
+  1508→  1508→    return result
+  1509→  1509→
+  1510→  1510→function CanMergeOrders(order1, order2):
+  1511→  1511→    # Source: OrderMerger.cs:65-77
+  1512→  1512→    if order1.Quantity != order2.Quantity: return false
+  1513→  1513→    if order1.Price != order2.Price: return false
+  1514→  1514→    if order1.MenuItemId != order2.MenuItemId: return false
+  1515→  1515→    if order1.PortionName != order2.PortionName: return false
+  1516→  1516→    if order1.CalculatePrice != order2.CalculatePrice: return false
+  1517→  1517→    if order1.IncreaseInventory != order2.IncreaseInventory: return false
+  1518→  1518→    if order1.DecreaseInventory != order2.DecreaseInventory: return false
+  1519→  1519→    if order1.OrderTagValues.Count > 0 or order2.OrderTagValues.Count > 0: return false
+  1520→  1520→    if not OrderStatesEqual(order1, order2): return false
+  1521→  1521→    return true
+  1522→  1522→```
+  1523→  1523→
+  1524→  1524→---
+  1525→  1525→
+  1526→  1526→## 11. ProductTimer (time-based pricing)
+  1527→  1527→
+  1528→  1528→```pseudo
+  1529→  1529→# Source: ProductTimerValue.cs:30-57
+  1530→  1530→function ProductTimerValue.GetPrice(unitPrice):
+  1531→  1531→    if unitPrice == 0: return 0
+  1532→  1532→    return roundBankers((unitPrice / PriceDuration) * GetTime(), DECIMALS)
+  1533→  1533→
+  1534→  1534→function ProductTimerValue.GetTime():
+  1535→  1535→    time = GetTimePeriod()
+  1536→  1536→    if time < MinTime:
+  1537→  1537→        time = MinTime
+  1538→  1538→    elif TimeRounding > 0 and TimeRounding != time:
+  1539→  1539→        # Always round UP to next multiple of TimeRounding
+  1540→  1540→        time = (Math.Truncate(time / TimeRounding) + 1) * TimeRounding
+  1541→  1541→    return time
+  1542→  1542→
+  1543→  1543→function ProductTimerValue.GetTimePeriod():
+  1544→  1544→    s = Start
+  1545→  1545→    e = (End != Start) ? End : DateTime.Now
+  1546→  1546→    ts = new TimeSpan(e.Ticks - s.Ticks)
+  1547→  1547→    switch PriceType:
+  1548→  1548→        case 2: return Convert.ToDecimal(ts.TotalDays)     # days
+  1549→  1549→        case 1: return Convert.ToDecimal(ts.TotalHours)    # hours
+  1550→  1550→        default: return Convert.ToDecimal(ts.TotalMinutes) # minutes (default)
+  1551→  1551→```
+  1552→  1552→
+  1553→  1553→---
+  1554→  1554→
+  1555→  1555→## 12. AccountTransaction (double-entry with auto-reversal)
+  1556→  1556→
+  1557→  1557→```pseudo
+  1558→  1558→# Source: AccountTransaction.cs:193-215
+  1559→  1559→function AccountTransaction.UpdateAmount(amount, exchangeRate, accounts = null):
+  1560→  1560→    if amount < 0 and CanReverse():
+  1561→  1561→        Reverse()                                  # [AccountTransaction.cs:177]
+  1562→  1562→            # tmp = SourceTransactionValue
+  1563→  1563→            # SourceTransactionValue = TargetTransactionValue
+  1564→  1564→            # TargetTransactionValue = tmp
+  1565→  1565→            # IsReversed = true
+  1566→  1566→    elif IsReversed and amount >= 0:
+  1567→  1567→        Reverse()
+  1568→  1568→        IsReversed = false
+  1569→  1569→
+  1570→  1570→    Amount = abs(amount)
+  1571→  1571→    # CRITICAL: Uses MidpointRounding.AwayFromZero (schoolbook rounding)
+  1572→  1572→    Amount = roundAway(Amount, 2)                  # [AccountTransaction.cs:203]
+  1573→  1573→    ExchangeRate = exchangeRate
+  1574→  1574→
+  1575→  1575→    if accounts != null:
+  1576→  1576→        sourceAccount = accounts.FirstOrDefault(x => x.AccountId == SourceTransactionValue.AccountId)
+  1577→  1577→        if sourceAccount != null:
+  1578→  1578→            SourceTransactionValue.UpdateExchange(sourceAccount.ExchangeRate)
+  1579→  1579→        targetAccount = accounts.FirstOrDefault(x => x.AccountId == TargetTransactionValue.AccountId)
+  1580→  1580→        if targetAccount != null:
+  1581→  1581→            TargetTransactionValue.UpdateExchange(targetAccount.ExchangeRate)
+  1582→  1582→
+  1583→  1583→# Source: AccountTransactionValue.cs:22-25
+  1584→  1584→function AccountTransactionValue.UpdateExchange(exchangeRate):
+  1585→  1585→    Exchange = exchangeRate == 0
+  1586→  1586→        ? 0
+  1587→  1587→        : roundBankers((Debit - Credit) / exchangeRate, 2)   # banker's rounding
+  1588→  1588→```
+  1589→  1589→
+  1590→  1590→---
+  1591→  1591→
+  1592→  1592→## 13. Print Flow (ESC/POS for thermal printers)
+  1593→  1593→
+  1594→  1594→### 13.1 Printer type detection
+  1595→  1595→
+  1596→  1596→```pseudo
+  1597→  1597→# Source: PrintJobFactory.cs:7
+  1598→  1598→function PrintJobFactory.CreatePrintJob(printer, printerService):
+  1599→  1599→    switch printer.PrinterType:
+  1600→  1600→        case 0: return new SlipPrinterJob(printer, printerService)    # ESC/POS via LinePrinter
+  1601→  1601→        case 1: return new TextPrinterJob(printer, printerService)    # XPS via FlowDocument
+  1602→  1602→        case 2: return new HtmlPrinterJob(printer, printerService)    # HTML → XPS
+  1603→  1603→        case 3: return new PortPrinterJob(printer, printerService)    # Raw bytes to LPT/COM
+  1604→  1604→        case 4: return new DemoPrinterJob(printer, printerService)    # On-screen preview
+  1605→  1605→        case 5: return new WindowsPrinterJob(printer, printerService) # XPS via FlowDocument
+  1606→  1606→        case 6: return new CustomPrinterJob(printer, printerService)  # ICustomPrinter delegate
+  1607→  1607→        case 7: return new RawPrinterJob(printer, printerService)     # Raw ANSI text via winspool
+  1608→  1608→```
+  1609→  1609→
+  1610→  1610→### 13.2 ESC/POS commands emitted by `LinePrinter`
+  1611→  1611→
+  1612→  1612→```pseudo
+  1613→  1613→# Source: Samba.Services/Implementations/PrinterModule/Tools/LinePrinter.cs
+  1614→  1614→
+  1615→  1615→# All commands prefixed with ESC (0x1B) or GS (0x1D)
+  1616→  1616→function LinePrinter.EnableLeft():     writeBytes([0x1B, 0x61, 0x00])           # ESC a 0
+  1617→  1617→function LinePrinter.EnableCenter():   writeBytes([0x1B, 0x61, 0x01])           # ESC a 1
+  1618→  1618→function LinePrinter.EnableRight():    writeBytes([0x1B, 0x61, 0x02])           # ESC a 2
+  1619→  1619→function LinePrinter.EnableBold():     writeBytes([0x1B, 0x47, 0x01])           # ESC G 1
+  1620→  1620→function LinePrinter.DisableBold():    writeBytes([0x1B, 0x47, 0x00])           # ESC G 0
+  1621→  1621→function LinePrinter.Cut():            writeBytes([0x1B, 0x64, 0x01,
+  1622→  1622→                                                  0x1D, 0x56, 0x42, 0x00])     # ESC d 1, GS V 66 0
+  1623→  1623→function LinePrinter.Beep():           writeBytes([0x1B, 0x42, 0x03, 0x05])     # ESC B <times> <duration>
+  1624→  1624→function LinePrinter.OpenCashDrawer(): writeBytes([0x1B, 0x70, 0x00, 0x19, 0xFA])  # ESC p 0 25 250
+  1625→  1625→
+  1626→  1626→function LinePrinter.WriteLine(line, h, w, align):
+  1627→  1627→    # h = horizontal scale (0-7), w = vertical scale (0-7)
+  1628→  1628→    if align == "center": EnableCenter()
+  1629→  1629→    elif align == "right": EnableRight()
+  1630→  1630→    else: EnableLeft()
+  1631→  1631→    writeBytes([0x1D, 0x21, h + w * 16])    # GS ! (h + w*16) — set font size
+  1632→  1632→    writeString(line + "\n")                # 0x0A = line feed
+  1633→  1633→
+  1634→  1634→function LinePrinter.SelectTurkishCodePage():
+  1635→  1635→    writeBytes([0x1B, 0x1D, 0x74, 0x0C])    # ESC GS t 12 (Turkish code page 857)
+  1636→  1636→```
+  1637→  1637→
+  1638→  1638→### 13.3 Print template format (XML-like tags in the template text)
+  1639→  1639→
+  1640→  1640→```
+  1641→  1641→<L00>Ticket: {TICKET NUMBER}
+  1642→  1642→<L00>Date: {DATE} {TIME}
+  1643→  1643→<L00>Customer: {ENTITY NAME:Customer}
+  1644→  1644→<F>
+  1645→  1645→<J00>Item|Qty|Price
+  1646→  1646→{ORDERS}
+  1647→  1647→<F>
+  1648→  1648→<J00>Subtotal|{PLAIN TOTAL}
+  1649→  1649→<J00>Tax|{TAX TOTAL}
+  1650→  1650→<J00>Total|{TOTAL AMOUNT}
+  1651→  1651→<F>
+  1652→  1652→{PAYMENTS}
+  1653→  1653→<J00>Remaining|{REMAINING AMOUNT}
+  1654→  1654→<F>
+  1655→  1655→<C00>Thank you!
+  1656→  1656→<cut>
+  1657→  1657→<drawer>
+  1658→  1658→<beep>
+  1659→  1659→```
+  1660→  1660→
+  1661→  1661→Tags (interpreted by `FormattedDocument.cs:26`):
+  1662→  1662→
+  1663→  1663→| Tag | Formatter | Purpose |
+  1664→  1664→|-----|-----------|---------|
+  1665→  1665→| `<l` | LeftAlignFormatter | Left-aligned text |
+  1666→  1666→| `<r` | RightAlignFormatter | Right-aligned text |
+  1667→  1667→| `<c` | CenterAlignFormatter | Centered text |
+  1668→  1668→| `<f>` | HorizontalRuleFormatter | Horizontal rule (─────) |
+  1669→  1669→| `<t` | TitleFormatter | Boxed title |
+  1670→  1670→| `<bx` | BoxFormatter | Boxed text |
+  1671→  1671→| `<j` or `<p` | JustifyAlignFormatter | Multi-column justified |
+  1672→  1672→| (none) | GenericFormatter | Plain line |
+  1673→  1673→| `<eb>` | (parsed inline) | Enable bold |
+  1674→  1674→| `<db>` | (parsed inline) | Disable bold |
+  1675→  1675→| `<ec>` | (parsed inline) | Enable center |
+  1676→  1676→| `<el>` | (parsed inline) | Enable left |
+  1677→  1677→| `<er>` | (parsed inline) | Enable right |
+  1678→  1678→| `<bmp>` | PrintBitmap(path) | Print bitmap image |
+  1679→  1679→| `<qr>` | PrintQrCode(data, h, w) | Print QR code |
+  1680→  1680→| `<bar>` | PrintBarCode(data, h, w) | Print barcode |
+  1681→  1681→| `<cut>` | Cut() | Cut paper |
+  1682→  1682→| `<beep>` | Beep() | Beep buzzer |
+  1683→  1683→| `<drawer>` | OpenCashDrawer() | Open cash drawer |
+  1684→  1684→| `<xct>` | ExecCommand(args) | Custom raw command |
+  1685→  1685→
+  1686→  1686→### 13.4 Print job execution chain
+  1687→  1687→
+  1688→  1688→```
+  1689→  1689→1. Trigger:
+  1690→  1690→   a. User taps PrintJobButton on POS screen → fires automation action "ExecutePrintJob"
+  1691→  1691→      with PrintJobName parameter.
+  1692→  1692→   b. Automation rule on event (TicketClosing, PaymentProcessed, OrderAdded, etc.)
+  1693→  1693→      → action "ExecutePrintJob".
+  1694→  1694→   c. Direct call: _printerService.PrintTicket(ticket, printJob, orderSelector, priority)
+  1695→  1695→                                                              [PrinterService.cs:62]
+  1696→  1696→   d. Direct call: _printerService.ExecutePrintJob(printJob, highPriority)
+  1697→  1697→                                                              [PrinterService.cs:96]
+  1698→  1698→
+  1699→  1699→2. ExecutePrintJob action processor                              [ExecutePrintJob.cs:32]
+  1700→  1700→   - ticket = actionData["Ticket"]
+  1701→  1701→   - pjName = actionData["PrintJobName"]
+  1702→  1702→   - j = _cacheService.GetPrintJobByName(pjName)
+  1703→  1703→   - copies = actionData["Copies"] (default 1)
+  1704→  1704→   - printTicket = actionData["PrintTicket"] (default true)
+  1705→  1705→   - priority = actionData["HighPriority"]
+  1706→  1706→   - if ticket != null && printTicket:
+  1707→  1707→       - build orderSelector expression from OrderTagName/OrderTagValue/OrderStateName/OrderState/OrderStateValue
+  1708→  1708→       - _ticketService.UpdateTicketNumber(ticket, _applicationState.CurrentTicketType.TicketNumerator)
+  1709→  1709→       - for i in 0..copies: _printerService.PrintTicket(ticket, j, expression.Compile(), priority)
+  1710→  1710→   - else:
+  1711→  1711→       - for i in 0..copies: _printerService.ExecutePrintJob(j, priority)
+  1712→  1712→
+  1713→  1713→3. PrinterService.PrintTicket(ticket, printJob, orderSelector, highPriority)
+  1714→  1714→                                                              [PrinterService.cs:62]
+  1715→  1715→   - TicketPrinter.For(ticket)
+  1716→  1716→       .WithPrinterService(this)
+  1717→  1717→       .WithLogService(_logService)
+  1718→  1718→       .WithTaskBuilder(_ticketPrintTaskBuilder)
+  1719→  1719→       .WithPrintJob(printJob)
+  1720→  1720→       .WithOrderSelector(orderSelector)
+  1721→  1721→       .IsHighPriority(highPriority)
+  1722→  1722→       .Print()                                              [TicketPrinter.cs:66]
+  1723→  1723→
+  1724→  1724→4. TicketPrinter.Print()                                       [TicketPrinter.cs:66]
+  1725→  1725→   - ticket = highPriority ? _ticket : ObjectCloner.Clone2(_ticket)
+  1726→  1726→   - AsyncPrintTask.Exec(highPriority, () => InternalPrint(ticket, printJob, orderSelector), _logService)
+  1727→  1727→     # queued on background thread unless highPriority
+  1728→  1728→
+  1729→  1729→5. TicketPrinter.InternalPrint(ticket, printJob, orderSelector) [TicketPrinter.cs:72]
+  1730→  1730→   - tasks = _ticketPrintTaskBuilder.GetPrintTasksForTicket(ticket, printJob, orderSelector)
+  1731→  1731→                                                              [TicketPrintTaskBuilder.cs:197]
+  1732→  1732→   - foreach task in tasks.Where(t => t.Printer != null && t.Lines != null):
+  1733→  1733→       PrintJobFactory.CreatePrintJob(task.Printer, _printerService).DoPrint(task.Lines)
+  1734→  1734→                                                              [PrintJobFactory.cs:7]
+  1735→  1735→
+  1736→  1736→6. TicketPrintTaskBuilder.GetPrintTasksForTicket(ticket, printJob, orderSelector)
+  1737→  1737→                                                              [TicketPrintTaskBuilder.cs:197]
+  1738→  1738→   - orders = GetOrders(printJob, ticket, orderSelector)       [TicketPrintTaskBuilder.cs:39]
+  1739→  1739→       switch (printJob.WhatToPrint):
+  1740→  1740→         case LastLinesByPrinterLineCount: GetLastOrders(ticket, printJob, orderSelector)
+  1741→  1741→         case LastPaidOrders: GetLastPaidOrders(ticket)
+  1742→  1742→         case OrdersByQuanity / SeparatedByQuantity: SeparateOrders(ticket, orderSelector)
+  1743→  1743→         default: ticket.Orders.Where(orderSelector).OrderBy(Id)
+  1744→  1744→   - return GetPrintTasks(printJob, ticket, orders)            [TicketPrintTaskBuilder.cs:110]
+  1745→  1745→       - if single PrinterMap and no filter:
+  1746→  1746→           return [GetPrintTask(ticket, orders, printJob.PrinterMaps[0])]
+  1747→  1747→       - else: group orders by PrinterMap (filtered by MenuItemGroupCode / MenuItemId)
+  1748→  1748→         foreach group: GetPrintTask(ticket, groupOrders, map)
+  1749→  1749→              - printer = PrinterById(map.PrinterId)
+  1750→  1750→              - template = PrinterTemplateById(map.PrinterTemplateId)
+  1751→  1751→              - if ShouldSkipPrint(printer, orders, template): return null
+  1752→  1752→              - ticketLines = _ticketFormatter.GetFormattedTicket(ticket, orders, template)
+  1753→  1753→                                                              [TicketFormatter.cs:29]
+  1754→  1754→              - return TicketPrintTask { Lines = ticketLines, Printer = printer }
+  1755→  1755→
+  1756→  1756→7. TicketFormatter.GetFormattedTicket(ticket, orders, printerTemplate) [TicketFormatter.cs:29]
+  1757→  1757→   - dataObject = { Ticket = ObjectCloner.Clone2(ticket) }
+  1758→  1758→   - orders = printerTemplate.MergeLines ? MergeLines(orders) : orders
+  1759→  1759→   - ticket.Orders.Clear(); orders.ForEach(ticket.Orders.Add)
+  1760→  1760→   - content = _ticketValueChanger.GetValue(printerTemplate, ticket)
+  1761→  1761→       # processes {TICKET.TAGS}, {ORDERS}, {DISCOUNTS}, {PAYMENTS}, etc.
+  1762→  1762→   - content = UpdateExpressions(content, dataObject)
+  1763→  1763→       # executes {CALL:...} expressions
+  1764→  1764→       # replaces {SETTING:...} values
+  1765→  1765→   - return content.Split(['\r','\n'], RemoveEmptyEntries).ToArray()
+  1766→  1766→
+  1767→  1767→8. AbstractPrintJob.DoPrint(lines) dispatches by PrinterType (see Section 13.1):
+  1768→  1768→   - SlipPrinterJob.DoPrint(lines)                            [SlipPrinterJob.cs:16]
+  1769→  1769→       - printer = new LinePrinter(ShareName, CharsPerLine, CodePage)
+  1770→  1770→       - printer.StartDocument()                              [LinePrinter.cs:166]
+  1771→  1771→       - formatters = new FormattedDocument(lines, CharsPerLine).GetFormatters()
+  1772→  1772→                                                              [FormattedDocument.cs:8]
+  1773→  1773→       - foreach formatter in formatters: SendToPrinter(printer, formatter)
+  1774→  1774→           - if line doesn't start with "<": printer.WriteLine(data, h, w, Left)
+  1775→  1775→           - else switch on Tag.TagName:
+  1776→  1776→               "eb" → EnableBold, "db" → DisableBold
+  1777→  1777→               "ec" → EnableCenter, "el" → EnableLeft, "er" → EnableRight
+  1778→  1778→               "bmp" → PrintBitmap(path)
+  1779→  1779→               "qr" → PrintQrCode(data, h, w)
+  1780→  1780→               "bar" → PrintBarCode(data, h, w)
+  1781→  1781→               "cut" → Cut()
+  1782→  1782→               "beep" → Beep()
+  1783→  1783→               "drawer" → OpenCashDrawer()
+  1784→  1784→               "b" → Beep(times=h, duration=w)
+  1785→  1785→               "xct" → ExecCommand(args)
+  1786→  1786→       - if formatters.Count > 1: printer.Cut()
+  1787→  1787→       - printer.EndDocument()
+  1788→  1788→```
+  1789→  1789→
+  1790→  1790→---
+  1791→  1791→
+  1792→  1792→## 14. Web-Clone Implementation Notes (CRITICAL)
+  1793→  1793→
+  1794→  1794→### 14.1 Rounding-mode inconsistency to PRESERVE
+  1795→  1795→
+  1796→  1796→SambaPOS V3 uses **two different rounding modes** depending on the code path:
+  1797→  1797→
+  1798→  1798→| Code path | Mode | Source |
+  1799→  1799→|-----------|------|--------|
+  1800→  1800→| `Ticket.CalculateTax` | `decimal.Round(value, 2)` (banker's / `MidpointRounding.ToEven`) | `Ticket.cs:350` |
+  1801→  1801→| `Ticket.CalculateServices` | `decimal.Round(value, 2)` (banker's) | `Ticket.cs:376` |
+  1802→  1802→| `Ticket.GetTaxTotal` | `decimal.Round(value, 2, MidpointRounding.AwayFromZero)` (schoolbook) | `Ticket.cs:694, 700` |
+  1803→  1803→| `AccountTransaction.UpdateAmount` | `Decimal.Round(Amount, 2, MidpointRounding.AwayFromZero)` | `AccountTransaction.cs:203` |
+  1804→  1804→| `TaxValue.GetTax` (when `Rounding > 0`) | `decimal.Round(..., Rounding, MidpointRounding.AwayFromZero)` | `TaxValue.cs:47` |
+  1805→  1805→| `Calculation.Update` type 4 (rounding) | `decimal.Round(currentSum / Amount, MidpointRounding.AwayFromZero)` | `Calculation.cs:45` |
+  1806→  1806→| `ProductTimerValue.GetPrice` | `decimal.Round(..., LocalSettings.Decimals)` (banker's) | `ProductTimerValue.cs:32` |
+  1807→  1807→
+  1808→  1808→**Web clone MUST preserve this inconsistency** for byte-perfect monetary parity. JavaScript `Math.round` rounds half-up (toward +∞ for `.5`), which matches `AwayFromZero` for positives but NOT for negatives.
+  1809→  1809→
+  1810→  1810→```javascript
+  1811→  1811→// Use decimal.js with explicit rounding modes:
+  1812→  1812→import Decimal from 'decimal.js';
+  1813→  1813→Decimal.set({ precision: 28 });
+  1814→  1814→
+  1815→  1815→const roundBankers = (v, d = 2) => new Decimal(v).toDecimalPlaces(d, Decimal.ROUND_HALF_EVEN).toNumber();
+  1816→  1816→const roundAway    = (v, d = 2) => new Decimal(v).toDecimalPlaces(d, Decimal.ROUND_HALF_UP).toNumber();
+  1817→  1817→```
+  1818→  1818→
+  1819→  1819→### 14.2 `LocalSettings.Decimals = 2` is hardcoded
+  1820→  1820→
+  1821→  1821→`Samba.Infrastructure/Settings/LocalSettings.cs:78`. Expose as config but **default to 2** for parity.
+  1822→  1822→
+  1823→  1823→### 14.3 JSON-serialized fields with short DataMember names
+  1824→  1824→
+  1825→  1825→`Ticket.TicketTags`, `Ticket.TicketStates`, `Ticket.TicketLogs`, `Order.Taxes`, `Order.OrderTags`, `Order.OrderStates`, `Task.CustomData`, `Entity.CustomData`, `EntityStateValue.EntityStates`, `AccountScreen.AutomationCommandMapData`, `AppRule.RuleConstraints`, `AppAction.Parameter`, `Widget.Properties`, `ScreenMenuItem.OrderTags/OrderStates/AutomationCommand` are all JSON strings persisted in DB columns. The DataContract serializer uses **short `[DataMember(Name="XX")]` names** (e.g. `"TN"`, `"TV"`, `"TR"`, `"RN"`) for compactness.
+  1826→  1826→
+  1827→  1827→**Web clone must replicate the exact JSON wire format** if reading/writing existing `.sdf` files; otherwise can use full property names with a migration adapter.
+  1828→  1828→
+  1829→  1829→### 14.4 No formal state machine
+  1830→  1830→
+  1831→  1831→Do NOT model the Ticket lifecycle as a strict FSM. `(IsClosed, IsLocked)` plus the JSON `TicketStates` is what the code actually uses. Order states are even looser.
+  1832→  1832→
+  1833→  1833→### 14.5 Splitting = MoveOrders to targetTicketId=0
+  1834→  1834→
+  1835→  1835→There is no separate `SplitTicket` endpoint. The UI flow is `ExtractSelectedOrders` (handles partial-quantity cloning) → `MoveOrders`.
+  1836→  1836→
+  1837→  1837→### 14.6 Closing is two-phase
+  1838→  1838→
+  1839→  1839→1. `CloseTicket` saves and locks.
+  1840→  1840→2. `MarkTicketAsClosed` (automation action) actually flips `IsClosed=true`.
+  1841→  1841→
+  1842→  1842→The port should preserve this separation OR unify it with a clear documented behavior. Recommended: **preserve the two-phase close** for behavioral parity (the user spec requires "logic-perfect" replication).
+  1843→  1843→
+  1844→  1844→### 14.7 PrintJob execution is async
+  1845→  1845→
+  1846→  1846→`AsyncPrintTask.Exec(highPriority, action, logService)` queues the print job. High-priority jobs (e.g. kitchen receipts on `OrderAdded`) run immediately; low-priority jobs are queued. **Web clone should use a similar priority queue** (e.g. `p-queue` with concurrency 1 + priority field).
+  1847→  1847→
+  1848→  1848→### 14.8 `AccountTransactionDocument` is the double-entry ledger
+  1849→  1849→
+  1850→  1850→Every monetary operation (sale, tax, discount, payment, change, refund) creates or updates an `AccountTransaction` inside the ticket's `TransactionDocument`. The port must replicate this — it is the audit trail and the source of truth for balances:
+  1851→  1851→
+  1852→  1852→```pseudo
+  1853→  1853→# Source: AccountDao.GetAccountBalance
+  1854→  1854→function GetAccountBalance(accountId):
+  1855→  1855→    # = SUM(Debit - Credit) over all AccountTransactionValues with AccountId == accountId
+  1856→  1856→    return db.AccountTransactionValues
+  1857→  1857→        .Where(v => v.AccountId == accountId)
+  1858→  1858→        .Sum(v => v.Debit - v.Credit)
+  1859→  1859→```
+  1860→  1860→
+  1861→  1861→### 14.9 `Order.CalculatePrice = false` is how Gift orders are excluded
+  1862→  1862→
+  1863→  1863→Rather than being removed, Gift orders are kept in the ticket but excluded from totals via this flag. The port should support this flag on every order.
+  1864→  1864→
+  1865→  1865→### 14.10 Concurrency
+  1866→  1866→
+  1867→  1867→`TicketConcurrencyValidator` (`TicketDao.cs:146`) compares the in-memory ticket against the DB-loaded version on every `CloseTicket`. If `LastPaymentDate` differs (another terminal paid), the operation is rejected with `"TicketPaidLastChangesNotSaved"`.
+  1868→  1868→
+  1869→  1869→**Web clone:** Implement optimistic concurrency using a `version` column (or `last_updated_at` timestamp) and `UPDATE ... WHERE version = $1 RETURNING *`.
+  1870→  1870→
+  1871→  1871→---
+  1872→  1872→
+  1873→  1873→## 15. Smoke Test Inputs (for VALIDATION_LOG.md)
+  1874→  1874→
+  1875→  1875→Use these inputs to verify the port produces byte-identical totals to the original.
+  1876→  1876→
+  1877→  1877→### Test 1: Simple ticket, tax included, no discount
+  1878→  1878→
+  1879→  1879→```yaml
+  1880→  1880→Setup:
+  1881→  1881→  TicketType.TaxIncluded: true
+  1882→  1882→  MenuItem: Burger, portion "Normal", price 5.00
+  1883→  1883→  TaxTemplate: VAT 10% (Rounding=0), AccountTransactionType=SaleTax
+  1884→  1884→Test:
+  1885→  1885→  - Create ticket
+  1886→  1886→  - Add 2x Burger
+  1887→  1887→Expected:
+  1888→  1888→  plainSum: 10.00
+  1889→  1889→  preTaxServices: 0
+  1890→  1890→  tax: 0           # TaxIncluded=true → no tax added on top
+  1891→  1891→  postTaxServices: 0
+  1892→  1892→  TotalAmount: 10.00
+  1893→  1893→  RemainingAmount: 10.00
+  1894→  1894→  # Tax AccountTransaction.Amount (extracted for reporting):
+  1895→  1895→  #   per order: (5.00 * 10) / (100 + 10) = 0.454545... → 0.45 (Rounding=0, so no per-line rounding)
+  1896→  1896→  #   × 2 orders = 0.909090... → round to 2 (AwayFromZero): 0.91
+  1897→  1897→```
+  1898→  1898→
+  1899→  1899→### Test 2: Simple ticket, tax excluded, no discount
+  1900→  1900→
+  1901→  1901→```yaml
+  1902→  1902→Setup:
+  1903→  1903→  TicketType.TaxIncluded: false
+  1904→  1904→  MenuItem: Burger, portion "Normal", price 5.00
+  1905→  1905→  TaxTemplate: VAT 10% (Rounding=0)
+  1906→  1906→Test:
+  1907→  1907→  - Create ticket
+  1908→  1908→  - Add 2x Burger
+  1909→  1909→Expected:
+  1910→  1910→  plainSum: 10.00
+  1911→  1911→  preTaxServices: 0
+  1912→  1912→  tax: 1.00        # 10% on top: 10 * 10 / 100 = 1.00
+  1913→  1913→  postTaxServices: 0
+  1914→  1914→  TotalAmount: 11.00
+  1915→  1915→  RemainingAmount: 11.00
+  1916→  1916→```
+  1917→  1917→
+  1918→  1918→### Test 3: Discount before tax (10% off, tax excluded)
+  1919→  1919→
+  1920→  1920→```yaml
+  1921→  1921→Setup:
+  1922→  1922→  TicketType.TaxIncluded: false
+  1923→  1923→  MenuItem: Burger, price 5.00
+  1924→  1924→  TaxTemplate: VAT 10%
+  1925→  1925→  CalculationType: Discount (CalculationMethod=0, DecreaseAmount=true, IncludeTax=false, Amount=10)
+  1926→  1926→Test:
+  1927→  1927→  - Create ticket
+  1928→  1928→  - Add 2x Burger
+  1929→  1929→  - Apply 10% discount
+  1930→  1930→Expected:
+  1931→  1931→  plainSum: 10.00
+  1932→  1932→  preTaxServices: -1.00        # 10% of 10.00 = 1.00, decreased → -1.00
+  1933→  1933→  tax: 0.90                    # 10% on (10 - 1) = 0.90
+  1934→  1934→  postTaxServices: 0
+  1935→  1935→  TotalAmount: 9.90
+  1936→  1936→```
+  1937→  1937→
+  1938→  1938→### Test 4: Service charge after tax (10% service, tax included)
+  1939→  1939→
+  1940→  1940→```yaml
+  1941→  1941→Setup:
+  1942→  1942→  TicketType.TaxIncluded: true
+  1943→  1943→  MenuItem: Burger, price 5.00 (includes 10% VAT)
+  1944→  1944→  TaxTemplate: VAT 10% (Rounding=0)
+  1945→  1945→  CalculationType: Service Charge (CalculationMethod=0, DecreaseAmount=false, IncludeTax=true, Amount=10)
+  1946→  1946→Test:
+  1947→  1947→  - Create ticket
+  1948→  1948→  - Add 2x Burger
+  1949→  1949→  - Apply 10% service charge
+  1950→  1950→Expected:
+  1951→  1951→  plainSum: 10.00
+  1952→  1952→  preTaxServices: 0
+  1953→  1953→  tax: 0     # TaxIncluded → no tax added
+  1954→  1954→  postTaxServices: 1.00   # 10% of 10.00 = 1.00 (applied after tax, but tax was 0)
+  1955→  1955→  TotalAmount: 11.00
+  1956→  1956→  # Per-line extracted tax (for reporting): 0.454545... × 2 = 0.909090... → 0.91
+  1957→  1957→```
+  1958→  1958→
+  1959→  1959→### Test 5: Rounding (nickel rounding, type 4, Amount=0.05)
+  1960→  1960→
+  1961→  1961→```yaml
+  1962→  1962→Setup:
+  1963→  1963→  TicketType.TaxIncluded: true
+  1964→  1964→  MenuItem: Coffee, price 1.43 (includes tax)
+  1965→  1965→  CalculationType: Round (CalculationMethod=4, DecreaseAmount=true, IncludeTax=true, Amount=0.05)
+  1966→  1966→Test:
+  1967→  1967→  - Create ticket
+  1968→  1968→  - Add 1x Coffee (plainSum=1.43)
+  1969→  1969→  - Apply rounding
+  1970→  1970→Expected:
+  1971→  1971→  plainSum: 1.43
+  1972→  1972→  # currentSum after pre-tax + tax = 1.43 (no pre-tax, no tax added)
+  1973→  1973→  # Round to nearest 0.05: round(1.43 / 0.05) * 0.05 = round(28.6) * 0.05 = 29 * 0.05 = 1.45
+  1974→  1974→  # CalculationAmount = 1.45 - 1.43 = 0.02
+  1975→  1975→  # DecreaseAmount=true, but result is positive → set to 0... wait, no:
+  1976→  1976→  # Actually: DecreaseAmount=true → if result > 0, set to 0... NO!
+  1977→  1977→  # Re-reading Calculation.cs:48:
+  1978→  1978→  #   if (DecreaseAmount && CalculationAmount > 0) CalculationAmount = 0
+  1979→  1979→  # So for DecreaseAmount=true with a positive rounding result, the calc is zeroed out.
+  1980→  1980→  # This means the ticket total stays at 1.43.
+  1981→  1981→  # For round-DOWN (Amount<0): trunc(1.43 / -0.05) * -0.05 = trunc(-28.6) * -0.05 = -28 * -0.05 = 1.40
+  1982→  1982→  # CalculationAmount = 1.40 - 1.43 = -0.03
+  1983→  1983→  # DecreaseAmount=true → -0.03 is already negative, so no zero-out.
+  1984→  1984→  # Total: 1.43 - 0.03 = 1.40
+  1985→  1985→```
+  1986→  1986→
+  1987→  1987→(Use these as starting points — additional tests should cover: foreign currency exchange, partial payments, split tickets, void orders, gift orders, multiple tax templates per item, order tag with TaxFree, order tag with AddTagPriceToOrderPrice, product timer pricing.)
+  1988→  1988→
+  1989→  1989→---
+  1990→  1990→
+  1991→  1991→**End of BUSINESS_RULES_ENGINE.md** — source for `/samba-web-clone/analysis/BUSINESS_RULES_ENGINE.md`.
+  1992→  1992→

@@ -1,0 +1,1083 @@
+     1→     1→// =====================================================================
+     2→     2→// Migration 20240904000001_create_schema.js
+     3→     3→// =====================================================================
+     4→     4→// Creates the entire SambaPOS V3 schema (96 tables) in a single
+     5→     5→// migration, in topological order (parents before children).
+     6→     6→//
+     7→     7→// Per Architect's directive:
+     8→     8→//   * Id INTEGER PRIMARY KEY AUTOINCREMENT  (simple PK)
+     9→     9→//   * UNIQUE(Id, ParentId) for tables that originally had composite PK
+    10→    10→//   * INDEX on every FK column
+    11→    11→//   * All FKs explicit (no EF shadow columns)
+    12→    12→//   * Type mapping: TEXT for nvarchar, NUMERIC(16,2/3) for decimals,
+    13→    13→//     INTEGER for bit/int, TEXT (ISO8601) for datetime
+    14→    14→// =====================================================================
+    15→    15→
+    16→    16→/**
+    17→    17→ * @param {import('knex').Knex} knex
+    18→    18→ * @param {boolean} isSQLite
+    19→    19→ */
+    20→    20→async function up(knex) {
+    21→    21→  const isSQLite = knex.client.config.client === 'sqlite3';
+    22→    22→
+    23→    23→  // Helper: create a table with the standard audit columns
+    24→    24→  const createTable = async (name, builder) => {
+    25→    25→    await knex.schema.createTable(name, (table) => {
+    26→    26→      table.increments('Id').primary();
+    27→    27→      builder(table);
+    28→    28→    });
+    29→    29→  };
+    30→    30→
+    31→    31→  // -----------------------------------------------------------------
+    32→    32→  // 1. Lookup tables (no FK dependencies)
+    33→    33→  // -----------------------------------------------------------------
+    34→    34→  await createTable('WarehouseTypes', (t) => {
+    35→    35→    t.text('Name');
+    36→    36→  });
+    37→    37→
+    38→    38→  await createTable('AccountTypes', (t) => {
+    39→    39→    t.text('Name');
+    40→    40→    t.integer('DefaultFilterType').notNullable().defaultTo(0);
+    41→    41→    t.integer('WorkingRule').notNullable().defaultTo(0);
+    42→    42→    t.integer('SortOrder').notNullable().defaultTo(0);
+    43→    43→    t.text('Tags');
+    44→    44→  });
+    45→    45→
+    46→    46→  await createTable('UserRoles', (t) => {
+    47→    47→    t.text('Name');
+    48→    48→    t.integer('IsAdmin').notNullable().defaultTo(0);
+    49→    49→    t.integer('DepartmentId').notNullable().defaultTo(0);
+    50→    50→  });
+    51→    51→
+    52→    52→  await createTable('WorkPeriods', (t) => {
+    53→    53→    t.text('Name');
+    54→    54→    t.text('StartDate').notNullable();
+    55→    55→    t.text('EndDate').notNullable();
+    56→    56→    t.text('StartDescription');
+    57→    57→    t.text('EndDescription');
+    58→    58→  });
+    59→    59→
+    60→    60→  await createTable('ForeignCurrencies', (t) => {
+    61→    61→    t.text('Name');
+    62→    62→    t.text('CurrencySymbol');
+    63→    63→    t.decimal('ExchangeRate', 18, 2).notNullable().defaultTo(1);
+    64→    64→    t.decimal('Rounding', 18, 2).notNullable().defaultTo(0);
+    65→    65→  });
+    66→    66→
+    67→    67→  await createTable('Triggers', (t) => {
+    68→    68→    t.text('Name');
+    69→    69→    t.text('Expression');
+    70→    70→    t.text('LastTrigger').notNullable();
+    71→    71→  });
+    72→    72→
+    73→    73→  await createTable('ProgramSettings', (t) => {
+    74→    74→    t.text('Name');
+    75→    75→    t.text('Value');
+    76→    76→  });
+    77→    77→
+    78→    78→  await createTable('Numerators', (t) => {
+    79→    79→    t.text('Name');
+    80→    80→    t.binary('LastUpdateTime'); // rowversion / binary(8)
+    81→    81→    t.integer('Number').notNullable().defaultTo(0);
+    82→    82→    t.text('NumberFormat');
+    83→    83→  });
+    84→    84→
+    85→    85→  await createTable('TaskTypes', (t) => {
+    86→    86→    t.text('Name');
+    87→    87→  });
+    88→    88→
+    89→    89→  await createTable('States', (t) => {
+    90→    90→    t.text('Name');
+    91→    91→    t.text('GroupName');
+    92→    92→    t.integer('StateType').notNullable().defaultTo(0); // 0=Entity, 1=Ticket, 2=Order
+    93→    93→    t.text('Color');
+    94→    94→    t.integer('ShowOnEndOfDayReport').notNullable().defaultTo(0);
+    95→    95→    t.integer('ShowOnProductReport').notNullable().defaultTo(0);
+    96→    96→    t.integer('ShowOnTicket').notNullable().defaultTo(0);
+    97→    97→  });
+    98→    98→
+    99→    99→  await createTable('AppActions', (t) => {
+   100→   100→    t.text('Name');
+   101→   101→    t.text('ActionType');
+   102→   102→    t.text('Parameter');
+   103→   103→    t.integer('SortOrder').notNullable().defaultTo(0);
+   104→   104→  });
+   105→   105→
+   106→   106→  await createTable('Scripts', (t) => {
+   107→   107→    t.text('Name');
+   108→   108→    t.text('HandlerName');
+   109→   109→    t.text('Code');
+   110→   110→  });
+   111→   111→
+   112→   112→  await createTable('EntityTypes', (t) => {
+   113→   113→    t.text('Name');
+   114→   114→    t.integer('SortOrder').notNullable().defaultTo(0);
+   115→   115→    t.text('EntityName');
+   116→   116→    t.integer('AccountTypeId').notNullable().defaultTo(0);
+   117→   117→    t.integer('WarehouseTypeId').notNullable().defaultTo(0);
+   118→   118→    t.text('AccountNameTemplate');
+   119→   119→    t.text('PrimaryFieldName');
+   120→   120→    t.text('PrimaryFieldFormat');
+   121→   121→    t.text('DisplayFormat');
+   122→   122→    t.text('AccountBalanceDisplayFormat');
+   123→   123→  });
+   124→   124→
+   125→   125→  await createTable('TicketTypes', (t) => {
+   126→   126→    t.text('Name');
+   127→   127→    t.integer('SortOrder').notNullable().defaultTo(0);
+   128→   128→    t.integer('ScreenMenuId').notNullable().defaultTo(0);
+   129→   129→    t.integer('TaxIncluded').notNullable().defaultTo(1);
+   130→   130→    t.integer('TicketNumeratorId').notNullable().defaultTo(0);
+   131→   131→    t.integer('OrderNumeratorId').notNullable().defaultTo(0);
+   132→   132→    t.integer('SaleTransactionTypeId').notNullable().defaultTo(0);
+   133→   133→  });
+   134→   134→
+   135→   135→  await createTable('MenuItemPriceDefinitions', (t) => {
+   136→   136→    t.text('Name');
+   137→   137→    t.text('PriceTag');
+   138→   138→  });
+   139→   139→
+   140→   140→  await createTable('ScreenMenus', (t) => {
+   141→   141→    t.text('Name');
+   142→   142→    t.integer('CategoryColumnCount').notNullable().defaultTo(1);
+   143→   143→    t.integer('CategoryColumnWidthRate').notNullable().defaultTo(25);
+   144→   144→  });
+   145→   145→
+   146→   146→  await createTable('TaxTemplates', (t) => {
+   147→   147→    t.text('Name');
+   148→   148→    t.integer('SortOrder').notNullable().defaultTo(0);
+   149→   149→    t.decimal('Rate', 16, 2).notNullable().defaultTo(0);
+   150→   150→    t.integer('Rounding').notNullable().defaultTo(0);
+   151→   151→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   152→   152→  });
+   153→   153→
+   154→   154→  await createTable('InventoryItems', (t) => {
+   155→   155→    t.text('Name');
+   156→   156→    t.text('GroupCode');
+   157→   157→    t.text('BaseUnit');
+   158→   158→    t.text('TransactionUnit');
+   159→   159→    t.integer('TransactionUnitMultiplier').notNullable().defaultTo(1);
+   160→   160→    t.text('Warehouse');
+   161→   161→  });
+   162→   162→
+   163→   163→  await createTable('InventoryTransactionTypes', (t) => {
+   164→   164→    t.text('Name');
+   165→   165→    t.integer('SourceWarehouseTypeId').notNullable().defaultTo(0);
+   166→   166→    t.integer('TargetWarehouseTypeId').notNullable().defaultTo(0);
+   167→   167→    t.integer('DefaultSourceWarehouseId').notNullable().defaultTo(0);
+   168→   168→    t.integer('DefaultTargetWarehouseId').notNullable().defaultTo(0);
+   169→   169→    t.integer('SortOrder').notNullable().defaultTo(0);
+   170→   170→  });
+   171→   171→
+   172→   172→  await createTable('AccountTransactionTypes', (t) => {
+   173→   173→    t.text('Name');
+   174→   174→    t.integer('SortOrder').notNullable().defaultTo(0);
+   175→   175→    t.integer('SourceAccountTypeId').notNullable().defaultTo(0);
+   176→   176→    t.integer('TargetAccountTypeId').notNullable().defaultTo(0);
+   177→   177→    t.integer('DefaultSourceAccountId').notNullable().defaultTo(0);
+   178→   178→    t.integer('DefaultTargetAccountId').notNullable().defaultTo(0);
+   179→   179→    t.integer('ForeignCurrencyId').notNullable().defaultTo(0);
+   180→   180→  });
+   181→   181→
+   182→   182→  await createTable('AccountTransactionDocumentTypes', (t) => {
+   183→   183→    t.text('Name');
+   184→   184→    t.text('ButtonHeader');
+   185→   185→    t.text('ButtonColor');
+   186→   186→    t.integer('MasterAccountTypeId').notNullable().defaultTo(0);
+   187→   187→    t.text('DefaultAmount');
+   188→   188→    t.text('DescriptionTemplate');
+   189→   189→    t.text('ExchangeTemplate');
+   190→   190→    t.integer('BatchCreateDocuments').notNullable().defaultTo(0);
+   191→   191→    t.integer('Filter').notNullable().defaultTo(0);
+   192→   192→    t.integer('SortOrder').notNullable().defaultTo(0);
+   193→   193→    t.integer('PrinterTemplateId').notNullable().defaultTo(0);
+   194→   194→  });
+   195→   195→
+   196→   196→  await createTable('Printers', (t) => {
+   197→   197→    t.text('Name');
+   198→   198→    t.text('ShareName');
+   199→   199→    t.integer('PrinterType').notNullable().defaultTo(0);
+   200→   200→    t.integer('CodePage').notNullable().defaultTo(857);
+   201→   201→    t.integer('CharsPerLine').notNullable().defaultTo(42);
+   202→   202→    t.integer('PageHeight').notNullable().defaultTo(0);
+   203→   203→    t.text('CustomPrinterName');
+   204→   204→    t.text('CustomPrinterData');
+   205→   205→  });
+   206→   206→
+   207→   207→  await createTable('PrinterTemplates', (t) => {
+   208→   208→    t.text('Name');
+   209→   209→    t.text('Template');
+   210→   210→    t.integer('MergeLines').notNullable().defaultTo(0);
+   211→   211→  });
+   212→   212→
+   213→   213→  await createTable('PrintJobs', (t) => {
+   214→   214→    t.text('Name');
+   215→   215→    t.integer('WhatToPrint').notNullable().defaultTo(0);
+   216→   216→    t.integer('UseForPaidTickets').notNullable().defaultTo(0);
+   217→   217→    t.integer('ExcludeTax').notNullable().defaultTo(0);
+   218→   218→  });
+   219→   219→
+   220→   220→  await createTable('Terminals', (t) => {
+   221→   221→    t.text('Name');
+   222→   222→    t.integer('IsDefault').notNullable().defaultTo(0);
+   223→   223→    t.integer('AutoLogout').notNullable().defaultTo(0);
+   224→   224→    t.integer('ReportPrinterId').notNullable().defaultTo(0);
+   225→   225→    t.integer('TransactionPrinterId').notNullable().defaultTo(0);
+   226→   226→  });
+   227→   227→
+   228→   228→  await createTable('Warehouses', (t) => {
+   229→   229→    t.text('Name');
+   230→   230→    t.integer('WarehouseTypeId').notNullable().defaultTo(0);
+   231→   231→    t.integer('SortOrder').notNullable().defaultTo(0);
+   232→   232→    t.foreign('WarehouseTypeId').references('WarehouseTypes.Id');
+   233→   233→  });
+   234→   234→
+   235→   235→  await createTable('Departments', (t) => {
+   236→   236→    t.text('Name');
+   237→   237→    t.integer('SortOrder').notNullable().defaultTo(0);
+   238→   238→    t.text('PriceTag');
+   239→   239→    t.integer('WarehouseId').notNullable().defaultTo(0);
+   240→   240→    t.integer('TicketTypeId').notNullable().defaultTo(0);
+   241→   241→    t.integer('ScreenMenuId').notNullable().defaultTo(0);
+   242→   242→    t.integer('TicketCreationMethod').notNullable().defaultTo(0);
+   243→   243→    t.foreign('WarehouseId').references('Warehouses.Id');
+   244→   244→    t.foreign('TicketTypeId').references('TicketTypes.Id');
+   245→   245→    t.foreign('ScreenMenuId').references('ScreenMenus.Id');
+   246→   246→  });
+   247→   247→
+   248→   248→  await createTable('Users', (t) => {
+   249→   249→    t.text('Name');
+   250→   250→    t.text('PinCode');
+   251→   251→    t.integer('UserRoleId');
+   252→   252→    t.foreign('UserRoleId').references('UserRoles.Id');
+   253→   253→  });
+   254→   254→
+   255→   255→  await createTable('Permissions', (t) => {
+   256→   256→    t.text('Name');
+   257→   257→    t.integer('Value').notNullable().defaultTo(0);
+   258→   258→    t.integer('UserRoleId').notNullable();
+   259→   259→    t.foreign('UserRoleId').references('UserRoles.Id').onDelete('CASCADE');
+   260→   260→  });
+   261→   261→
+   262→   262→  await createTable('Accounts', (t) => {
+   263→   263→    t.text('Name');
+   264→   264→    t.integer('AccountTypeId').notNullable();
+   265→   265→    t.integer('ForeignCurrencyId').notNullable().defaultTo(0);
+   266→   266→    t.foreign('AccountTypeId').references('AccountTypes.Id').onDelete('CASCADE');
+   267→   267→  });
+   268→   268→
+   269→   269→  await createTable('AccountScreens', (t) => {
+   270→   270→    t.text('Name');
+   271→   271→    t.integer('Filter').notNullable().defaultTo(0);
+   272→   272→    t.integer('DisplayAsTree').notNullable().defaultTo(0);
+   273→   273→    t.integer('SortOrder').notNullable().defaultTo(0);
+   274→   274→    t.text('AutomationCommandMapData');
+   275→   275→  });
+   276→   276→
+   277→   277→  await createTable('MenuItems', (t) => {
+   278→   278→    t.text('Name');
+   279→   279→    t.text('GroupCode');
+   280→   280→    t.text('Barcode');
+   281→   281→    t.text('Tag');
+   282→   282→  });
+   283→   283→
+   284→   284→  await createTable('CalculationTypes', (t) => {
+   285→   285→    t.text('Name');
+   286→   286→    t.integer('SortOrder').notNullable().defaultTo(0);
+   287→   287→    t.integer('CalculationMethod').notNullable().defaultTo(0);
+   288→   288→    t.decimal('Amount', 16, 2).notNullable().defaultTo(0);
+   289→   289→    t.decimal('MaxAmount', 16, 2).notNullable().defaultTo(0);
+   290→   290→    t.integer('IncludeTax').notNullable().defaultTo(0);
+   291→   291→    t.integer('DecreaseAmount').notNullable().defaultTo(0);
+   292→   292→    t.integer('UsePlainSum').notNullable().defaultTo(0);
+   293→   293→    t.integer('ToggleCalculation').notNullable().defaultTo(0);
+   294→   294→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   295→   295→    t.foreign('AccountTransactionTypeId').references('AccountTransactionTypes.Id');
+   296→   296→  });
+   297→   297→
+   298→   298→  await createTable('CalculationSelectors', (t) => {
+   299→   299→    t.text('Name');
+   300→   300→    t.text('ButtonHeader');
+   301→   301→    t.text('ButtonColor');
+   302→   302→    t.integer('FontSize').notNullable().defaultTo(0);
+   303→   303→    t.integer('SortOrder').notNullable().defaultTo(0);
+   304→   304→  });
+   305→   305→
+   306→   306→  await createTable('PaymentTypes', (t) => {
+   307→   307→    t.text('Name');
+   308→   308→    t.integer('SortOrder').notNullable().defaultTo(0);
+   309→   309→    t.text('ButtonColor');
+   310→   310→    t.integer('FontSize').notNullable().defaultTo(40);
+   311→   311→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   312→   312→    t.integer('AccountId');
+   313→   313→    t.foreign('AccountTransactionTypeId').references('AccountTransactionTypes.Id');
+   314→   314→    t.foreign('AccountId').references('Accounts.Id');
+   315→   315→  });
+   316→   316→
+   317→   317→  await createTable('ChangePaymentTypes', (t) => {
+   318→   318→    t.text('Name');
+   319→   319→    t.integer('SortOrder').notNullable().defaultTo(0);
+   320→   320→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   321→   321→    t.integer('AccountId');
+   322→   322→    t.foreign('AccountTransactionTypeId').references('AccountTransactionTypes.Id');
+   323→   323→    t.foreign('AccountId').references('Accounts.Id');
+   324→   324→  });
+   325→   325→
+   326→   326→  await createTable('OrderTagGroups', (t) => {
+   327→   327→    t.text('Name');
+   328→   328→    t.integer('SortOrder').notNullable().defaultTo(0);
+   329→   329→    t.integer('ColumnCount').notNullable().defaultTo(0);
+   330→   330→    t.integer('ButtonHeight').notNullable().defaultTo(0);
+   331→   331→    t.integer('FontSize').notNullable().defaultTo(0);
+   332→   332→    t.text('ButtonColor');
+   333→   333→    t.integer('MaxSelectedItems').notNullable().defaultTo(0);
+   334→   334→    t.integer('MinSelectedItems').notNullable().defaultTo(0);
+   335→   335→    t.integer('AddTagPriceToOrderPrice').notNullable().defaultTo(0);
+   336→   336→    t.integer('FreeTagging').notNullable().defaultTo(0);
+   337→   337→    t.integer('SaveFreeTags').notNullable().defaultTo(0);
+   338→   338→    t.text('GroupTag');
+   339→   339→    t.integer('TaxFree').notNullable().defaultTo(0);
+   340→   340→    t.integer('Hidden').notNullable().defaultTo(0);
+   341→   341→  });
+   342→   342→
+   343→   343→  await createTable('TicketTagGroups', (t) => {
+   344→   344→    t.text('Name');
+   345→   345→    t.integer('SortOrder').notNullable().defaultTo(0);
+   346→   346→    t.integer('FreeTagging').notNullable().defaultTo(0);
+   347→   347→    t.integer('SaveFreeTags').notNullable().defaultTo(0);
+   348→   348→    t.text('ButtonColorWhenTagSelected');
+   349→   349→    t.text('ButtonColorWhenNoTagSelected');
+   350→   350→    t.integer('ForceValue').notNullable().defaultTo(0);
+   351→   351→    t.integer('AskBeforeCreatingTicket').notNullable().defaultTo(0);
+   352→   352→    t.integer('DataType').notNullable().defaultTo(0);
+   353→   353→  });
+   354→   354→
+   355→   355→  await createTable('ProductTimers', (t) => {
+   356→   356→    t.text('Name');
+   357→   357→    t.integer('PriceType').notNullable().defaultTo(0);
+   358→   358→    t.decimal('PriceDuration', 16, 2).notNullable().defaultTo(1);
+   359→   359→    t.decimal('MinTime', 16, 2).notNullable().defaultTo(0);
+   360→   360→    t.decimal('TimeRounding', 16, 2).notNullable().defaultTo(0);
+   361→   361→    t.integer('StartTime').notNullable().defaultTo(0);
+   362→   362→  });
+   363→   363→
+   364→   364→  await createTable('AutomationCommands', (t) => {
+   365→   365→    t.text('Name');
+   366→   366→    t.text('ButtonHeader');
+   367→   367→    t.text('Color');
+   368→   368→    t.integer('FontSize').notNullable().defaultTo(30);
+   369→   369→    t.text('Values');
+   370→   370→    t.integer('ToggleValues').notNullable().defaultTo(0);
+   371→   371→    t.integer('SortOrder').notNullable().defaultTo(0);
+   372→   372→  });
+   373→   373→
+   374→   374→  await createTable('AppRules', (t) => {
+   375→   375→    t.text('Name');
+   376→   376→    t.text('EventName');
+   377→   377→    t.text('EventConstraints');
+   378→   378→    t.text('CustomConstraint');
+   379→   379→    t.text('RuleConstraints');
+   380→   380→    t.integer('ConstraintMatch').notNullable().defaultTo(0);
+   381→   381→    t.integer('SortOrder').notNullable().defaultTo(0);
+   382→   382→  });
+   383→   383→
+   384→   384→  await createTable('InventoryTransactionDocumentTypes', (t) => {
+   385→   385→    t.text('Name');
+   386→   386→    t.integer('SourceEntityTypeId').notNullable().defaultTo(0);
+   387→   387→    t.integer('TargetEntityTypeId').notNullable().defaultTo(0);
+   388→   388→    t.integer('DefaultSourceEntityId').notNullable().defaultTo(0);
+   389→   389→    t.integer('DefaultTargetEntityId').notNullable().defaultTo(0);
+   390→   390→    t.integer('SortOrder').notNullable().defaultTo(0);
+   391→   391→    t.integer('AccountTransactionTypeId');   // nullable: seed allows 0/null when not linked to a txn type
+   392→   392→    t.integer('InventoryTransactionTypeId'); // nullable for same reason
+   393→   393→    t.foreign('AccountTransactionTypeId').references('AccountTransactionTypes.Id');
+   394→   394→    t.foreign('InventoryTransactionTypeId').references('InventoryTransactionTypes.Id');
+   395→   395→  });
+   396→   396→
+   397→   397→  await createTable('EntityScreens', (t) => {
+   398→   398→    t.text('Name');
+   399→   399→    t.integer('TicketTypeId').notNullable().defaultTo(0);
+   400→   400→    t.integer('EntityTypeId').notNullable().defaultTo(0);
+   401→   401→    t.integer('SortOrder').notNullable().defaultTo(0);
+   402→   402→    t.integer('DisplayMode').notNullable().defaultTo(0);
+   403→   403→    t.text('BackgroundColor');
+   404→   404→    t.text('BackgroundImage');
+   405→   405→    t.integer('FontSize').notNullable().defaultTo(50);
+   406→   406→    t.integer('PageCount').notNullable().defaultTo(0);
+   407→   407→    t.integer('RowCount').notNullable().defaultTo(0);
+   408→   408→    t.integer('ColumnCount').notNullable().defaultTo(0);
+   409→   409→    t.integer('ButtonHeight').notNullable().defaultTo(0);
+   410→   410→    t.text('DisplayState');
+   411→   411→    t.text('StateFilter');
+   412→   412→    t.integer('AskTicketType').notNullable().defaultTo(0);
+   413→   413→    t.text('SearchValueReplacePattern');
+   414→   414→  });
+   415→   415→
+   416→   416→  await createTable('MenuItemPortions', (t) => {
+   417→   417→    t.text('Name');
+   418→   418→    t.integer('MenuItemId').notNullable();
+   419→   419→    t.integer('Multiplier').notNullable().defaultTo(1);
+   420→   420→    t.foreign('MenuItemId').references('MenuItems.Id').onDelete('CASCADE');
+   421→   421→  });
+   422→   422→
+   423→   423→  await createTable('ScreenMenuCategories', (t) => {
+   424→   424→    t.text('Name');
+   425→   425→    t.integer('SortOrder').notNullable().defaultTo(0);
+   426→   426→    t.integer('ScreenMenuId').notNullable();
+   427→   427→    t.integer('MostUsedItemsCategory').notNullable().defaultTo(0);
+   428→   428→    t.integer('ColumnCount').notNullable().defaultTo(0);
+   429→   429→    t.integer('MenuItemButtonHeight').notNullable().defaultTo(0);
+   430→   430→    t.text('MenuItemButtonColor');
+   431→   431→    t.float('MenuItemFontSize').notNullable().defaultTo(0);
+   432→   432→    t.integer('WrapText').notNullable().defaultTo(0);
+   433→   433→    t.integer('PageCount').notNullable().defaultTo(0);
+   434→   434→    t.integer('MainButtonHeight').notNullable().defaultTo(0);
+   435→   435→    t.text('MainButtonColor');
+   436→   436→    t.float('MainFontSize').notNullable().defaultTo(0);
+   437→   437→    t.integer('SubButtonHeight').notNullable().defaultTo(0);
+   438→   438→    t.integer('SubButtonRows').notNullable().defaultTo(1);
+   439→   439→    t.text('SubButtonColorDef');
+   440→   440→    t.integer('NumeratorType').notNullable().defaultTo(0);
+   441→   441→    t.text('NumeratorValues');
+   442→   442→    t.text('AlphaButtonValues');
+   443→   443→    t.text('ImagePath');
+   444→   444→    t.integer('MaxItems').notNullable().defaultTo(0);
+   445→   445→    t.foreign('ScreenMenuId').references('ScreenMenus.Id').onDelete('CASCADE');
+   446→   446→  });
+   447→   447→
+   448→   448→  await createTable('OrderTags', (t) => {
+   449→   449→    t.text('Name');
+   450→   450→    t.integer('SortOrder').notNullable().defaultTo(0);
+   451→   451→    t.integer('OrderTagGroupId').notNullable();
+   452→   452→    t.decimal('Price', 16, 2).notNullable().defaultTo(0);
+   453→   453→    t.integer('MenuItemId').notNullable().defaultTo(0);
+   454→   454→    t.integer('MaxQuantity').notNullable().defaultTo(1);
+   455→   455→    t.foreign('OrderTagGroupId').references('OrderTagGroups.Id').onDelete('CASCADE');
+   456→   456→  });
+   457→   457→
+   458→   458→  await createTable('TicketTags', (t) => {
+   459→   459→    t.text('Name');
+   460→   460→    t.integer('TicketTagGroupId').notNullable();
+   461→   461→    t.integer('SortOrder').notNullable().defaultTo(0);
+   462→   462→    t.foreign('TicketTagGroupId').references('TicketTagGroups.Id').onDelete('CASCADE');
+   463→   463→  });
+   464→   464→
+   465→   465→  await createTable('AccountTransactionDocuments', (t) => {
+   466→   466→    t.text('Name');
+   467→   467→    t.text('Date').notNullable();
+   468→   468→    t.integer('DocumentTypeId').notNullable().defaultTo(0);
+   469→   469→  });
+   470→   470→
+   471→   471→  await createTable('Entities', (t) => {
+   472→   472→    t.text('Name');
+   473→   473→    t.integer('EntityTypeId').notNullable();
+   474→   474→    t.text('LastUpdateTime').notNullable();
+   475→   475→    t.text('SearchString');
+   476→   476→    t.text('CustomData');
+   477→   477→    t.integer('AccountId').notNullable().defaultTo(0);
+   478→   478→    t.integer('WarehouseId').notNullable().defaultTo(0);
+   479→   479→    t.foreign('EntityTypeId').references('EntityTypes.Id').onDelete('CASCADE');
+   480→   480→  });
+   481→   481→
+   482→   482→  await createTable('EntityCustomFields', (t) => {
+   483→   483→    t.text('Name');
+   484→   484→    t.integer('FieldType').notNullable().defaultTo(0);
+   485→   485→    t.text('EditingFormat');
+   486→   486→    t.text('ValueSource');
+   487→   487→    t.integer('Hidden').notNullable().defaultTo(0);
+   488→   488→    t.integer('EntityTypeId');
+   489→   489→    t.foreign('EntityTypeId').references('EntityTypes.Id');
+   490→   490→  });
+   491→   491→
+   492→   492→  await createTable('ProductTimerValues', (t) => {
+   493→   493→    t.integer('ProductTimerId').notNullable().defaultTo(0);
+   494→   494→    t.integer('PriceType').notNullable().defaultTo(0);
+   495→   495→    t.decimal('PriceDuration', 16, 2).notNullable().defaultTo(1);
+   496→   496→    t.decimal('MinTime', 16, 2).notNullable().defaultTo(0);
+   497→   497→    t.decimal('TimeRounding', 16, 2).notNullable().defaultTo(0);
+   498→   498→    t.text('Start').notNullable();
+   499→   499→    t.text('End').notNullable();
+   500→   500→  });
+   501→   501→
+   502→   502→  await createTable('Recipes', (t) => {
+   503→   503→    t.text('Name');
+   504→   504→    t.decimal('FixedCost', 16, 2).notNullable().defaultTo(0);
+   505→   505→    t.integer('PortionId');
+   506→   506→    t.foreign('PortionId').references('MenuItemPortions.Id');
+   507→   507→  });
+   508→   508→
+   509→   509→  await createTable('InventoryTransactionsDocuments', (t) => {
+   510→   510→    t.text('Name');
+   511→   511→    t.text('Date').notNullable();
+   512→   512→  });
+   513→   513→
+   514→   514→  await createTable('PeriodicConsumptions', (t) => {
+   515→   515→    t.text('Name');
+   516→   516→    t.integer('WorkPeriodId').notNullable().defaultTo(0);
+   517→   517→    t.text('StartDate').notNullable();
+   518→   518→    t.text('EndDate').notNullable();
+   519→   519→    t.text('LastUpdateTime').notNullable();
+   520→   520→  });
+   521→   521→
+   522→   522→  await createTable('Tasks', (t) => {
+   523→   523→    t.text('Name');
+   524→   524→    t.integer('TaskTypeId').notNullable();
+   525→   525→    t.text('Content');
+   526→   526→    t.text('StartDate').notNullable();
+   527→   527→    t.text('EndDate').notNullable();
+   528→   528→    t.text('CustomData');
+   529→   529→    t.integer('Completed').notNullable().defaultTo(0);
+   530→   530→    t.text('LastUpdateTime').notNullable();
+   531→   531→    t.foreign('TaskTypeId').references('TaskTypes.Id').onDelete('CASCADE');
+   532→   532→  });
+   533→   533→
+   534→   534→  await createTable('ActionContainers', (t) => {
+   535→   535→    t.text('Name');
+   536→   536→    t.integer('AppActionId').notNullable();
+   537→   537→    t.integer('AppRuleId').notNullable();
+   538→   538→    t.text('ParameterValues');
+   539→   539→    t.text('CustomConstraint');
+   540→   540→    t.integer('SortOrder').notNullable().defaultTo(0);
+   541→   541→    t.foreign('AppActionId').references('AppActions.Id');
+   542→   542→    t.foreign('AppRuleId').references('AppRules.Id').onDelete('CASCADE');
+   543→   543→  });
+   544→   544→
+   545→   545→  // -----------------------------------------------------------------
+   546→   546→  // 2. Tickets (the heart of the system) — needs TransactionDocument first
+   547→   547→  // -----------------------------------------------------------------
+   548→   548→  await createTable('Tickets', (t) => {
+   549→   549→    t.text('Name');
+   550→   550→    t.text('LastUpdateTime').notNullable();
+   551→   551→    t.text('TicketNumber');
+   552→   552→    t.text('Date').notNullable();
+   553→   553→    t.text('LastOrderDate').notNullable();
+   554→   554→    t.text('LastPaymentDate').notNullable();
+   555→   555→    t.integer('IsClosed').notNullable().defaultTo(0);
+   556→   556→    t.integer('IsLocked').notNullable().defaultTo(0);
+   557→   557→    t.decimal('RemainingAmount', 16, 2).notNullable().defaultTo(0);
+   558→   558→    t.decimal('TotalAmount', 16, 2).notNullable().defaultTo(0);
+   559→   559→    t.integer('DepartmentId').notNullable().defaultTo(0);
+   560→   560→    t.integer('TicketTypeId').notNullable().defaultTo(0);
+   561→   561→    t.text('Note');
+   562→   562→    t.text('LastModifiedUserName');
+   563→   563→    t.text('TicketTags');
+   564→   564→    t.text('TicketStates');
+   565→   565→    t.text('TicketLogs');
+   566→   566→    t.decimal('ExchangeRate', 18, 2).notNullable().defaultTo(1);
+   567→   567→    t.integer('TaxIncluded').notNullable().defaultTo(1);
+   568→   568→    t.integer('TransactionDocumentId');   // nullable: ticket can exist without a document yet
+   569→   569→    t.foreign('DepartmentId').references('Departments.Id');
+   570→   570→    t.foreign('TicketTypeId').references('TicketTypes.Id');
+   571→   571→    t.foreign('TransactionDocumentId').references('AccountTransactionDocuments.Id');
+   572→   572→  });
+   573→   573→
+   574→   574→  // -----------------------------------------------------------------
+   575→   575→  // 3. Ticket children (composite Id+TicketId in original → simple Id + UNIQUE here)
+   576→   576→  // -----------------------------------------------------------------
+   577→   577→  await createTable('Orders', (t) => {
+   578→   578→    t.integer('TicketId').notNullable();
+   579→   579→    t.integer('WarehouseId').notNullable().defaultTo(0);
+   580→   580→    t.integer('DepartmentId').notNullable().defaultTo(0);
+   581→   581→    t.integer('MenuItemId').notNullable().defaultTo(0);
+   582→   582→    t.text('MenuItemName');
+   583→   583→    t.text('PortionName');
+   584→   584→    t.decimal('Price', 16, 2).notNullable().defaultTo(0);
+   585→   585→    t.decimal('Quantity', 16, 3).notNullable().defaultTo(0);
+   586→   586→    t.integer('PortionCount').notNullable().defaultTo(0);
+   587→   587→    t.integer('Locked').notNullable().defaultTo(0);
+   588→   588→    t.integer('CalculatePrice').notNullable().defaultTo(1);
+   589→   589→    t.integer('DecreaseInventory').notNullable().defaultTo(0);
+   590→   590→    t.integer('IncreaseInventory').notNullable().defaultTo(0);
+   591→   591→    t.integer('OrderNumber').notNullable().defaultTo(0);
+   592→   592→    t.text('CreatingUserName');
+   593→   593→    t.text('CreatedDateTime').notNullable();
+   594→   594→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   595→   595→    t.integer('ProductTimerValueId');
+   596→   596→    t.text('PriceTag');
+   597→   597→    t.text('Tag');
+   598→   598→    t.text('Taxes');
+   599→   599→    t.text('OrderTags');
+   600→   600→    t.text('OrderStates');
+   601→   601→    t.unique(['Id', 'TicketId']);
+   602→   602→    t.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
+   603→   603→    t.foreign('MenuItemId').references('MenuItems.Id');
+   604→   604→    t.foreign('AccountTransactionTypeId').references('AccountTransactionTypes.Id');
+   605→   605→  });
+   606→   606→
+   607→   607→  await createTable('Payments', (t) => {
+   608→   608→    t.integer('PaymentTypeId').notNullable().defaultTo(0);
+   609→   609→    t.integer('TicketId').notNullable();
+   610→   610→    t.text('Name');
+   611→   611→    t.text('Date').notNullable();
+   612→   612→    t.integer('AccountTransactionId').notNullable().defaultTo(0);
+   613→   613→    t.decimal('Amount', 16, 2).notNullable().defaultTo(0);
+   614→   614→    t.integer('UserId').notNullable().defaultTo(0);
+   615→   615→    t.unique(['Id', 'TicketId']);
+   616→   616→    t.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
+   617→   617→    t.foreign('PaymentTypeId').references('PaymentTypes.Id');
+   618→   618→  });
+   619→   619→
+   620→   620→  await createTable('ChangePayments', (t) => {
+   621→   621→    t.integer('ChangePaymentTypeId').notNullable().defaultTo(0);
+   622→   622→    t.integer('TicketId').notNullable();
+   623→   623→    t.text('Name');
+   624→   624→    t.text('Date').notNullable();
+   625→   625→    t.integer('AccountTransactionId').notNullable().defaultTo(0);
+   626→   626→    t.decimal('Amount', 16, 2).notNullable().defaultTo(0);
+   627→   627→    t.integer('UserId').notNullable().defaultTo(0);
+   628→   628→    t.unique(['Id', 'TicketId']);
+   629→   629→    t.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
+   630→   630→    t.foreign('ChangePaymentTypeId').references('ChangePaymentTypes.Id');
+   631→   631→  });
+   632→   632→
+   633→   633→  await createTable('Calculations', (t) => {
+   634→   634→    t.text('Name');
+   635→   635→    t.integer('Order').notNullable().defaultTo(0);
+   636→   636→    t.integer('CalculationTypeId').notNullable().defaultTo(0);
+   637→   637→    t.integer('TicketId').notNullable();
+   638→   638→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   639→   639→    t.integer('CalculationType').notNullable().defaultTo(0);
+   640→   640→    t.integer('IncludeTax').notNullable().defaultTo(0);
+   641→   641→    t.integer('DecreaseAmount').notNullable().defaultTo(0);
+   642→   642→    t.integer('UsePlainSum').notNullable().defaultTo(0);
+   643→   643→    t.decimal('Amount', 16, 2).notNullable().defaultTo(0);
+   644→   644→    t.decimal('CalculationAmount', 16, 2).notNullable().defaultTo(0);
+   645→   645→    t.unique(['Id', 'TicketId']);
+   646→   646→    t.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
+   647→   647→    t.foreign('CalculationTypeId').references('CalculationTypes.Id');
+   648→   648→  });
+   649→   649→
+   650→   650→  await createTable('PaidItems', (t) => {
+   651→   651→    t.text('Key');
+   652→   652→    t.decimal('Quantity', 16, 3).notNullable().defaultTo(0);
+   653→   653→    t.integer('TicketId').notNullable();
+   654→   654→    t.unique(['Id', 'TicketId']);
+   655→   655→    t.foreign('TicketId').references('Tickets.Id').onDelete('CASCADE');
+   656→   656→  });
+   657→   657→
+   658→   658→  await createTable('TicketEntities', (t) => {
+   659→   659→    t.integer('EntityTypeId').notNullable().defaultTo(0);
+   660→   660→    t.integer('EntityId').notNullable().defaultTo(0);
+   661→   661→    t.integer('AccountId').notNullable().defaultTo(0);
+   662→   662→    t.integer('AccountTypeId').notNullable().defaultTo(0);
+   663→   663→    t.text('EntityName');
+   664→   664→    t.text('EntityCustomData');
+   665→   665→    t.integer('TicketId');
+   666→   666→    t.foreign('TicketId').references('Tickets.Id');
+   667→   667→    t.foreign('EntityId').references('Entities.Id');
+   668→   668→  });
+   669→   669→
+   670→   670→  // -----------------------------------------------------------------
+   671→   671→  // 4. AccountTransaction children (composite Id+DocumentId in original)
+   672→   672→  // -----------------------------------------------------------------
+   673→   673→  await createTable('AccountTransactions', (t) => {
+   674→   674→    t.text('Name');
+   675→   675→    t.decimal('Amount', 16, 2).notNullable().defaultTo(0);
+   676→   676→    t.decimal('ExchangeRate', 16, 2).notNullable().defaultTo(1);
+   677→   677→    t.integer('AccountTransactionDocumentId').notNullable();
+   678→   678→    t.integer('AccountTransactionTypeId').notNullable().defaultTo(0);
+   679→   679→    t.integer('SourceAccountTypeId').notNullable().defaultTo(0);
+   680→   680→    t.integer('TargetAccountTypeId').notNullable().defaultTo(0);
+   681→   681→    t.integer('IsReversed').notNullable().defaultTo(0);
+   682→   682→    t.integer('Reversable').notNullable().defaultTo(1);
+   683→   683→    t.unique(['Id', 'AccountTransactionDocumentId']);
+   684→   684→    t.foreign('AccountTransactionDocumentId')
+   685→   685→      .references('AccountTransactionDocuments.Id').onDelete('CASCADE');
+   686→   686→    t.foreign('AccountTransactionTypeId').references('AccountTransactionTypes.Id');
+   687→   687→  });
+   688→   688→
+   689→   689→  await createTable('AccountTransactionValues', (t) => {
+   690→   690→    t.text('Name');
+   691→   691→    t.integer('AccountTypeId').notNullable().defaultTo(0);
+   692→   692→    t.integer('AccountId').notNullable().defaultTo(0);
+   693→   693→    t.text('Date').notNullable();
+   694→   694→    t.decimal('Debit', 16, 2).notNullable().defaultTo(0);
+   695→   695→    t.decimal('Credit', 16, 2).notNullable().defaultTo(0);
+   696→   696→    t.decimal('Exchange', 16, 2).notNullable().defaultTo(0);
+   697→   697→    t.integer('AccountTransactionId').notNullable();
+   698→   698→    t.integer('AccountTransactionDocumentId').notNullable();
+   699→   699→    t.unique(['Id', 'AccountTransactionId', 'AccountTransactionDocumentId']);
+   700→   700→    // SQLite/Knex limitation: composite FKs aren't well supported via builder API.
+   701→   701→    // AccountTransactions.Id is already a simple AUTOINCREMENT PK (unique by itself),
+   702→   702→    // so a single-column FK is sufficient for integrity. We keep the UNIQUE constraint
+   703→   703→    // above to preserve the original composite-key semantic.
+   704→   704→    t.foreign('AccountTransactionId').references('AccountTransactions.Id').onDelete('CASCADE');
+   705→   705→    t.foreign('AccountTransactionDocumentId').references('AccountTransactionDocuments.Id').onDelete('CASCADE');
+   706→   706→  });
+   707→   707→
+   708→   708→  // -----------------------------------------------------------------
+   709→   709→  // 5. Map tables (Terminal/Department/UserRole/TicketType scoping)
+   710→   710→  // -----------------------------------------------------------------
+   711→   711→  const mapTables = [
+   712→   712→    ['OrderTagMaps', 'OrderTagGroupId', 'OrderTagGroups'],
+   713→   713→    ['TicketTagMaps', 'TicketTagGroupId', 'TicketTagGroups'],
+   714→   714→    ['TaxTemplateMaps', 'TaxTemplateId', 'TaxTemplates'],
+   715→   715→    ['ProductTimerMaps', 'ProductTimerId', 'ProductTimers'],
+   716→   716→    ['PaymentTypeMaps', 'PaymentTypeId', 'PaymentTypes'],
+   717→   717→    ['ChangePaymentTypeMaps', 'ChangePaymentTypeId', 'ChangePaymentTypes'],
+   718→   718→    ['CalculationSelectorMaps', 'CalculationSelectorId', 'CalculationSelectors'],
+   719→   719→    ['AppRuleMaps', 'AppRuleId', 'AppRules'],
+   720→   720→    ['AutomationCommandMaps', 'AutomationCommandId', 'AutomationCommands'],
+   721→   721→    ['AccountTransactionDocumentTypeMaps', 'AccountTransactionDocumentTypeId', 'AccountTransactionDocumentTypes'],
+   722→   722→    ['EntityScreenMaps', 'EntityScreenId', 'EntityScreens'],
+   723→   723→    // MenuAssignments + EntityTypeAssignments declare their own TicketTypeId FK
+   724→   724→    // (with ON DELETE CASCADE) and skip the generic one above.
+   725→   725→    ['MenuAssignments', null, 'TicketTypes'],
+   726→   726→    ['EntityTypeAssignments', null, 'TicketTypes'],
+   727→   727→  ];
+   728→   728→  for (const [tbl, fkCol, refTbl] of mapTables) {
+   729→   729→    await createTable(tbl, (t) => {
+   730→   730→      t.integer('TerminalId').notNullable().defaultTo(0);
+   731→   731→      t.integer('DepartmentId').notNullable().defaultTo(0);
+   732→   732→      t.integer('UserRoleId').notNullable().defaultTo(0);
+   733→   733→      // MenuAssignments and EntityTypeAssignments declare TicketTypeId themselves
+   734→   734→      // (because they have an explicit FK with ON DELETE CASCADE).
+   735→   735→      if (tbl !== 'MenuAssignments' && tbl !== 'EntityTypeAssignments') {
+   736→   736→        t.integer('TicketTypeId').notNullable().defaultTo(0);
+   737→   737→      }
+   738→   738→      if (fkCol) {
+   739→   739→        t.integer(fkCol).notNullable();
+   740→   740→      }
+   741→   741→      // Some maps have extra columns:
+   742→   742→      if (tbl === 'OrderTagMaps' || tbl === 'TaxTemplateMaps' || tbl === 'ProductTimerMaps') {
+   743→   743→        t.text('MenuItemGroupCode');
+   744→   744→        t.integer('MenuItemId').notNullable().defaultTo(0);
+   745→   745→      }
+   746→   746→      if (tbl === 'AutomationCommandMaps') {
+   747→   747→        t.integer('DisplayOnTicket').notNullable().defaultTo(1);
+   748→   748→        t.integer('DisplayOnPayment').notNullable().defaultTo(0);
+   749→   749→        t.integer('DisplayOnOrders').notNullable().defaultTo(0);
+   750→   750→        t.integer('DisplayOnTicketList').notNullable().defaultTo(0);
+   751→   751→        t.integer('DisplayUnderTicket').notNullable().defaultTo(0);
+   752→   752→        t.integer('DisplayUnderTicket2').notNullable().defaultTo(0);
+   753→   753→        t.integer('DisplayOnCommandSelector').notNullable().defaultTo(0);
+   754→   754→        t.text('EnabledStates');
+   755→   755→        t.text('VisibleStates');
+   756→   756→      }
+   757→   757→      if (tbl === 'MenuAssignments') {
+   758→   758→        t.integer('TicketTypeId').notNullable();  // FK target
+   759→   759→        t.text('TerminalName');
+   760→   760→        t.integer('MenuId').notNullable().defaultTo(0);
+   761→   761→        t.integer('SortOrder').notNullable().defaultTo(0);
+   762→   762→      }
+   763→   763→      if (tbl === 'EntityTypeAssignments') {
+   764→   764→        t.integer('TicketTypeId').notNullable();  // FK target
+   765→   765→        t.integer('EntityTypeId').notNullable().defaultTo(0);
+   766→   766→        t.text('EntityTypeName');
+   767→   767→        t.integer('AskBeforeCreatingTicket').notNullable().defaultTo(0);
+   768→   768→        t.text('State');
+   769→   769→        t.integer('CopyToNewTickets').notNullable().defaultTo(1);
+   770→   770→        t.integer('SortOrder').notNullable().defaultTo(0);
+   771→   771→      }
+   772→   772→      if (fkCol) {
+   773→   773→        t.foreign(fkCol).references(`${refTbl}.Id`).onDelete('CASCADE');
+   774→   774→      } else {
+   775→   775→        // MenuAssignments / EntityTypeAssignments: FK on TicketTypeId
+   776→   776→        t.foreign('TicketTypeId').references('TicketTypes.Id').onDelete('CASCADE');
+   777→   777→      }
+   778→   778→    });
+   779→   779→  }
+   780→   780→
+   781→   781→  // -----------------------------------------------------------------
+   782→   782→  // 6. Other child tables
+   783→   783→  // -----------------------------------------------------------------
+   784→   784→  await createTable('MenuItemPrices', (t) => {
+   785→   785→    t.integer('MenuItemPortionId').notNullable();
+   786→   786→    t.text('PriceTag');
+   787→   787→    t.decimal('Price', 16, 2).notNullable().defaultTo(0);
+   788→   788→    t.unique(['Id', 'MenuItemPortionId']);
+   789→   789→    t.foreign('MenuItemPortionId').references('MenuItemPortions.Id').onDelete('CASCADE');
+   790→   790→  });
+   791→   791→
+   792→   792→  await createTable('ScreenMenuItems', (t) => {
+   793→   793→    t.text('Name');
+   794→   794→    t.integer('ScreenMenuCategoryId').notNullable();
+   795→   795→    t.integer('MenuItemId').notNullable().defaultTo(0);
+   796→   796→    t.integer('SortOrder').notNullable().defaultTo(0);
+   797→   797→    t.integer('AutoSelect').notNullable().defaultTo(0);
+   798→   798→    t.text('ButtonColor');
+   799→   799→    t.integer('Quantity').notNullable().defaultTo(0);
+   800→   800→    t.text('ImagePath');
+   801→   801→    t.float('FontSize').notNullable().defaultTo(0);
+   802→   802→    t.text('SubMenuTag');
+   803→   803→    t.text('ItemPortion');
+   804→   804→    t.text('OrderTags');
+   805→   805→    t.text('OrderStates');
+   806→   806→    t.text('AutomationCommand');
+   807→   807→    t.text('AutomationCommandValue');
+   808→   808→    t.foreign('ScreenMenuCategoryId').references('ScreenMenuCategories.Id').onDelete('CASCADE');
+   809→   809→  });
+   810→   810→
+   811→   811→  await createTable('AccountScreenValues', (t) => {
+   812→   812→    t.integer('AccountScreenId').notNullable();
+   813→   813→    t.integer('AccountTypeId').notNullable().defaultTo(0);
+   814→   814→    t.text('AccountTypeName');
+   815→   815→    t.integer('DisplayDetails').notNullable().defaultTo(0);
+   816→   816→    t.integer('HideZeroBalanceAccounts').notNullable().defaultTo(0);
+   817→   817→    t.integer('SortOrder').notNullable().defaultTo(0);
+   818→   818→    t.unique(['Id', 'AccountScreenId']);
+   819→   819→    t.foreign('AccountScreenId').references('AccountScreens.Id').onDelete('CASCADE');
+   820→   820→  });
+   821→   821→
+   822→   822→  await createTable('EntityScreenItems', (t) => {
+   823→   823→    t.text('Name');
+   824→   824→    t.integer('EntityScreenId').notNullable();
+   825→   825→    t.integer('EntityId').notNullable().defaultTo(0);
+   826→   826→    t.text('EntityState');
+   827→   827→    t.integer('SortOrder').notNullable().defaultTo(0);
+   828→   828→    t.text('LastUpdateTime').notNullable();
+   829→   829→    t.unique(['Id', 'EntityScreenId']);
+   830→   830→    t.foreign('EntityScreenId').references('EntityScreens.Id').onDelete('CASCADE');
+   831→   831→  });
+   832→   832→
+   833→   833→  await createTable('EntityStateValues', (t) => {
+   834→   834→    t.integer('EntityId').notNullable().defaultTo(0);
+   835→   835→    t.text('EntityStates');
+   836→   836→    t.foreign('EntityId').references('Entities.Id');
+   837→   837→  });
+   838→   838→
+   839→   839→  await createTable('Widgets', (t) => {
+   840→   840→    t.text('Name');
+   841→   841→    t.integer('EntityScreenId').notNullable().defaultTo(0);
+   842→   842→    t.integer('XLocation').notNullable().defaultTo(0);
+   843→   843→    t.integer('YLocation').notNullable().defaultTo(0);
+   844→   844→    t.integer('Height').notNullable().defaultTo(0);
+   845→   845→    t.integer('Width').notNullable().defaultTo(0);
+   846→   846→    t.integer('CornerRadius').notNullable().defaultTo(0);
+   847→   847→    t.float('Angle').notNullable().defaultTo(0);
+   848→   848→    t.float('Scale').notNullable().defaultTo(1);
+   849→   849→    t.text('Properties');
+   850→   850→    t.text('CreatorName');
+   851→   851→    t.integer('AutoRefresh').notNullable().defaultTo(0);
+   852→   852→    t.integer('AutoRefreshInterval').notNullable().defaultTo(0);
+   853→   853→    t.foreign('EntityScreenId').references('EntityScreens.Id').onDelete('CASCADE');
+   854→   854→  });
+   855→   855→
+   856→   856→  await createTable('PrinterMaps', (t) => {
+   857→   857→    t.integer('PrintJobId').notNullable().defaultTo(0);
+   858→   858→    t.text('MenuItemGroupCode');
+   859→   859→    t.integer('MenuItemId').notNullable().defaultTo(0);
+   860→   860→    t.integer('PrinterId').notNullable().defaultTo(0);
+   861→   861→    t.integer('PrinterTemplateId').notNullable().defaultTo(0);
+   862→   862→    t.foreign('PrintJobId').references('PrintJobs.Id').onDelete('CASCADE');
+   863→   863→    t.foreign('PrinterId').references('Printers.Id');
+   864→   864→    t.foreign('PrinterTemplateId').references('PrinterTemplates.Id');
+   865→   865→  });
+   866→   866→
+   867→   867→  await createTable('CalculationSelectorCalculationTypes', (t) => {
+   868→   868→    t.integer('CalculationSelectorId').notNullable();
+   869→   869→    t.integer('CalculationTypeId').notNullable();
+   870→   870→    t.primary(['CalculationSelectorId', 'CalculationTypeId']); // pure M:N, no Id
+   871→   871→    t.foreign('CalculationSelectorId').references('CalculationSelectors.Id').onDelete('CASCADE');
+   872→   872→    t.foreign('CalculationTypeId').references('CalculationTypes.Id').onDelete('CASCADE');
+   873→   873→  });
+   874→   874→
+   875→   875→  await createTable('AccountTransactionDocumentTypeAccountTransactionTypes', (t) => {
+   876→   876→    t.integer('AccountTransactionDocumentTypeId').notNullable();
+   877→   877→    t.integer('AccountTransactionTypeId').notNullable();
+   878→   878→    t.primary(['AccountTransactionDocumentTypeId', 'AccountTransactionTypeId']);
+   879→   879→    t.foreign('AccountTransactionDocumentTypeId')
+   880→   880→      .references('AccountTransactionDocumentTypes.Id').onDelete('CASCADE');
+   881→   881→    t.foreign('AccountTransactionTypeId')
+   882→   882→      .references('AccountTransactionTypes.Id').onDelete('CASCADE');
+   883→   883→  });
+   884→   884→
+   885→   885→  await createTable('AccountTransactionDocumentAccountMaps', (t) => {
+   886→   886→    t.integer('AccountTransactionDocumentTypeId').notNullable().defaultTo(0);
+   887→   887→    t.integer('AccountId').notNullable().defaultTo(0);
+   888→   888→    t.text('AccountName');
+   889→   889→    t.integer('MappedAccountId').notNullable().defaultTo(0);
+   890→   890→    t.text('MappedAccountName');
+   891→   891→    t.foreign('AccountTransactionDocumentTypeId')
+   892→   892→      .references('AccountTransactionDocumentTypes.Id').onDelete('CASCADE');
+   893→   893→  });
+   894→   894→
+   895→   895→  await createTable('RecipeItems', (t) => {
+   896→   896→    t.decimal('Quantity', 16, 3).notNullable().defaultTo(0);
+   897→   897→    t.integer('RecipeId').notNullable().defaultTo(0);
+   898→   898→    t.integer('InventoryItemId');
+   899→   899→    t.foreign('RecipeId').references('Recipes.Id').onDelete('CASCADE');
+   900→   900→    t.foreign('InventoryItemId').references('InventoryItems.Id');
+   901→   901→  });
+   902→   902→
+   903→   903→  await createTable('InventoryTransactions', (t) => {
+   904→   904→    t.integer('InventoryTransactionDocumentId').notNullable().defaultTo(0);
+   905→   905→    t.integer('InventoryTransactionTypeId').notNullable().defaultTo(0);
+   906→   906→    t.integer('SourceWarehouseId').notNullable().defaultTo(0);
+   907→   907→    t.integer('TargetWarehouseId').notNullable().defaultTo(0);
+   908→   908→    t.text('Date').notNullable();
+   909→   909→    t.text('Unit');
+   910→   910→    t.integer('Multiplier').notNullable().defaultTo(1);
+   911→   911→    t.decimal('Quantity', 16, 3).notNullable().defaultTo(0);
+   912→   912→    t.decimal('Price', 16, 2).notNullable().defaultTo(0);
+   913→   913→    t.integer('InventoryItemId');
+   914→   914→    t.foreign('InventoryTransactionDocumentId')
+   915→   915→      .references('InventoryTransactionsDocuments.Id').onDelete('CASCADE');
+   916→   916→    t.foreign('InventoryItemId').references('InventoryItems.Id');
+   917→   917→  });
+   918→   918→
+   919→   919→  await createTable('WarehouseConsumptions', (t) => {
+   920→   920→    t.integer('PeriodicConsumptionId').notNullable();
+   921→   921→    t.integer('WarehouseId').notNullable().defaultTo(0);
+   922→   922→    t.unique(['Id', 'PeriodicConsumptionId']);
+   923→   923→    t.foreign('PeriodicConsumptionId')
+   924→   924→      .references('PeriodicConsumptions.Id').onDelete('CASCADE');
+   925→   925→  });
+   926→   926→
+   927→   927→  await createTable('PeriodicConsumptionItems', (t) => {
+   928→   928→    t.integer('PeriodicConsumptionId').notNullable();
+   929→   929→    t.integer('WarehouseConsumptionId').notNullable();
+   930→   930→    t.integer('InventoryItemId').notNullable().defaultTo(0);
+   931→   931→    t.text('InventoryItemName');
+   932→   932→    t.text('UnitName');
+   933→   933→    t.decimal('UnitMultiplier', 16, 2).notNullable().defaultTo(1);
+   934→   934→    t.decimal('InStock', 16, 3).notNullable().defaultTo(0);
+   935→   935→    t.decimal('Added', 16, 3).notNullable().defaultTo(0);
+   936→   936→    t.decimal('Removed', 16, 3).notNullable().defaultTo(0);
+   937→   937→    t.decimal('Consumption', 16, 3).notNullable().defaultTo(0);
+   938→   938→    t.decimal('PhysicalInventory', 16, 3);
+   939→   939→    t.decimal('Cost', 16, 2).notNullable().defaultTo(0);
+   940→   940→    t.unique(['Id', 'WarehouseConsumptionId', 'PeriodicConsumptionId']);
+   941→   941→  });
+   942→   942→
+   943→   943→  await createTable('CostItems', (t) => {
+   944→   944→    t.text('Name');
+   945→   945→    t.integer('PeriodicConsumptionId').notNullable();
+   946→   946→    t.integer('WarehouseConsumptionId').notNullable();
+   947→   947→    t.integer('MenuItemId').notNullable().defaultTo(0);
+   948→   948→    t.integer('PortionId').notNullable().defaultTo(0);
+   949→   949→    t.text('PortionName');
+   950→   950→    t.decimal('Quantity', 16, 3).notNullable().defaultTo(0);
+   951→   951→    t.decimal('CostPrediction', 16, 2).notNullable().defaultTo(0);
+   952→   952→    t.decimal('Cost', 16, 2).notNullable().defaultTo(0);
+   953→   953→    t.unique(['Id', 'WarehouseConsumptionId', 'PeriodicConsumptionId']);
+   954→   954→  });
+   955→   955→
+   956→   956→  await createTable('TaskTokens', (t) => {
+   957→   957→    t.integer('TaskId').notNullable();
+   958→   958→    t.text('Caption');
+   959→   959→    t.text('Value');
+   960→   960→    t.integer('Type').notNullable().defaultTo(0);
+   961→   961→    t.integer('ReferenceTypeId').notNullable().defaultTo(0);
+   962→   962→    t.integer('ReferenceId').notNullable().defaultTo(0);
+   963→   963→    t.unique(['Id', 'TaskId']);
+   964→   964→    t.foreign('TaskId').references('Tasks.Id').onDelete('CASCADE');
+   965→   965→  });
+   966→   966→
+   967→   967→  await createTable('TaskCustomFields', (t) => {
+   968→   968→    t.text('Name');
+   969→   969→    t.integer('TaskTypeId').notNullable().defaultTo(0);
+   970→   970→    t.integer('FieldType').notNullable().defaultTo(0);
+   971→   971→    t.text('EditingFormat');
+   972→   972→    t.text('DisplayFormat');
+   973→   973→    t.unique(['Id', 'TaskTypeId']);
+   974→   974→    t.foreign('TaskTypeId').references('TaskTypes.Id').onDelete('CASCADE');
+   975→   975→  });
+   976→   976→
+   977→   977→  // -----------------------------------------------------------------
+   978→   978→  // 7. VersionInfo (FluentMigrator-style version tracking, preserved)
+   979→   979→  // -----------------------------------------------------------------
+   980→   980→  await knex.schema.createTable('VersionInfo', (t) => {
+   981→   981→    t.bigInteger('Version').notNullable();
+   982→   982→  });
+   983→   983→  // Stamp versions 1..24 to mirror the original migration history
+   984→   984→  for (let v = 1; v <= 24; v++) {
+   985→   985→    await knex('VersionInfo').insert({ Version: v });
+   986→   986→  }
+   987→   987→
+   988→   988→  // -----------------------------------------------------------------
+   989→   989→  // 8. Indexes (manual — Knex auto-creates indexes for FK columns
+   990→   990→  //    but we want explicit composite indexes for performance)
+   991→   991→  // -----------------------------------------------------------------
+   992→   992→  await knex.schema.alterTable('Tickets', (t) => {
+   993→   993→    t.index(['LastPaymentDate'], 'IX_Tickets_LastPaymentDate');
+   994→   994→    t.index(['TicketNumber'], 'IX_Tickets_TicketNumber');
+   995→   995→    t.index(['DepartmentId'], 'IX_Tickets_DepartmentId');
+   996→   996→    t.index(['TicketTypeId'], 'IX_Tickets_TicketTypeId');
+   997→   997→  });
+   998→   998→  await knex.schema.alterTable('Orders', (t) => {
+   999→   999→    t.index(['TicketId'], 'IX_Orders_TicketId');
+  1000→  1000→    t.index(['TicketId', 'OrderNumber'], 'IX_Orders_TicketId_OrderNumber');
+  1001→  1001→    t.index(['MenuItemId'], 'IX_Orders_MenuItemId');
+  1002→  1002→  });
+  1003→  1003→  await knex.schema.alterTable('Payments', (t) => {
+  1004→  1004→    t.index(['TicketId'], 'IX_Payments_TicketId');
+  1005→  1005→    t.index(['PaymentTypeId'], 'IX_Payments_PaymentTypeId');
+  1006→  1006→  });
+  1007→  1007→  await knex.schema.alterTable('Calculations', (t) => {
+  1008→  1008→    t.index(['TicketId'], 'IX_Calculations_TicketId');
+  1009→  1009→    t.index(['CalculationTypeId'], 'IX_Calculations_CalculationTypeId');
+  1010→  1010→  });
+  1011→  1011→  await knex.schema.alterTable('ChangePayments', (t) => {
+  1012→  1012→    t.index(['TicketId'], 'IX_ChangePayments_TicketId');
+  1013→  1013→  });
+  1014→  1014→  await knex.schema.alterTable('PaidItems', (t) => {
+  1015→  1015→    t.index(['TicketId'], 'IX_PaidItems_TicketId');
+  1016→  1016→  });
+  1017→  1017→  await knex.schema.alterTable('TicketEntities', (t) => {
+  1018→  1018→    t.index(['TicketId'], 'IX_TicketEntities_TicketId');
+  1019→  1019→    t.index(['EntityId'], 'IX_TicketEntities_EntityId');
+  1020→  1020→  });
+  1021→  1021→  await knex.schema.alterTable('EntityStateValues', (t) => {
+  1022→  1022→    t.unique(['EntityId'], 'IX_EntityStateValue_EntityId');
+  1023→  1023→  });
+  1024→  1024→  await knex.schema.alterTable('AccountTransactions', (t) => {
+  1025→  1025→    t.index(['AccountTransactionDocumentId'], 'IX_AT_DocumentId');
+  1026→  1026→    t.index(['AccountTransactionTypeId'], 'IX_AT_TypeId');
+  1027→  1027→  });
+  1028→  1028→  await knex.schema.alterTable('AccountTransactionValues', (t) => {
+  1029→  1029→    t.index(['AccountId'], 'IX_ATV_AccountId');
+  1030→  1030→    t.index(['AccountTransactionId'], 'IX_ATV_ATId');
+  1031→  1031→  });
+  1032→  1032→  await knex.schema.alterTable('Entities', (t) => {
+  1033→  1033→    t.index(['EntityTypeId'], 'IX_Entities_EntityTypeId');
+  1034→  1034→  });
+  1035→  1035→  await knex.schema.alterTable('MenuItems', (t) => {
+  1036→  1036→    t.index(['GroupCode'], 'IX_MenuItems_GroupCode');
+  1037→  1037→    t.index(['Barcode'], 'IX_MenuItems_Barcode');
+  1038→  1038→  });
+  1039→  1039→}
+  1040→  1040→
+  1041→  1041→async function down(knex) {
+  1042→  1042→  // Drop in reverse-dependency order
+  1043→  1043→  const tables = [
+  1044→  1044→    'VersionInfo',
+  1045→  1045→    'TaskCustomFields', 'TaskTokens',
+  1046→  1046→    'CostItems', 'PeriodicConsumptionItems', 'WarehouseConsumptions',
+  1047→  1047→    'InventoryTransactions', 'RecipeItems', 'InventoryTransactionsDocuments',
+  1048→  1048→    'AccountTransactionDocumentAccountMaps',
+  1049→  1049→    'AccountTransactionDocumentTypeAccountTransactionTypes',
+  1050→  1050→    'CalculationSelectorCalculationTypes',
+  1051→  1051→    'PrinterMaps', 'Widgets', 'EntityStateValues', 'EntityScreenItems',
+  1052→  1052→    'AccountScreenValues', 'ScreenMenuItems', 'MenuItemPrices',
+  1053→  1053→    'EntityTypeAssignments', 'MenuAssignments',
+  1054→  1054→    'EntityScreenMaps', 'AccountTransactionDocumentTypeMaps',
+  1055→  1055→    'AutomationCommandMaps', 'AppRuleMaps', 'CalculationSelectorMaps',
+  1056→  1056→    'ChangePaymentTypeMaps', 'PaymentTypeMaps', 'ProductTimerMaps',
+  1057→  1057→    'TaxTemplateMaps', 'TicketTagMaps', 'OrderTagMaps',
+  1058→  1058→    'AccountTransactionValues', 'AccountTransactions',
+  1059→  1059→    'TicketEntities', 'PaidItems', 'Calculations', 'ChangePayments', 'Payments', 'Orders',
+  1060→  1060→    'Tickets', 'AccountTransactionDocuments',
+  1061→  1061→    'ActionContainers', 'Tasks', 'PeriodicConsumptions',
+  1062→  1062→    'InventoryTransactionDocumentTypes', 'Recipes', 'ProductTimerValues',
+  1063→  1063→    'EntityCustomFields', 'Entities', 'TicketTags', 'OrderTags',
+  1064→  1064→    'ScreenMenuCategories', 'MenuItemPortions', 'EntityScreens',
+  1065→  1065→    'AppRules', 'AutomationCommands', 'ProductTimers', 'TicketTagGroups',
+  1066→  1066→    'OrderTagGroups', 'ChangePaymentTypes', 'PaymentTypes',
+  1067→  1067→    'CalculationSelectors', 'CalculationTypes', 'MenuItems',
+  1068→  1068→    'AccountScreens', 'Accounts', 'Permissions', 'Users', 'Departments',
+  1069→  1069→    'Warehouses', 'Terminals', 'PrintJobs', 'PrinterTemplates', 'Printers',
+  1070→  1070→    'AccountTransactionDocumentTypes', 'AccountTransactionTypes',
+  1071→  1071→    'InventoryTransactionTypes', 'InventoryItems', 'TaxTemplates',
+  1072→  1072→    'ScreenMenus', 'MenuItemPriceDefinitions', 'TicketTypes', 'EntityTypes',
+  1073→  1073→    'Scripts', 'AppActions', 'States', 'TaskTypes', 'Numerators',
+  1074→  1074→    'ProgramSettings', 'Triggers', 'ForeignCurrencies', 'WorkPeriods',
+  1075→  1075→    'UserRoles', 'AccountTypes', 'WarehouseTypes',
+  1076→  1076→  ];
+  1077→  1077→  for (const tbl of tables) {
+  1078→  1078→    await knex.schema.dropTableIfExists(tbl);
+  1079→  1079→  }
+  1080→  1080→}
+  1081→  1081→
+  1082→  1082→module.exports = { up, down };
+  1083→  1083→

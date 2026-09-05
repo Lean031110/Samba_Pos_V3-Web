@@ -1,0 +1,863 @@
+     1→﻿using System;
+     2→using System.Collections.Generic;
+     3→using System.Diagnostics;
+     4→using System.Globalization;
+     5→using System.Linq;
+     6→using Samba.Domain.Builders;
+     7→using Samba.Domain.Models.Accounts;
+     8→using Samba.Domain.Models.Menus;
+     9→using Samba.Infrastructure.Data;
+    10→using Samba.Infrastructure.Data.Serializer;
+    11→using Samba.Infrastructure.Helpers;
+    12→using Samba.Infrastructure.Settings;
+    13→
+    14→namespace Samba.Domain.Models.Tickets
+    15→{
+    16→    public class Ticket : EntityClass, ICacheable
+    17→    {
+    18→        private bool _shouldLock;
+    19→
+    20→        public Ticket()
+    21→            : this(0)
+    22→        {
+    23→
+    24→        }
+    25→
+    26→        public Ticket(int ticketId)
+    27→        {
+    28→            Id = ticketId;
+    29→            Date = DateTime.Now;
+    30→            LastPaymentDate = DateTime.Now;
+    31→            LastOrderDate = DateTime.Now;
+    32→            LastUpdateTime = DateTime.Now;
+    33→            ExchangeRate = 1;
+    34→
+    35→            _orders = new List<Order>();
+    36→            _paidItems = new List<PaidItem>();
+    37→            _calculations = new List<Calculation>();
+    38→            _payments = new List<Payment>();
+    39→            _changePayments = new List<ChangePayment>();
+    40→            _ticketEntities = new List<TicketEntity>();
+    41→        }
+    42→
+    43→        private static Ticket _emptyTicket;
+    44→        public static Ticket Empty
+    45→        {
+    46→            get
+    47→            {
+    48→                return _emptyTicket ?? (_emptyTicket = new Ticket
+    49→                                                           {
+    50→                                                               TransactionDocument = new AccountTransactionDocument()
+    51→                                                           });
+    52→            }
+    53→        }
+    54→
+    55→        public DateTime LastUpdateTime { get; set; }
+    56→
+    57→        private string _ticketNumber;
+    58→        public string TicketNumber
+    59→        {
+    60→            get { return _ticketNumber; }
+    61→            set
+    62→            {
+    63→                _ticketNumber = value;
+    64→                if (TransactionDocument != null)
+    65→                {
+    66→                    TransactionDocument.Name = string.Format("Ticket Transaction [{0}]", TicketNumber);
+    67→                }
+    68→            }
+    69→        }
+    70→
+    71→        public DateTime Date { get; set; }
+    72→        public DateTime LastOrderDate { get; set; }
+    73→        public DateTime LastPaymentDate { get; set; }
+    74→
+    75→        public bool IsClosed { get; set; }
+    76→        public bool IsLocked { get; set; }
+    77→        public void UnLock() { if (!IsClosed) IsLocked = false; }
+    78→        public void Lock() { IsLocked = true; }
+    79→        public void Close()
+    80→        {
+    81→            if (RemainingAmount == 0 && !HasActiveTimers())
+    82→            {
+    83→                IsClosed = true;
+    84→                PaidItems.Clear();
+    85→            }
+    86→        }
+    87→
+    88→        public decimal RemainingAmount { get; set; }
+    89→        public decimal TotalAmount { get; set; }
+    90→
+    91→        public int DepartmentId { get; set; }
+    92→        public int TicketTypeId { get; set; }
+    93→        public string Note { get; set; }
+    94→        public string LastModifiedUserName { get; set; }
+    95→
+    96→        private string _ticketTags;
+    97→        public string TicketTags
+    98→        {
+    99→            get { return _ticketTags; }
+   100→            set
+   101→            {
+   102→                _ticketTags = value;
+   103→                _ticketTagValues = null;
+   104→            }
+   105→        }
+   106→
+   107→        private string _ticketStates;
+   108→        public string TicketStates
+   109→        {
+   110→            get { return _ticketStates; }
+   111→            set
+   112→            {
+   113→                _ticketStates = value;
+   114→                _ticketStateValues = null;
+   115→            }
+   116→        }
+   117→
+   118→        private string _ticketLogs;
+   119→        public string TicketLogs
+   120→        {
+   121→            get { return _ticketLogs; }
+   122→            set
+   123→            {
+   124→                _ticketLogs = value;
+   125→                _ticketLogValues = null;
+   126→            }
+   127→        }
+   128→
+   129→        public decimal ExchangeRate { get; set; }
+   130→        public bool TaxIncluded { get; set; }
+   131→
+   132→        public virtual AccountTransactionDocument TransactionDocument { get; set; }
+   133→
+   134→        private IList<TicketEntity> _ticketEntities;
+   135→        public virtual IList<TicketEntity> TicketEntities
+   136→        {
+   137→            get { return _ticketEntities; }
+   138→            set { _ticketEntities = value; }
+   139→        }
+   140→
+   141→        private IList<Order> _orders;
+   142→        public virtual IList<Order> Orders
+   143→        {
+   144→            get { return _orders; }
+   145→            set { _orders = value; }
+   146→        }
+   147→
+   148→        private IList<Calculation> _calculations;
+   149→        public virtual IList<Calculation> Calculations
+   150→        {
+   151→            get { return _calculations; }
+   152→            set { _calculations = value; }
+   153→        }
+   154→
+   155→        private IList<Payment> _payments;
+   156→        public virtual IList<Payment> Payments
+   157→        {
+   158→            get { return _payments; }
+   159→            set { _payments = value; }
+   160→        }
+   161→
+   162→        private IList<ChangePayment> _changePayments;
+   163→        public virtual IList<ChangePayment> ChangePayments
+   164→        {
+   165→            get { return _changePayments; }
+   166→            set { _changePayments = value; }
+   167→        }
+   168→
+   169→        private IList<PaidItem> _paidItems;
+   170→        public virtual IList<PaidItem> PaidItems
+   171→        {
+   172→            get { return _paidItems; }
+   173→            set { _paidItems = value; }
+   174→        }
+   175→
+   176→        private IList<TicketTagValue> _ticketTagValues;
+   177→        private IList<TicketTagValue> TicketTagValues
+   178→        {
+   179→            get { return _ticketTagValues ?? (_ticketTagValues = JsonHelper.Deserialize<List<TicketTagValue>>(TicketTags)); }
+   180→        }
+   181→
+   182→        private IList<TicketStateValue> _ticketStateValues;
+   183→        private IList<TicketStateValue> TicketStateValues
+   184→        {
+   185→            get { return _ticketStateValues ?? (_ticketStateValues = JsonHelper.Deserialize<List<TicketStateValue>>(TicketStates)); }
+   186→        }
+   187→
+   188→        private IList<TicketLogValue> _ticketLogValues;
+   189→        private IList<TicketLogValue> TicketLogValues
+   190→        {
+   191→            get { return _ticketLogValues ?? (_ticketLogValues = JsonHelper.Deserialize<List<TicketLogValue>>(TicketLogs)); }
+   192→        }
+   193→
+   194→        public IList<TicketTagValue> GetTicketTagValues()
+   195→        {
+   196→            return TicketTagValues;
+   197→        }
+   198→
+   199→        public IEnumerable<TicketStateValue> GetTicketStateValues()
+   200→        {
+   201→            return TicketStateValues;
+   202→        }
+   203→
+   204→        public IEnumerable<TicketLogValue> GetTicketLogValues()
+   205→        {
+   206→            return TicketLogValues;
+   207→        }
+   208→
+   209→        public IEnumerable<AccountData> GetTicketAccounts(params Account[] includes)
+   210→        {
+   211→            return TicketEntities.Select(x => new AccountData(x.AccountTypeId, x.AccountId)).Union(includes.Select(x => new AccountData(x.AccountTypeId, x.Id)));
+   212→        }
+   213→
+   214→        public Order AddOrder(AccountTransactionType template, Department department, string userName, MenuItem menuItem, IList<TaxTemplate> taxTemplates, MenuItemPortion portion, string priceTag, ProductTimer timer)
+   215→        {
+   216→            UnLock();
+   217→            var order = OrderBuilder.Create()
+   218→                                    .WithDepartment(department)
+   219→                                    .ForMenuItem(menuItem)
+   220→                                    .WithUserName(userName)
+   221→                                    .WithTaxTemplates(taxTemplates)
+   222→                                    .WithPortion(portion)
+   223→                                    .WithPriceTag(priceTag)
+   224→                                    .WithAccountTransactionType(template)
+   225→                                    .WithProductTimer(timer)
+   226→                                    .Build();
+   227→
+   228→            AddOrder(order, taxTemplates, template, userName);
+   229→            return order;
+   230→        }
+   231→
+   232→        public void AddOrder(Order order, IEnumerable<TaxTemplate> taxTemplates, AccountTransactionType template, string userName)
+   233→        {
+   234→            TransactionDocument.AddSingletonTransaction(template.Id, template, GetTicketAccounts());
+   235→
+   236→            if (taxTemplates != null)
+   237→            {
+   238→                foreach (var taxTemplate in taxTemplates)
+   239→                {
+   240→                    TransactionDocument.AddSingletonTransaction(taxTemplate.AccountTransactionType.Id,
+   241→                                               taxTemplate.AccountTransactionType,
+   242→                                               GetTicketAccounts());
+   243→                }
+   244→            }
+   245→
+   246→
+   247→            Orders.Add(order);
+   248→            LastModifiedUserName = userName;
+   249→        }
+   250→
+   251→        public void AddPayment(PaymentType paymentType, Account account, decimal amount, decimal exchangeRate, int userId)
+   252→        {
+   253→            var transaction = TransactionDocument.AddNewTransaction(paymentType.AccountTransactionType, GetTicketAccounts(account), amount, exchangeRate);
+   254→            transaction.UpdateDescription(transaction.Name + " [" + account.Name + "]");
+   255→            var payment = new Payment { AccountTransaction = transaction, Amount = amount, Name = account.Name, PaymentTypeId = paymentType.Id, UserId = userId };
+   256→            Payments.Add(payment);
+   257→            LastPaymentDate = DateTime.Now;
+   258→            RemainingAmount = GetRemainingAmount();
+   259→        }
+   260→
+   261→        public void AddChangePayment(ChangePaymentType changePaymentType, Account account, decimal amount, decimal exchangeRate, int userId)
+   262→        {
+   263→            var transaction = TransactionDocument.AddNewTransaction(changePaymentType.AccountTransactionType, GetTicketAccounts(account), amount, exchangeRate);
+   264→            transaction.UpdateDescription(transaction.Name + " [" + account.Name + "]");
+   265→            var payment = new ChangePayment { AccountTransaction = transaction, Amount = amount, Name = account.Name, ChangePaymentTypeId = changePaymentType.Id, UserId = userId };
+   266→            ChangePayments.Add(payment);
+   267→        }
+   268→
+   269→        public void RemoveOrder(Order order)
+   270→        {
+   271→            var transactionId = order.AccountTransactionTypeId;
+   272→            Orders.Remove(order);
+   273→            if (Orders.All(x => x.AccountTransactionTypeId != transactionId))
+   274→            {
+   275→                TransactionDocument.AccountTransactions.Where(x => x.AccountTransactionTypeId == transactionId)
+   276→                       .ToList().ForEach(x => TransactionDocument.AccountTransactions.Remove(x));
+   277→            }
+   278→        }
+   279→
+   280→        public void RemovePayment(Payment py)
+   281→        {
+   282→            Payments.Remove(py);
+   283→            TransactionDocument.AccountTransactions.Where(x => x.Id == py.AccountTransaction.Id).ToList().ForEach(x => TransactionDocument.AccountTransactions.Remove(x));
+   284→        }
+   285→
+   286→        public void RemoveChangePayment(ChangePayment py)
+   287→        {
+   288→            ChangePayments.Remove(py);
+   289→            TransactionDocument.AccountTransactions.Where(x => x.Id == py.AccountTransaction.Id).ToList().ForEach(x => TransactionDocument.AccountTransactions.Remove(x));
+   290→        }
+   291→
+   292→        public void RemoveCalculation(Calculation py)
+   293→        {
+   294→            var transactionId = py.AccountTransactionTypeId;
+   295→            Calculations.Remove(py);
+   296→            if (Calculations.All(x => x.AccountTransactionTypeId != transactionId))
+   297→            {
+   298→                TransactionDocument.AccountTransactions.Where(x => x.AccountTransactionTypeId == transactionId)
+   299→                       .ToList().ForEach(x => TransactionDocument.AccountTransactions.Remove(x));
+   300→            }
+   301→        }
+   302→
+   303→        public int GetItemCount()
+   304→        {
+   305→            return Orders.Count();
+   306→        }
+   307→
+   308→        public decimal GetSum()
+   309→        {
+   310→            var plainSum = GetPlainSum();
+   311→            var services = CalculateServices(Calculations.Where(x => !x.IncludeTax), plainSum);
+   312→            var tax = TaxIncluded ? 0 : CalculateTax(plainSum, services);
+   313→            plainSum = plainSum + services + tax;
+   314→            services = CalculateServices(Calculations.Where(x => x.IncludeTax), plainSum);
+   315→            return (plainSum + services);
+   316→        }
+   317→
+   318→        public decimal GetSum(int taxTempleteAccountTransactionTypeId)
+   319→        {
+   320→            var plainSum = GetPlainSum(taxTempleteAccountTransactionTypeId);
+   321→            var services = CalculateServices(Calculations.Where(x => !x.IncludeTax), plainSum);
+   322→            var tax = TaxIncluded ? 0 : CalculateTax(plainSum, services);
+   323→            plainSum = plainSum + services + tax;
+   324→            services = CalculateServices(Calculations.Where(x => x.IncludeTax), plainSum);
+   325→            return (plainSum + services);
+   326→        }
+   327→
+   328→        public decimal GetTaxExcludedSum(Order order)
+   329→        {
+   330→            var tax = TaxIncluded ? order.GetTotalTaxAmount(TaxIncluded, GetPlainSum(), GetPreTaxServicesTotal()) : 0;
+   331→            return order.GetTotal() - tax;
+   332→        }
+   333→
+   334→        public decimal GetPreTaxServicesTotal()
+   335→        {
+   336→            var plainSum = GetPlainSum();
+   337→            return CalculateServices(Calculations.Where(x => !x.IncludeTax), plainSum);
+   338→        }
+   339→
+   340→        public decimal GetPostTaxServicesTotal()
+   341→        {
+   342→            var plainSum = GetPlainSum();
+   343→            var postServices = CalculateServices(Calculations.Where(x => !x.IncludeTax), plainSum);
+   344→            var tax = TaxIncluded ? 0 : CalculateTax(plainSum, postServices);
+   345→            return CalculateServices(Calculations.Where(x => x.IncludeTax), plainSum + postServices + tax);
+   346→        }
+   347→
+   348→        public decimal CalculateTax(decimal plainSum, decimal preTaxServices)
+   349→        {
+   350→            var result = Orders.Where(x => x.CalculatePrice).Sum(x => x.GetTotalTaxAmount(TaxIncluded, plainSum, preTaxServices));
+   351→            return decimal.Round(result, LocalSettings.Decimals);
+   352→        }
+   353→
+   354→        private decimal CalculateServices(IEnumerable<Calculation> calculations, decimal sum)
+   355→        {
+   356→            decimal totalAmount = 0;
+   357→            var currentSum = sum;
+   358→
+   359→            foreach (var calculation in calculations.OrderBy(x => x.Order))
+   360→            {
+   361→                var sumValue = calculation.UsePlainSum ? Orders.Where(x => x.DecreaseInventory || x.IncreaseInventory).Sum(x => x.GetVisibleValue()) : sum;
+   362→
+   363→                calculation.Update(sumValue, currentSum, LocalSettings.Decimals);
+   364→
+   365→                totalAmount += calculation.CalculationAmount;
+   366→                currentSum += calculation.CalculationAmount;
+   367→
+   368→                if (calculation.Amount == 0 && calculation.CalculationType != 5)
+   369→                {
+   370→                    Calculations.Remove(calculation);
+   371→                }
+   372→
+   373→                calculation.UpdateCalculationTransaction(TransactionDocument, Math.Abs(calculation.CalculationAmount), ExchangeRate);
+   374→            }
+   375→
+   376→            return decimal.Round(totalAmount, LocalSettings.Decimals);
+   377→        }
+   378→
+   379→        public void AddCalculation(CalculationType calculationType, decimal amount)
+   380→        {
+   381→            var calculation = Calculations.SingleOrDefault(x => x.CalculationTypeId == calculationType.Id) ??
+   382→                    Calculations.SingleOrDefault(x => x.AccountTransactionTypeId == calculationType.AccountTransactionType.Id);
+   383→            if (calculation == null)
+   384→            {
+   385→                calculation = new Calculation
+   386→                        {
+   387→                            Amount = amount,
+   388→                            Name = calculationType.Name,
+   389→                            CalculationType = calculationType.CalculationMethod,
+   390→                            CalculationTypeId = calculationType.Id,
+   391→                            IncludeTax = calculationType.IncludeTax,
+   392→                            DecreaseAmount = calculationType.DecreaseAmount,
+   393→                            UsePlainSum = calculationType.UsePlainSum,
+   394→                            Order = calculationType.SortOrder,
+   395→                            AccountTransactionTypeId = calculationType.AccountTransactionType.Id
+   396→                        };
+   397→                Calculations.Add(calculation);
+   398→                TransactionDocument.AddSingletonTransaction(calculation.AccountTransactionTypeId, calculationType.AccountTransactionType, GetTicketAccounts());
+   399→            }
+   400→            else if (calculationType.ToggleCalculation && calculation.Amount == amount)
+   401→            {
+   402→                amount = 0;
+   403→            }
+   404→            else calculation.Amount = amount;
+   405→            calculation.Name = calculationType.Name;
+   406→            if (amount == 0 && calculation.CalculationType != 5)
+   407→            {
+   408→                Calculations.Remove(calculation);
+   409→                calculation.UpdateCalculationTransaction(TransactionDocument, 0, ExchangeRate);
+   410→            }
+   411→        }
+   412→
+   413→        public decimal GetPlainSum()
+   414→        {
+   415→            return Orders.Sum(item => item.GetTotal());
+   416→        }
+   417→
+   418→        private decimal GetPlainSum(int taxTempleteAccountTransactionTypeId)
+   419→        {
+   420→            return Orders.Where(
+   421→                x =>
+   422→                x.GetTaxValues().Any(y => y.TaxTempleteAccountTransactionTypeId == taxTempleteAccountTransactionTypeId))
+   423→                .Sum(x => x.GetTotal());
+   424→        }
+   425→
+   426→        public decimal GetPaymentAmount()
+   427→        {
+   428→            return Payments.Sum(x => x.Amount);
+   429→        }
+   430→
+   431→        public decimal GetChangeAmount()
+   432→        {
+   433→            return ChangePayments.Sum(x => x.Amount);
+   434→        }
+   435→
+   436→        public decimal GetRemainingAmount()
+   437→        {
+   438→            var sum = GetSum();
+   439→            var payment = GetPaymentAmount();
+   440→            var changePayment = GetChangeAmount();
+   441→            return decimal.Round(sum - payment + changePayment, LocalSettings.Decimals);
+   442→        }
+   443→
+   444→        public string UserString
+   445→        {
+   446→            get { return Name; }
+   447→        }
+   448→
+   449→        public bool CanSubmit
+   450→        {
+   451→            get { return !IsClosed; }
+   452→        }
+   453→
+   454→        public bool IsTagged
+   455→        {
+   456→            get { return TicketTagValues.Any(x => !string.IsNullOrEmpty(x.TagValue)); }
+   457→        }
+   458→
+   459→        public bool IsTaggedWithDefinedTags(IEnumerable<string> definedTags)
+   460→        {
+   461→            return TicketTagValues.Any(x => definedTags.Contains(x.TagName) && !string.IsNullOrEmpty(x.TagValue));
+   462→        }
+   463→
+   464→        public bool IsInState(string stateName, string state)
+   465→        {
+   466→            stateName = stateName.Trim();
+   467→            state = state.Trim();
+   468→            if (stateName == "*") return TicketStateValues.Any(x => x.State == state);
+   469→            if (string.IsNullOrEmpty(state)) return TicketStateValues.All(x => x.StateName != stateName);
+   470→            return TicketStateValues.Any(x => x.StateName == stateName && x.State == state);
+   471→        }
+   472→
+   473→        public void CancelOrders(IEnumerable<Order> orders)
+   474→        {
+   475→            UnLock();
+   476→            foreach (var order in orders.Where(order => order.Id == 0))
+   477→            {
+   478→                RemoveOrder(order);
+   479→            }
+   480→        }
+   481→
+   482→        public bool CanRemoveSelectedOrders(IEnumerable<Order> items)
+   483→        {
+   484→            return (items.Where(x => x.CalculatePrice).Sum(x => x.GetSelectedValue()) <= GetRemainingAmount());
+   485→        }
+   486→
+   487→        public bool CanCancelSelectedOrders(IEnumerable<Order> selectedOrders)
+   488→        {
+   489→            var so = selectedOrders.ToList();
+   490→            return so.Count != 0 && so.All(x => !x.Locked) && !so.Any(x => x.Id > 0 || !Orders.Contains(x));
+   491→        }
+   492→
+   493→        public IEnumerable<Order> GetUnlockedOrders()
+   494→        {
+   495→            return Orders.Where(x => !x.Locked).OrderBy(x => x.Id).ToList();
+   496→        }
+   497→
+   498→        public void MergeOrdersAndUpdateOrderNumbers(int orderNumber)
+   499→        {
+   500→            LastOrderDate = DateTime.Now;
+   501→
+   502→            IList<Order> newOrders = Orders.Where(x => !x.Locked && x.Id == 0).ToList();
+   503→
+   504→            var mergedOrders = OrderMerger.Merge(newOrders);
+   505→
+   506→            foreach (var order in newOrders.Where(order => !mergedOrders.Contains(order)))
+   507→            {
+   508→                RemoveOrder(order);
+   509→            }
+   510→
+   511→            foreach (var item in Orders.Where(order => order.OrderNumber == 0))
+   512→            {
+   513→                item.OrderNumber = orderNumber;
+   514→            }
+   515→        }
+   516→
+   517→        public void RequestLock()
+   518→        {
+   519→            _shouldLock = true;
+   520→        }
+   521→
+   522→        public void LockTicket()
+   523→        {
+   524→            foreach (var order in Orders.Where(x => !x.Locked))
+   525→            {
+   526→                order.Locked = true;
+   527→            }
+   528→            if (_shouldLock) Lock();
+   529→            _shouldLock = false;
+   530→        }
+   531→
+   532→        public Order CloneOrder(Order item)
+   533→        {
+   534→            Debug.Assert(_orders.Contains(item));
+   535→            var result = ObjectCloner.Clone(item);
+   536→            result.CreatedDateTime = DateTime.Now;
+   537→            result.Quantity = 0;
+   538→            result.ResetSelectedQuantity();
+   539→            _orders.Add(result);
+   540→            return result;
+   541→        }
+   542→
+   543→        public void AddLog(string userName, string category, string log)
+   544→        {
+   545→            var lm = new TicketLogValue(TicketNumber, userName) { Category = category, Log = log };
+   546→            TicketLogValues.Add(lm);
+   547→            SetLogs(TicketLogValues);
+   548→        }
+   549→
+   550→        public void SetLogs(IList<TicketLogValue> logs)
+   551→        {
+   552→            TicketLogs = JsonHelper.Serialize(logs);
+   553→            _ticketLogValues = null;
+   554→        }
+   555→
+   556→        public TicketStateValue GetStateValue(string groupName)
+   557→        {
+   558→            return TicketStateValues.SingleOrDefault(x => x.StateName == groupName) ?? TicketStateValue.Default;
+   559→        }
+   560→
+   561→        public void SetStateValue(string stateName, string state, string stateValue, string quantityDef = "")
+   562→        {
+   563→            var sv = TicketStateValues.SingleOrDefault(x => x.StateName == stateName);
+   564→            if (sv == null)
+   565→            {
+   566→                sv = new TicketStateValue { StateName = stateName, State = state, StateValue = stateValue };
+   567→                TicketStateValues.Add(sv);
+   568→            }
+   569→            else
+   570→            {
+   571→                sv.State = state;
+   572→                sv.StateValue = stateValue;
+   573→            }
+   574→            sv.Quantity = QuantityFuncParser.Parse(quantityDef, sv.Quantity);
+   575→            sv.LastUpdateTime = DateTime.Now;
+   576→
+   577→            if (string.IsNullOrEmpty(sv.State))
+   578→                TicketStateValues.Remove(sv);
+   579→
+   580→            TicketStates = JsonHelper.Serialize(TicketStateValues);
+   581→            _ticketStateValues = null;
+   582→        }
+   583→
+   584→        public string GetStateData(Func<TicketStateValue, bool> canDisplayState)
+   585→        {
+   586→            return string.Join("\r", TicketStateValues.Where(canDisplayState).Where(x => !string.IsNullOrEmpty(x.State)).Select(x => string.Format("{0}{1}: {2} {3}", x.Quantity > 0 ? string.Format("{0} ", x.Quantity.ToString(CultureInfo.CurrentCulture)) : "", x.StateName, x.State, !string.IsNullOrEmpty(x.StateValue) ? string.Format("[{0}]", x.StateValue) : "")));
+   587→        }
+   588→
+   589→        public string GetTagValue(string tagName)
+   590→        {
+   591→            var tag = TicketTagValues.SingleOrDefault(x => x.TagName == tagName);
+   592→            return tag != null ? tag.TagValue : "";
+   593→        }
+   594→
+   595→        public void SetTagValue(string tagName, string tagValue)
+   596→        {
+   597→            var tag = TicketTagValues.SingleOrDefault(x => x.TagName == tagName);
+   598→            if (tag == null)
+   599→            {
+   600→                tag = new TicketTagValue { TagName = tagName, TagValue = tagValue };
+   601→                TicketTagValues.Add(tag);
+   602→            }
+   603→            else
+   604→            {
+   605→                tag.TagValue = tagValue;
+   606→            }
+   607→
+   608→            if (string.IsNullOrEmpty(tag.TagValue))
+   609→                TicketTagValues.Remove(tag);
+   610→
+   611→            TicketTags = JsonHelper.Serialize(TicketTagValues);
+   612→            _ticketTagValues = null;
+   613→        }
+   614→
+   615→        public string GetTagData()
+   616→        {
+   617→            return string.Join("\r", TicketTagValues.Where(x => !string.IsNullOrEmpty(x.TagValue)).Select(x => string.Format("{0}: {1}", x.TagName, x.TagValue)));
+   618→        }
+   619→
+   620→        public void UpdateEntity(int entityTypeId, int entityId, string entityName, int accountTypeId, int accountId, string entityCustomData)
+   621→        {
+   622→            var r = TicketEntities.SingleOrDefault(x => x.EntityTypeId == entityTypeId);
+   623→            if (r == null && entityId > 0)
+   624→            {
+   625→                TicketEntities.Add(new TicketEntity
+   626→                {
+   627→                    EntityId = entityId,
+   628→                    EntityName = entityName,
+   629→                    EntityTypeId = entityTypeId,
+   630→                    AccountTypeId = accountTypeId,
+   631→                    AccountId = accountId,
+   632→                    EntityCustomData = entityCustomData
+   633→                });
+   634→            }
+   635→            else if (r != null && entityId > 0)
+   636→            {
+   637→                r.AccountId = accountId;
+   638→                r.AccountTypeId = accountTypeId;
+   639→                r.EntityId = entityId;
+   640→                r.EntityName = entityName;
+   641→                r.EntityTypeId = entityTypeId;
+   642→                r.EntityCustomData = entityCustomData;
+   643→            }
+   644→            else if (r != null && entityId == 0)
+   645→                TicketEntities.Remove(r);
+   646→        }
+   647→
+   648→        public IList<int> GetTaxIds()
+   649→        {
+   650→            return Orders.SelectMany(x => x.TaxValues)
+   651→                               .Where(x => x.TaxTempleteAccountTransactionTypeId > 0)
+   652→                               .Select(x => x.TaxTempleteAccountTransactionTypeId)
+   653→                               .Distinct().ToList();
+   654→        }
+   655→
+   656→        public void Recalculate()
+   657→        {
+   658→            if (Orders.Count > 0)
+   659→            {
+   660→                var orderGroup = Orders.GroupBy(x => x.AccountTransactionTypeId);
+   661→                foreach (var orders in orderGroup)
+   662→                {
+   663→                    var o = orders;
+   664→                    var transaction = TransactionDocument.AccountTransactions.SingleOrDefault(x => x.AccountTransactionTypeId == o.Key);
+   665→                    if (transaction != null)
+   666→                    {
+   667→                        var amount = o.Sum(x => GetTaxExcludedSum(x));
+   668→                        transaction.UpdateAccounts(GetTicketAccounts());
+   669→                        transaction.UpdateAmount(amount, ExchangeRate);
+   670→                    }
+   671→                }
+   672→
+   673→                var taxIds = GetTaxIds();
+   674→                if (taxIds.Any())
+   675→                {
+   676→                    var plainSum = GetPlainSum();
+   677→                    var preTaxServices = GetPreTaxServicesTotal();
+   678→                    foreach (var taxId in taxIds)
+   679→                    {
+   680→                        var transaction = TransactionDocument.AccountTransactions.Single(x => x.AccountTransactionTypeId == taxId);
+   681→                        transaction.UpdateAccounts(GetTicketAccounts());
+   682→                        transaction.UpdateAmount(GetTaxTotal(taxId, preTaxServices, plainSum), ExchangeRate);
+   683→                    }
+   684→                }
+   685→            }
+   686→
+   687→            RemainingAmount = GetRemainingAmount();
+   688→            TotalAmount = GetSum();
+   689→        }
+   690→
+   691→        public decimal GetTaxTotal(int taxTemplateAccountTransactionTypeId, decimal preTaxServicesTotal, decimal plainSum)
+   692→        {
+   693→            var result = Orders.Sum(x => x.GetTotalTaxAmount(TaxIncluded, plainSum, preTaxServicesTotal, taxTemplateAccountTransactionTypeId));
+   694→            return decimal.Round(result, 2, MidpointRounding.AwayFromZero);
+   695→        }
+   696→
+   697→        public decimal GetTaxTotal()
+   698→        {
+   699→            var result = Orders.Sum(x => x.GetTotalTaxAmount(TaxIncluded, GetPlainSum(), GetPreTaxServicesTotal()));
+   700→            return decimal.Round(result, 2, MidpointRounding.AwayFromZero);
+   701→        }
+   702→
+   703→        public IEnumerable<Order> SelectedOrders { get { return Orders.Where(x => x.IsSelected); } }
+   704→
+   705→        public IEnumerable<Order> ExtractSelectedOrders()
+   706→        {
+   707→            if (Orders.Any(x => x.SelectedQuantity > 0 && x.SelectedQuantity < x.Quantity))
+   708→            {
+   709→                Orders.ToList().ForEach(x => x.IsSelected = false);
+   710→                var newOrders = FixSelectedOrders();
+   711→                newOrders.ForEach(x => x.IsSelected = true);
+   712→            }
+   713→            return SelectedOrders;
+   714→        }
+   715→
+   716→        public Order ExtractSelectedOrder(Order order)
+   717→        {
+   718→            if (order.SelectedQuantity > 0 && order.SelectedQuantity < order.Quantity)
+   719→            {
+   720→                return FixOrder(order);
+   721→            }
+   722→            return order;
+   723→        }
+   724→
+   725→        private List<Order> FixSelectedOrders()
+   726→        {
+   727→            return Orders.Where(x => x.SelectedQuantity > 0 && x.SelectedQuantity < x.Quantity)
+   728→                         .ToList()
+   729→                         .Select(FixOrder)
+   730→                         .Where(newItem => newItem != null)
+   731→                         .ToList();
+   732→        }
+   733→
+   734→        private Order FixOrder(Order order)
+   735→        {
+   736→            Debug.Assert(order.SelectedQuantity > 0);
+   737→            Debug.Assert(Orders.Contains(order));
+   738→            if (order.SelectedQuantity >= order.Quantity) return null;
+   739→            var result = CloneOrder(order);
+   740→            result.Id = 0;
+   741→            result.Quantity = order.SelectedQuantity;
+   742→            result.ResetSelectedQuantity();
+   743→            order.Quantity -= order.SelectedQuantity;
+   744→            order.ResetSelectedQuantity();
+   745→            return result;
+   746→        }
+   747→
+   748→        public void RemoveOrders(IEnumerable<Order> selectedOrders)
+   749→        {
+   750→            selectedOrders.ToList().ForEach(RemoveOrder);
+   751→        }
+   752→
+   753→        public bool IsTaggedWith(string tagName)
+   754→        {
+   755→            return !string.IsNullOrEmpty(GetTagValue(tagName));
+   756→        }
+   757→
+   758→        public bool CanCloseTicket()
+   759→        {
+   760→            return (GetRemainingAmount() == 0 || TicketEntities.Count > 0 || Orders.Count == 0);
+   761→        }
+   762→
+   763→        public decimal GetCalculationTotal(string s)
+   764→        {
+   765→            return Calculations.Where(x => string.IsNullOrEmpty(s) || x.Name == s).Sum(x => x.CalculationAmount);
+   766→        }
+   767→
+   768→        public string GetEntityName(int entityTypeId)
+   769→        {
+   770→            var tr = TicketEntities.FirstOrDefault(x => x.EntityTypeId == entityTypeId);
+   771→            return tr != null ? tr.EntityName : "";
+   772→        }
+   773→
+   774→        public string GetEntityFieldValue(int entityTypeId, string fieldName)
+   775→        {
+   776→            var tr = TicketEntities.FirstOrDefault(x => x.EntityTypeId == entityTypeId);
+   777→            return tr != null ? tr.GetCustomData(fieldName) : "";
+   778→        }
+   779→
+   780→        public string GetEntityFieldValue(string fieldName)
+   781→        {
+   782→            var tr = TicketEntities.FirstOrDefault(x => x.HasCustomData(fieldName));
+   783→            return tr != null ? tr.GetCustomData(fieldName) : "";
+   784→        }
+   785→
+   786→        public decimal GetOrderStateTotal(string s)
+   787→        {
+   788→            return Orders.Where(x => x.IsInState("*", s)).Sum(x => x.GetValue());
+   789→        }
+   790→
+   791→        public decimal GetOrderStateQuantityTotal(string orderState)
+   792→        {
+   793→            return Orders.Where(x => x.IsInState("*", orderState)).Sum(x => x.Quantity);
+   794→        }
+   795→
+   796→        public decimal GetActiveTimerAmount()
+   797→        {
+   798→            return Orders.Where(x => x.ProductTimerValue != null && x.ProductTimerValue.IsActive).Sum(x => x.GetValue());
+   799→        }
+   800→
+   801→        public bool HasActiveTimers()
+   802→        {
+   803→            return Orders.Any(x => x.ProductTimerValue != null && x.ProductTimerValue.IsActive);
+   804→        }
+   805→
+   806→        public void StopActiveTimers()
+   807→        {
+   808→            Orders.Where(x => x.ProductTimerValue != null && x.ProductTimerValue.IsActive).ToList().ForEach(x => x.StopProductTimer());
+   809→        }
+   810→
+   811→        public IEnumerable<PaidItem> GetPaidItems()
+   812→        {
+   813→            return _paidItems;
+   814→        }
+   815→
+   816→        public void RemoveZeroAmountAccountTransactions()
+   817→        {
+   818→            if (!IsClosed) return;
+   819→            TransactionDocument.AccountTransactions.Where(x => x.Amount == 0).ToList().ForEach(x => TransactionDocument.AccountTransactions.Remove(x));
+   820→        }
+   821→
+   822→        public string GetStateStr(string s)
+   823→        {
+   824→            var sv = GetStateValue(s);
+   825→            return sv != null ? sv.State ?? "" : "";
+   826→        }
+   827→
+   828→        public string GetStateQuantityStr(string s)
+   829→        {
+   830→            var sv = GetStateValue(s);
+   831→            return sv != null ? sv.Quantity.ToString(CultureInfo.InvariantCulture) : "";
+   832→        }
+   833→
+   834→        public void RemoveData()
+   835→        {
+   836→            Orders.ToList().ForEach(RemoveOrder);
+   837→            Payments.ToList().ForEach(RemovePayment);
+   838→            ChangePayments.ToList().ForEach(RemoveChangePayment);
+   839→            Calculations.ToList().ForEach(RemoveCalculation);
+   840→        }
+   841→
+   842→        public string GetTicketCreationMinuteStr()
+   843→        {
+   844→            return new TimeSpan(DateTime.Now.Ticks - Date.Ticks).TotalMinutes.ToString("#");
+   845→        }
+   846→
+   847→        public string GetTicketLastOrderMinuteStr()
+   848→        {
+   849→            return new TimeSpan(DateTime.Now.Ticks - LastOrderDate.Ticks).TotalMinutes.ToString("#");
+   850→        }
+   851→
+   852→        public string GetStateMinuteStr(string state)
+   853→        {
+   854→            var sv = GetStateValue(state);
+   855→            if (sv != null)
+   856→            {
+   857→                return new TimeSpan(DateTime.Now.Ticks - sv.LastUpdateTime.Ticks).TotalMinutes.ToString("#");
+   858→            }
+   859→            return "";
+   860→        }
+   861→    }
+   862→}
+   863→

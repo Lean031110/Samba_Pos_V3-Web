@@ -14,6 +14,13 @@
 async function seed(knex) {
   console.log('[seed] Starting transactional seed...');
 
+  // ---- Idempotency check: skip if Users table already has data ----
+  const existingUsers = await knex('Users').count('* as n').first();
+  if (existingUsers.n > 0) {
+    console.log('[seed] Database already has data. Skipping seed (idempotent).');
+    return;
+  }
+
   // ---- Open a single transaction wrapping ALL inserts ----
   await knex.transaction(async (trx) => {
     // Inside a transaction, defer FK checks so out-of-order inserts work
@@ -177,15 +184,22 @@ async function seed(knex) {
     const [departmentId] = await trx('Departments').orderBy('Id').pluck('Id');
 
     // -----------------------------------------------------------------
-    // 11. UserRoles + Users (admin / 1234)
+    // 11. UserRoles + Users (admin PIN from env, hashed with bcrypt)
     // -----------------------------------------------------------------
     await trx('UserRoles').insert({
       Name: 'Admin', IsAdmin: 1, DepartmentId: departmentId,
     });
     const [userRoleId] = await trx('UserRoles').orderBy('Id').pluck('Id');
 
+    // SECURITY: PIN MUST be hashed with bcrypt. Read from env or use a
+    // development-only default that is clearly marked as insecure.
+    // In production, ADMIN_PIN must be set via environment variable.
+    const adminPin = process.env.ADMIN_PIN || '1234';
+    const bcrypt = require('bcryptjs');
+    const hashedPin = bcrypt.hashSync(adminPin, 10);
+
     await trx('Users').insert({
-      Name: 'Administrator', PinCode: '1234', UserRoleId: userRoleId,
+      Name: 'Administrator', PinCode: hashedPin, UserRoleId: userRoleId,
     });
 
     // -----------------------------------------------------------------

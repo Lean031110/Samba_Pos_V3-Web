@@ -1,0 +1,16 @@
+# .dockerignore — exclude unnecessary files from Docker build context
+node_modules
+**/node_modules
+data
+**/*.db
+**/*.db-*
+.git
+source
+docs
+analysis
+*.md
+!README.md
+backend/test-results
+backend/tests
+backend/scripts
+backend/playwright.config.js

@@ -1,0 +1,729 @@
+     1→// =====================================================================
+     2→// api-integration.test.js — Sprint 3 integration tests with supertest
+     3→// =====================================================================
+     4→// Tests every endpoint with expected HTTP codes:
+     5→//   - 200 OK for valid GET/POST
+     6→//   - 201 Created for POST that creates a resource
+     7→//   - 400 Bad Request for input validation failures
+     8→//   - 404 Not Found for non-existent resources
+     9→//   - 409 Conflict for state conflicts (table already open, ticket closed)
+    10→// =====================================================================
+    11→
+    12→const { test, describe, before, after } = require('node:test');
+    13→const assert = require('node:assert');
+    14→const supertest = require('supertest');
+    15→
+    16→const { createApp } = require('../src/api/server');
+    17→const { db } = require('../src/infrastructure/db/db');
+    18→
+    19→const app = createApp();
+    20→const request = supertest(app);
+    21→
+    22→// =====================================================================
+    23→// Sprint 5: Helper for authenticated requests
+    24→// =====================================================================
+    25→function authGet(path) {
+    26→  return request.get(path).set('Authorization', 'Bearer ' + jwtToken);
+    27→}
+    28→function authPost(path, body) {
+    29→  return request.post(path).set('Authorization', 'Bearer ' + jwtToken).send(body || {});
+    30→}
+    31→function authPatch(path, body) {
+    32→  return request.patch(path).set('Authorization', 'Bearer ' + jwtToken).send(body || {});
+    33→}
+    34→
+    35→// =====================================================================
+    36→// Test fixtures
+    37→// =====================================================================
+    38→
+    39→let testMenuItemId = null;
+    40→let testTicketId = null;
+    41→let testTableId = null;
+    42→let testPaymentTypeId = null;
+    43→let testCalculationTypeId = null;
+    44→let jwtToken = null;   // Sprint 5: JWT token for authenticated requests
+    45→
+    46→async function setupFixtures() {
+    47→  // === Sprint 5: Login to get JWT token ===
+    48→  const loginRes = await authPost('/api/auth/login')
+    49→    .send({ username: 'Administrator', pin: '1234' });
+    50→  assert.strictEqual(loginRes.status, 200);
+    51→  assert.ok(loginRes.body.token);
+    52→  jwtToken = loginRes.body.token;
+    53→
+    54→  // Insert a menu item for testing (use authenticated request)
+    55→  const [miId] = await db('MenuItems').insert({ Name: 'Test Burger', GroupCode: 'Food', Barcode: 'TB01', Tag: null });
+    56→  const [portionId] = await db('MenuItemPortions').insert({ Name: 'Normal', MenuItemId: miId, Multiplier: 1 });
+    57→  await db('MenuItemPrices').insert({ MenuItemPortionId: portionId, PriceTag: null, Price: 8.50 });
+    58→  testMenuItemId = miId;
+    59→
+    60→  // Insert a tax template for the menu item (needed for tax calculations)
+    61→  const [taxTxnTypeId] = await db('AccountTransactionTypes').insert({
+    62→    Name: 'Test VAT', SortOrder: 200,
+    63→    SourceAccountTypeId: 2, TargetAccountTypeId: 1,
+    64→    DefaultSourceAccountId: 2, DefaultTargetAccountId: 1,
+    65→  });
+    66→  const [ttId] = await db('TaxTemplates').insert({
+    67→    Name: 'Test VAT 10%', SortOrder: 30, Rate: 10.0, Rounding: 0,
+    68→    AccountTransactionTypeId: taxTxnTypeId,
+    69→  });
+    70→  await db('TaxTemplateMaps').insert({
+    71→    TerminalId: 0, DepartmentId: 0, UserRoleId: 0, TicketTypeId: 0,
+    72→    TaxTemplateId: ttId, MenuItemGroupCode: null, MenuItemId: miId,
+    73→  });
+    74→
+    75→  // Create a table entity for testing
+    76→  const [entityTypeId] = await db('EntityTypes')
+    77→    .where({ Name: 'Tables' }).pluck('Id');
+    78→  const [tableId] = await db('Entities').insert({
+    79→    Name: 'T1', EntityTypeId: entityTypeId,
+    80→    LastUpdateTime: new Date().toISOString(),
+    81→    SearchString: 't1', CustomData: null,
+    82→    AccountId: 0, WarehouseId: 0,
+    83→  });
+    84→  await db('EntityStateValues').insert({
+    85→    EntityId: tableId,
+    86→    EntityStates: JSON.stringify([{
+    87→      StateName: 'Status', State: 'Available', StateValue: '',
+    88→      LastUpdateTime: new Date().toISOString(), Quantity: 0,
+    89→    }]),
+    90→  });
+    91→  testTableId = tableId;
+    92→
+    93→  // Get the seeded PaymentType (Cash, id=1)
+    94→  const pt = await db('PaymentTypes').where({ Name: 'Cash' }).first();
+    95→  testPaymentTypeId = pt.Id;
+    96→
+    97→  // Get the seeded CalculationType (Discount, id=1)
+    98→  const ct = await db('CalculationTypes').where({ Name: 'Discount' }).first();
+    99→  testCalculationTypeId = ct.Id;
+   100→}
+   101→
+   102→async function teardownFixtures() {
+   103→  // Robust cleanup: only delete test-created rows, never seed data.
+   104→  // Strategy: collect all ticket IDs created during tests, delete their children,
+   105→  // then the tickets themselves. Then delete test menu items + tables.
+   106→  try {
+   107→    // Collect ticket IDs from all our test vars (some may be null if a test failed)
+   108→    const ticketIds = [testTicketId].filter(Boolean);
+   109→    // Also clean up any tickets with Note containing 'Sprint 5' or test markers
+   110→    const extraTicketIds = await db('Tickets')
+   111→      .whereLike('Note', '%Sprint 5%')
+   112→      .orWhereLike('Note', '%Test%')
+   113→      .orWhereLike('TicketStates', '%Refunded%')
+   114→      .orWhereLike('TicketStates', '%Merged%')
+   115→      .pluck('Id');
+   116→    const allTicketIds = [...new Set([...ticketIds, ...extraTicketIds])];
+   117→    if (allTicketIds.length > 0) {
+   118→      await db('Orders').whereIn('TicketId', allTicketIds).del();
+   119→      await db('Payments').whereIn('TicketId', allTicketIds).del();
+   120→      await db('Calculations').whereIn('TicketId', allTicketIds).del();
+   121→      await db('TicketEntities').whereIn('TicketId', allTicketIds).del();
+   122→      await db('PaidItems').whereIn('TicketId', allTicketIds).del();
+   123→      await db('Tickets').whereIn('Id', allTicketIds).del();
+   124→    }
+   125→    // Test menu item
+   126→    if (testMenuItemId) {
+   127→      const portionIds = await db('MenuItemPortions').where({ MenuItemId: testMenuItemId }).pluck('Id');
+   128→      if (portionIds.length > 0) {
+   129→        await db('MenuItemPrices').whereIn('MenuItemPortionId', portionIds).del();
+   130→      }
+   131→      await db('MenuItemPortions').where({ MenuItemId: testMenuItemId }).del();
+   132→      await db('MenuItems').where({ Id: testMenuItemId }).del();
+   133→    }
+   134→    // Test table
+   135→    if (testTableId) {
+   136→      await db('EntityStateValues').where({ EntityId: testTableId }).del();
+   137→      await db('Entities').where({ Id: testTableId }).del();
+   138→    }
+   139→    // Test tax templates + txn types (names start with 'Test ')
+   140→    const testTaxTemplateIds = await db('TaxTemplates').whereLike('Name', 'Test %').pluck('Id');
+   141→    if (testTaxTemplateIds.length > 0) {
+   142→      await db('TaxTemplateMaps').whereIn('TaxTemplateId', testTaxTemplateIds).del();
+   143→      await db('TaxTemplates').whereIn('Id', testTaxTemplateIds).del();
+   144→    }
+   145→    const testTxnTypeIds = await db('AccountTransactionTypes').whereLike('Name', 'Test %').pluck('Id');
+   146→    if (testTxnTypeIds.length > 0) {
+   147→      await db('AccountTransactionTypes').whereIn('Id', testTxnTypeIds).del();
+   148→    }
+   149→  } catch (err) {
+   150→    console.error('[teardown] Error (continuing):', err.message);
+   151→  }
+   152→  await db.destroy();
+   153→}
+   154→
+   155→// =====================================================================
+   156→// ANSI colors + counter
+   157→// =====================================================================
+   158→const C = {
+   159→  reset: '\x1b[0m', bold: '\x1b[1m',
+   160→  red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
+   161→  cyan: '\x1b[36m', gray: '\x1b[90m',
+   162→};
+   163→
+   164→let passedCount = 0;
+   165→let failedCount = 0;
+   166→
+   167→function header(title) {
+   168→  console.log('\n' + C.bold + C.cyan + '═'.repeat(70) + C.reset);
+   169→  console.log(C.bold + C.cyan + '  ' + title + C.reset);
+   170→  console.log(C.bold + C.cyan + '═'.repeat(70) + C.reset);
+   171→}
+   172→
+   173→function ok(msg) { console.log(C.green + '  ✓ ' + C.reset + msg); passedCount++; }
+   174→function fail(msg) { console.log(C.red + '  ✗ ' + C.reset + msg); failedCount++; }
+   175→
+   176→// Override test() to wrap with try/catch and counting
+   177→const originalTest = test;
+   178→function countedTest(name, fn) {
+   179→  return originalTest(name, async (t) => {
+   180→    try {
+   181→      await fn(t);
+   182→    } catch (err) {
+   183→      fail(name + ' — ' + err.message);
+   184→      throw err;
+   185→    }
+   186→  });
+   187→}
+   188→
+   189→// =====================================================================
+   190→// Tests
+   191→// =====================================================================
+   192→
+   193→before(async () => {
+   194→  await setupFixtures();
+   195→});
+   196→
+   197→after(async () => {
+   198→  await teardownFixtures();
+   199→  header('FINAL VERDICT');
+   200→  console.log(C.gray + '  Passed: ' + C.reset + C.green + passedCount + C.reset);
+   201→  console.log(C.gray + '  Failed: ' + C.reset + C.red + failedCount + C.reset);
+   202→  if (failedCount === 0) {
+   203→    console.log('');
+   204→    console.log(C.bold + C.green + '  ╔══════════════════════════════════════════════════════════════╗' + C.reset);
+   205→    console.log(C.bold + C.green + '  |  SPRINT 3 ACCEPTANCE TEST PASSED                             |' + C.reset);
+   206→    console.log(C.bold + C.green + '  ╚══════════════════════════════════════════════════════════════╝' + C.reset);
+   207→  } else {
+   208→    console.log('');
+   209→    console.log(C.bold + C.red + '  SPRINT 3 ACCEPTANCE TEST FAILED' + C.reset);
+   210→    process.exit(1);
+   211→  }
+   212→});
+   213→
+   214→// =====================================================================
+   215→// HEALTH CHECK
+   216→// =====================================================================
+   217→
+   218→describe('Health Check', () => {
+   219→  test('GET /health returns 200', async () => {
+   220→    const res = await authGet('/health');
+   221→    assert.strictEqual(res.status, 200);
+   222→    assert.strictEqual(res.body.status, 'ok');
+   223→    assert.strictEqual(res.body.service, 'samba-web-clone');
+   224→    ok('GET /health → 200 (status: ok)');
+   225→  });
+   226→
+   227→  test('GET /unknown returns SPA fallback (200 with index.html)', async () => {
+   228→    const res = await request.get('/some-unknown-route');
+   229→    assert.strictEqual(res.status, 200);
+   230→    assert.ok(res.text.includes('<!DOCTYPE html>'));
+   231→    ok('GET /unknown → 200 (SPA fallback to index.html)');
+   232→  });
+   233→});
+   234→
+   235→// =====================================================================
+   236→// PRODUCTS API
+   237→// =====================================================================
+   238→
+   239→describe('Products API', () => {
+   240→  test('GET /api/products returns 200 with array', async () => {
+   241→    const res = await authGet('/api/products');
+   242→    assert.strictEqual(res.status, 200);
+   243→    assert.ok(Array.isArray(res.body.data));
+   244→    assert.ok(res.body.data.length > 0);
+   245→    ok(`GET /api/products → 200 (${res.body.count} items)`);
+   246→  });
+   247→
+   248→  test('GET /api/products/:id returns 200 for valid ID', async () => {
+   249→    const res = await authGet(`/api/products/${testMenuItemId}`);
+   250→    assert.strictEqual(res.status, 200);
+   251→    assert.strictEqual(res.body.data.Id, testMenuItemId);
+   252→    assert.strictEqual(res.body.data.Name, 'Test Burger');
+   253→    ok(`GET /api/products/${testMenuItemId} → 200 (Test Burger)`);
+   254→  });
+   255→
+   256→  test('GET /api/products/:id returns 404 for non-existent ID', async () => {
+   257→    const res = await authGet('/api/products/999999');
+   258→    assert.strictEqual(res.status, 404);
+   259→    assert.strictEqual(res.body.error, 'NotFoundError');
+   260→    assert.match(res.body.message, /not found/i);
+   261→    ok('GET /api/products/999999 → 404 (NotFoundError)');
+   262→  });
+   263→
+   264→  test('GET /api/products/:id returns 400 for invalid ID', async () => {
+   265→    const res = await authGet('/api/products/notanumber');
+   266→    assert.strictEqual(res.status, 400);
+   267→    assert.strictEqual(res.body.error, 'ValidationError');
+   268→    ok('GET /api/products/notanumber → 400 (ValidationError)');
+   269→  });
+   270→
+   271→  test('GET /api/products/group/:code returns 200 with filtered items', async () => {
+   272→    const res = await authGet('/api/products/group/Food');
+   273→    assert.strictEqual(res.status, 200);
+   274→    assert.ok(Array.isArray(res.body.data));
+   275→    ok(`GET /api/products/group/Food → 200 (${res.body.count} items)`);
+   276→  });
+   277→});
+   278→
+   279→// =====================================================================
+   280→// TABLES API
+   281→// =====================================================================
+   282→
+   283→describe('Tables API', () => {
+   284→  test('GET /api/tables returns 200 with array', async () => {
+   285→    const res = await authGet('/api/tables');
+   286→    assert.strictEqual(res.status, 200);
+   287→    assert.ok(Array.isArray(res.body.data));
+   288→    ok(`GET /api/tables → 200 (${res.body.count} tables)`);
+   289→  });
+   290→
+   291→  test('GET /api/tables/:id returns 200 for valid ID', async () => {
+   292→    const res = await authGet(`/api/tables/${testTableId}`);
+   293→    assert.strictEqual(res.status, 200);
+   294→    assert.strictEqual(res.body.data.Id, testTableId);
+   295→    ok(`GET /api/tables/${testTableId} → 200 (T1)`);
+   296→  });
+   297→
+   298→  test('GET /api/tables/:id returns 404 for non-existent ID', async () => {
+   299→    const res = await authGet('/api/tables/999999');
+   300→    assert.strictEqual(res.status, 404);
+   301→    assert.strictEqual(res.body.error, 'NotFoundError');
+   302→    ok('GET /api/tables/999999 → 404 (NotFoundError)');
+   303→  });
+   304→
+   305→  test('PATCH /api/tables/:id/state returns 200 for valid state update', async () => {
+   306→    const res = await authPatch(`/api/tables/${testTableId}/state`)
+   307→      .send({ state: 'New Orders' });
+   308→    assert.strictEqual(res.status, 200);
+   309→    assert.strictEqual(res.body.data.state, 'New Orders');
+   310→    ok(`PATCH /api/tables/${testTableId}/state → 200 (state: New Orders)`);
+   311→  });
+   312→
+   313→  test('PATCH /api/tables/:id/state returns 400 when state missing', async () => {
+   314→    const res = await authPatch(`/api/tables/${testTableId}/state`)
+   315→      .send({});
+   316→    assert.strictEqual(res.status, 400);
+   317→    assert.strictEqual(res.body.error, 'ValidationError');
+   318→    ok('PATCH /api/tables/:id/state (no state) → 400 (ValidationError)');
+   319→  });
+   320→});
+   321→
+   322→// =====================================================================
+   323→// TICKETS API — full lifecycle
+   324→// =====================================================================
+   325→
+   326→describe('Tickets API — full lifecycle', () => {
+   327→  test('POST /api/tickets creates a new ticket → 201', async () => {
+   328→    const res = await authPost('/api/tickets')
+   329→      .send({ departmentId: 1, ticketTypeId: 1 });
+   330→    assert.strictEqual(res.status, 201);
+   331→    assert.ok(res.body.data.Id > 0);
+   332→    assert.strictEqual(res.body.data.IsClosed, 0);
+   333→    assert.strictEqual(Number(res.body.data.TotalAmount), 0);
+   334→    testTicketId = res.body.data.Id;
+   335→    ok(`POST /api/tickets → 201 (ticketId: ${testTicketId})`);
+   336→  });
+   337→
+   338→  test('GET /api/tickets returns 200 with the new ticket in the list', async () => {
+   339→    const res = await authGet('/api/tickets');
+   340→    assert.strictEqual(res.status, 200);
+   341→    const ids = res.body.data.map(t => t.Id);
+   342→    assert.ok(ids.includes(testTicketId));
+   343→    ok(`GET /api/tickets → 200 (includes ticket ${testTicketId})`);
+   344→  });
+   345→
+   346→  test('GET /api/tickets/:id returns 200 for valid ID', async () => {
+   347→    const res = await authGet(`/api/tickets/${testTicketId}`);
+   348→    assert.strictEqual(res.status, 200);
+   349→    assert.strictEqual(res.body.data.Id, testTicketId);
+   350→    ok(`GET /api/tickets/${testTicketId} → 200`);
+   351→  });
+   352→
+   353→  test('GET /api/tickets/:id returns 404 for non-existent ID', async () => {
+   354→    const res = await authGet('/api/tickets/999999');
+   355→    assert.strictEqual(res.status, 404);
+   356→    assert.strictEqual(res.body.error, 'NotFoundError');
+   357→    ok('GET /api/tickets/999999 → 404 (NotFoundError)');
+   358→  });
+   359→
+   360→  test('POST /api/tickets/:id/orders adds an order → 200', async () => {
+   361→    const res = await authPost(`/api/tickets/${testTicketId}/orders`)
+   362→      .send({ menuItemId: testMenuItemId, quantity: 2 });
+   363→    assert.strictEqual(res.status, 200);
+   364→    assert.strictEqual(res.body.data.Orders.length, 1);
+   365→    assert.strictEqual(res.body.data.Orders[0].MenuItemName, 'Test Burger');
+   366→    assert.strictEqual(Number(res.body.data.Orders[0].Quantity), 2);
+   367→    // TotalAmount should be 2 * 8.50 = 17.00 (tax-included default)
+   368→    assert.strictEqual(Number(res.body.data.TotalAmount), 17.00);
+   369→    ok(`POST /api/tickets/${testTicketId}/orders → 200 (1 order, total: $${res.body.data.TotalAmount})`);
+   370→  });
+   371→
+   372→  test('POST /api/tickets/:id/orders returns 400 when menuItemId missing', async () => {
+   373→    const res = await authPost(`/api/tickets/${testTicketId}/orders`)
+   374→      .send({ quantity: 1 });
+   375→    assert.strictEqual(res.status, 400);
+   376→    assert.strictEqual(res.body.error, 'ValidationError');
+   377→    ok('POST /api/tickets/:id/orders (no menuItemId) → 400 (ValidationError)');
+   378→  });
+   379→
+   380→  test('POST /api/tickets/:id/orders returns 404 when menuItemId does not exist', async () => {
+   381→    const res = await authPost(`/api/tickets/${testTicketId}/orders`)
+   382→      .send({ menuItemId: 999999 });
+   383→    assert.strictEqual(res.status, 404);
+   384→    assert.strictEqual(res.body.error, 'NotFoundError');
+   385→    ok('POST /api/tickets/:id/orders (non-existent menuItemId) → 404 (NotFoundError)');
+   386→  });
+   387→
+   388→  test('POST /api/tickets/:id/calculations applies a discount → 200', async () => {
+   389→    const res = await authPost(`/api/tickets/${testTicketId}/calculations`)
+   390→      .send({ calculationTypeId: testCalculationTypeId, amount: 10 });  // 10% discount
+   391→    assert.strictEqual(res.status, 200);
+   392→    assert.ok(res.body.data.Calculations.length > 0);
+   393→    // TotalAmount should drop: 17.00 - 1.70 = 15.30 (tax included so no tax adjustment)
+   394→    assert.strictEqual(Number(res.body.data.TotalAmount), 15.30);
+   395→    ok(`POST /api/tickets/${testTicketId}/calculations → 200 (10% discount, total: $${res.body.data.TotalAmount})`);
+   396→  });
+   397→
+   398→  test('POST /api/tickets/:id/calculations returns 400 when amount invalid', async () => {
+   399→    const res = await authPost(`/api/tickets/${testTicketId}/calculations`)
+   400→      .send({ calculationTypeId: testCalculationTypeId, amount: 'not a number' });
+   401→    assert.strictEqual(res.status, 400);
+   402→    assert.strictEqual(res.body.error, 'ValidationError');
+   403→    ok('POST /api/tickets/:id/calculations (invalid amount) → 400 (ValidationError)');
+   404→  });
+   405→
+   406→  test('POST /api/tickets/:id/payments processes a payment → 200', async () => {
+   407→    const res = await authPost(`/api/tickets/${testTicketId}/payments`)
+   408→      .send({ paymentTypeId: testPaymentTypeId, amount: 15.30 });
+   409→    assert.strictEqual(res.status, 200);
+   410→    assert.strictEqual(res.body.data.Payments.length, 1);
+   411→    assert.strictEqual(Number(res.body.data.Payments[0].Amount), 15.30);
+   412→    assert.strictEqual(Number(res.body.data.RemainingAmount), 0);
+   413→    ok(`POST /api/tickets/${testTicketId}/payments → 200 (paid $15.30, remaining: $${res.body.data.RemainingAmount})`);
+   414→  });
+   415→
+   416→  test('POST /api/tickets/:id/payments returns 400 when amount <= 0', async () => {
+   417→    const res = await authPost(`/api/tickets/${testTicketId}/payments`)
+   418→      .send({ paymentTypeId: testPaymentTypeId, amount: 0 });
+   419→    assert.strictEqual(res.status, 400);
+   420→    assert.strictEqual(res.body.error, 'ValidationError');
+   421→    ok('POST /api/tickets/:id/payments (amount=0) → 400 (ValidationError)');
+   422→  });
+   423→
+   424→  test('POST /api/tickets/:id/close closes the ticket → 200', async () => {
+   425→    const res = await authPost(`/api/tickets/${testTicketId}/close`);
+   426→    assert.strictEqual(res.status, 200);
+   427→    assert.strictEqual(res.body.data.IsClosed, 1);
+   428→    assert.ok(res.body.data.TicketNumber, 'TicketNumber should be assigned');
+   429→    ok(`POST /api/tickets/${testTicketId}/close → 200 (closed, ticket#: ${res.body.data.TicketNumber})`);
+   430→  });
+   431→
+   432→  test('POST /api/tickets/:id/close returns 409 when already closed', async () => {
+   433→    const res = await authPost(`/api/tickets/${testTicketId}/close`);
+   434→    assert.strictEqual(res.status, 409);
+   435→    assert.strictEqual(res.body.error, 'ConflictError');
+   436→    ok(`POST /api/tickets/${testTicketId}/close (already closed) → 409 (ConflictError)`);
+   437→  });
+   438→});
+   439→
+   440→// =====================================================================
+   441→// TICKETS API — table conflict scenario (409)
+   442→// =====================================================================
+   443→
+   444→describe('Tickets API — table conflict (409)', () => {
+   445→  let firstTicketId = null;
+   446→
+   447→  test('POST /api/tickets with tableId creates a ticket linked to the table → 201', async () => {
+   448→    const res = await authPost('/api/tickets')
+   449→      .send({ departmentId: 1, ticketTypeId: 1, tableId: testTableId });
+   450→    assert.strictEqual(res.status, 201);
+   451→    firstTicketId = res.body.data.Id;
+   452→    ok(`POST /api/tickets (tableId=${testTableId}) → 201 (ticket ${firstTicketId})`);
+   453→  });
+   454→
+   455→  test('POST /api/tickets with same tableId returns 409 (conflict)', async () => {
+   456→    const res = await authPost('/api/tickets')
+   457→      .send({ departmentId: 1, ticketTypeId: 1, tableId: testTableId });
+   458→    assert.strictEqual(res.status, 409);
+   459→    assert.strictEqual(res.body.error, 'ConflictError');
+   460→    assert.match(res.body.message, /already has an open ticket/i);
+   461→    ok(`POST /api/tickets (tableId=${testTableId} again) → 409 (ConflictError)`);
+   462→  });
+   463→
+   464→  test('PATCH /api/tables/:id/state to "Available" with open ticket returns 409', async () => {
+   465→    const res = await authPatch(`/api/tables/${testTableId}/state`)
+   466→      .send({ state: 'Available' });
+   467→    assert.strictEqual(res.status, 409);
+   468→    assert.strictEqual(res.body.error, 'ConflictError');
+   469→    assert.match(res.body.message, /open ticket/i);
+   470→    ok(`PATCH /api/tables/${testTableId}/state (Available with open ticket) → 409 (ConflictError)`);
+   471→  });
+   472→
+   473→  // Clean up the conflicting ticket
+   474→  after(async () => {
+   475→    if (firstTicketId) {
+   476→      await db('Orders').where({ TicketId: firstTicketId }).del();
+   477→      await db('Payments').where({ TicketId: firstTicketId }).del();
+   478→      await db('Calculations').where({ TicketId: firstTicketId }).del();
+   479→      await db('TicketEntities').where({ TicketId: firstTicketId }).del();
+   480→      await db('Tickets').where({ Id: firstTicketId }).del();
+   481→    }
+   482→  });
+   483→});
+   484→
+   485→// =====================================================================
+   486→// PRINT MOCK
+   487→// =====================================================================
+   488→
+   489→describe('Print mock', () => {
+   490→  test('GET /api/tickets/:id/print returns 200 with ESC/POS base64', async () => {
+   491→    const res = await authGet(`/api/tickets/${testTicketId}/print`);
+   492→    assert.strictEqual(res.status, 200);
+   493→    assert.ok(res.body.data.escposBase64, 'escposBase64 should be present');
+   494→    assert.ok(res.body.data.escposBase64.length > 0, 'escposBase64 should not be empty');
+   495→    assert.ok(res.body.data.formatted, 'formatted text should be present');
+   496→    assert.ok(res.body.data.escposBytesCount > 0, 'byte count should be > 0');
+   497→
+   498→    // Verify the base64 decodes to a Buffer starting with ESC @ (0x1B 0x40)
+   499→    const buf = Buffer.from(res.body.data.escposBase64, 'base64');
+   500→    assert.strictEqual(buf[0], 0x1B);
+   501→    assert.strictEqual(buf[1], 0x40);
+   502→
+   503→    // Verify the formatted text contains expected lines
+   504→    assert.match(res.body.data.formatted, /Ticket:/);
+   505→    assert.match(res.body.data.formatted, /Subtotal/);
+   506→    assert.match(res.body.data.formatted, /<cut>/);
+   507→
+   508→    ok(`GET /api/tickets/${testTicketId}/print → 200 (${res.body.data.escposBytesCount} ESC/POS bytes, base64 length ${res.body.data.escposBase64.length})`);
+   509→  });
+   510→
+   511→  test('GET /api/tickets/:id/print returns 404 for non-existent ticket', async () => {
+   512→    const res = await authGet('/api/tickets/999999/print');
+   513→    assert.strictEqual(res.status, 404);
+   514→    assert.strictEqual(res.body.error, 'NotFoundError');
+   515→    ok('GET /api/tickets/999999/print → 404 (NotFoundError)');
+   516→  });
+   517→});
+   518→
+   519→// =====================================================================
+   520→// Validation edge cases
+   521→// =====================================================================
+   522→
+   523→describe('Validation edge cases', () => {
+   524→  test('POST /api/tickets/:id/orders with invalid ticketId returns 400', async () => {
+   525→    const res = await authPost('/api/tickets/notanumber/orders')
+   526→      .send({ menuItemId: 1 });
+   527→    assert.strictEqual(res.status, 400);
+   528→    ok('POST /api/tickets/notanumber/orders → 400 (invalid id type)');
+   529→  });
+   530→
+   531→  test('POST /api/tickets with non-existent departmentId returns 400', async () => {
+   532→    const res = await authPost('/api/tickets')
+   533→      .send({ departmentId: 999999, ticketTypeId: 1 });
+   534→    assert.strictEqual(res.status, 400);
+   535→    assert.strictEqual(res.body.error, 'ValidationError');
+   536→    ok('POST /api/tickets (invalid departmentId) → 400 (ValidationError)');
+   537→  });
+   538→});
+   539→
+   540→// =====================================================================
+   541→// Sprint 5 — JWT Authentication tests
+   542→// =====================================================================
+   543→
+   544→describe('JWT Authentication', () => {
+   545→  test('POST /api/auth/login with valid credentials returns 200 + token', async () => {
+   546→    const res = await request.post('/api/auth/login')
+   547→      .send({ username: 'Administrator', pin: '1234' });
+   548→    assert.strictEqual(res.status, 200);
+   549→    assert.ok(res.body.token);
+   550→    assert.strictEqual(res.body.user.name, 'Administrator');
+   551→    assert.strictEqual(res.body.user.isAdmin, true);
+   552→    ok('POST /api/auth/login (valid) → 200 + JWT token + user info');
+   553→  });
+   554→
+   555→  test('POST /api/auth/login with invalid PIN returns 401', async () => {
+   556→    const res = await request.post('/api/auth/login')
+   557→      .send({ username: 'Administrator', pin: 'wrong' });
+   558→    assert.strictEqual(res.status, 401);
+   559→    assert.strictEqual(res.body.error, 'UnauthorizedError');
+   560→    ok('POST /api/auth/login (wrong PIN) → 401 UnauthorizedError');
+   561→  });
+   562→
+   563→  test('POST /api/auth/login with missing fields returns 400', async () => {
+   564→    const res = await request.post('/api/auth/login').send({ username: 'Administrator' });
+   565→    assert.strictEqual(res.status, 400);
+   566→    assert.strictEqual(res.body.error, 'ValidationError');
+   567→    ok('POST /api/auth/login (no pin) → 400 ValidationError');
+   568→  });
+   569→
+   570→  test('GET /api/tickets without token returns 401', async () => {
+   571→    const res = await request.get('/api/tickets');
+   572→    assert.strictEqual(res.status, 401);
+   573→    assert.strictEqual(res.body.error, 'UnauthorizedError');
+   574→    ok('GET /api/tickets (no token) → 401 UnauthorizedError');
+   575→  });
+   576→
+   577→  test('GET /api/tickets with invalid token returns 401', async () => {
+   578→    const res = await request.get('/api/tickets')
+   579→      .set('Authorization', 'Bearer invalid.token.here');
+   580→    assert.strictEqual(res.status, 401);
+   581→    ok('GET /api/tickets (invalid token) → 401');
+   582→  });
+   583→
+   584→  test('GET /api/auth/me with valid token returns user info', async () => {
+   585→    const res = await request.get('/api/auth/me')
+   586→      .set('Authorization', 'Bearer ' + jwtToken);
+   587→    assert.strictEqual(res.status, 200);
+   588→    assert.strictEqual(res.body.user.username, 'Administrator');
+   589→    ok('GET /api/auth/me → 200 (user info)');
+   590→  });
+   591→});
+   592→
+   593→// =====================================================================
+   594→// Sprint 5 — Extended endpoints (note, gift, void, tags)
+   595→// =====================================================================
+   596→
+   597→describe('Sprint 5 — Extended ticket endpoints', () => {
+   598→  let sprint5TicketId = null;
+   599→
+   600→  test('Setup: create ticket + add order for extended tests', async () => {
+   601→    const createRes = await authPost('/api/tickets').send({ departmentId: 1, ticketTypeId: 1 });
+   602→    assert.strictEqual(createRes.status, 201);
+   603→    sprint5TicketId = createRes.body.data.Id;
+   604→
+   605→    const orderRes = await authPost(`/api/tickets/${sprint5TicketId}/orders`)
+   606→      .send({ menuItemId: testMenuItemId, quantity: 1 });
+   607→    assert.strictEqual(orderRes.status, 200);
+   608→    ok(`Setup: ticket ${sprint5TicketId} + 1 order`);
+   609→  });
+   610→
+   611→  test('POST /api/tickets/:id/note sets the note', async () => {
+   612→    const res = await authPost(`/api/tickets/${sprint5TicketId}/note`)
+   613→      .send({ note: 'Test note from Sprint 5' });
+   614→    assert.strictEqual(res.status, 200);
+   615→    assert.strictEqual(res.body.data.Note, 'Test note from Sprint 5');
+   616→    ok('POST /api/tickets/:id/note → 200 (note saved)');
+   617→  });
+   618→
+   619→  test('POST /api/tickets/:id/tags sets ticket tags', async () => {
+   620→    const res = await authPost(`/api/tickets/${sprint5TicketId}/tags`)
+   621→      .send({ tags: [{ name: 'OrderType', value: 'Dine-in' }] });
+   622→    assert.strictEqual(res.status, 200);
+   623→    const tags = JSON.parse(res.body.data.TicketTags);
+   624→    assert.strictEqual(tags[0].TagName, 'OrderType');
+   625→    assert.strictEqual(tags[0].TagValue, 'Dine-in');
+   626→    ok('POST /api/tickets/:id/tags → 200 (tags saved)');
+   627→  });
+   628→
+   629→  test('POST /api/tickets/:id/gift marks an order as Gift', async () => {
+   630→    const ticket = await authGet(`/api/tickets/${sprint5TicketId}`);
+   631→    const orderId = ticket.body.data.Orders[0].Id;
+   632→    const res = await authPost(`/api/tickets/${sprint5TicketId}/gift`)
+   633→      .send({ orderIds: [orderId] });
+   634→    assert.strictEqual(res.status, 200);
+   635→    // After gift, the order should have CalculatePrice=0 and TotalAmount should be 0
+   636→    assert.strictEqual(res.body.data.Orders[0].CalculatePrice, 0);
+   637→    assert.strictEqual(Number(res.body.data.TotalAmount), 0);
+   638→    ok('POST /api/tickets/:id/gift → 200 (order marked as Gift, total=0)');
+   639→  });
+   640→
+   641→  test('POST /api/tickets/:id/void voids the ticket', async () => {
+   642→    const res = await authPost(`/api/tickets/${sprint5TicketId}/void`);
+   643→    assert.strictEqual(res.status, 200);
+   644→    assert.strictEqual(res.body.data.IsClosed, 1);
+   645→    const states = JSON.parse(res.body.data.TicketStates);
+   646→    const status = states.find(s => s.StateName === 'Status');
+   647→    assert.strictEqual(status.State, 'Void');
+   648→    ok('POST /api/tickets/:id/void → 200 (ticket voided, state=Void)');
+   649→  });
+   650→
+   651→  test('POST /api/tickets/:id/void on already-closed returns 409', async () => {
+   652→    const res = await authPost(`/api/tickets/${sprint5TicketId}/void`);
+   653→    assert.strictEqual(res.status, 409);
+   654→    ok('POST /api/tickets/:id/void (already closed) → 409');
+   655→  });
+   656→});
+   657→
+   658→// =====================================================================
+   659→// Sprint 5 — Split / Refund / Merge
+   660→// =====================================================================
+   661→
+   662→describe('Sprint 5 — Split, Refund, Merge', () => {
+   663→  let splitSourceId = null;
+   664→  let splitNewId = null;
+   665→  let refundOriginalId = null;
+   666→  let mergeSource1 = null;
+   667→  let mergeSource2 = null;
+   668→  let mergeResultId = null;
+   669→
+   670→  test('SPLIT: create ticket with 2 orders, split 1 order to new ticket', async () => {
+   671→    // Setup
+   672→    const createRes = await authPost('/api/tickets').send({ departmentId: 1, ticketTypeId: 1 });
+   673→    splitSourceId = createRes.body.data.Id;
+   674→    await authPost(`/api/tickets/${splitSourceId}/orders`).send({ menuItemId: testMenuItemId, quantity: 2 });
+   675→    await authPost(`/api/tickets/${splitSourceId}/orders`).send({ menuItemId: testMenuItemId, quantity: 3 });
+   676→    const beforeSplit = await authGet(`/api/tickets/${splitSourceId}`);
+   677→    assert.strictEqual(beforeSplit.body.data.Orders.length, 2);
+   678→
+   679→    // Split: move first order to new ticket
+   680→    const orderIdToMove = beforeSplit.body.data.Orders[0].Id;
+   681→    const splitRes = await authPost(`/api/tickets/${splitSourceId}/split`).send({ orderIds: [orderIdToMove] });
+   682→    assert.strictEqual(splitRes.status, 201);
+   683→    splitNewId = splitRes.body.data.newTicket.Id;
+   684→    assert.strictEqual(splitRes.body.data.sourceTicket.Orders.length, 1);
+   685→    assert.strictEqual(splitRes.body.data.newTicket.Orders.length, 1);
+   686→    ok(`SPLIT: source ${splitSourceId} (1 order) + new ${splitNewId} (1 order)`);
+   687→  });
+   688→
+   689→  test('REFUND: closed ticket can be refunded', async () => {
+   690→    // Create + close a ticket
+   691→    const createRes = await authPost('/api/tickets').send({ departmentId: 1, ticketTypeId: 1 });
+   692→    refundOriginalId = createRes.body.data.Id;
+   693→    await authPost(`/api/tickets/${refundOriginalId}/orders`).send({ menuItemId: testMenuItemId, quantity: 1 });
+   694→    await authPost(`/api/tickets/${refundOriginalId}/payments`).send({ paymentTypeId: testPaymentTypeId, amount: 8.50 });
+   695→    await authPost(`/api/tickets/${refundOriginalId}/close`);
+   696→
+   697→    // Refund
+   698→    const refundRes = await authPost(`/api/tickets/${refundOriginalId}/refund`)
+   699→      .send({ amount: 5.00, reason: 'Customer was dissatisfied' });
+   700→    assert.strictEqual(refundRes.status, 201);
+   701→    assert.ok(refundRes.body.data.refundTicket.Id > 0);
+   702→    assert.strictEqual(Number(refundRes.body.data.refundTicket.TotalAmount), -5.00);
+   703→    ok(`REFUND: original ${refundOriginalId} → refund ticket ${refundRes.body.data.refundTicket.Id} (-$5.00)`);
+   704→  });
+   705→
+   706→  test('MERGE: two open tickets combine into one', async () => {
+   707→    // Create two tickets with orders
+   708→    const c1 = await authPost('/api/tickets').send({ departmentId: 1, ticketTypeId: 1 });
+   709→    mergeSource1 = c1.body.data.Id;
+   710→    await authPost(`/api/tickets/${mergeSource1}/orders`).send({ menuItemId: testMenuItemId, quantity: 1 });
+   711→
+   712→    const c2 = await authPost('/api/tickets').send({ departmentId: 1, ticketTypeId: 1 });
+   713→    mergeSource2 = c2.body.data.Id;
+   714→    await authPost(`/api/tickets/${mergeSource2}/orders`).send({ menuItemId: testMenuItemId, quantity: 2 });
+   715→
+   716→    // Merge
+   717→    const mergeRes = await authPost('/api/tickets/merge').send({ sourceTicketIds: [mergeSource1, mergeSource2] });
+   718→    assert.strictEqual(mergeRes.status, 201);
+   719→    mergeResultId = mergeRes.body.data.mergedTicket.Id;
+   720→    assert.strictEqual(mergeRes.body.data.mergedTicket.Orders.length, 2);
+   721→    ok(`MERGE: ${mergeSource1} + ${mergeSource2} → ${mergeResultId} (2 orders)`);
+   722→
+   723→    // Verify sources are closed
+   724→    const src1 = await authGet(`/api/tickets/${mergeSource1}`);
+   725→    assert.strictEqual(src1.body.data.IsClosed, 1);
+   726→    ok('MERGE: source ticket 1 marked as closed');
+   727→  });
+   728→});
+   729→

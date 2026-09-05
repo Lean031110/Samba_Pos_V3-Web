@@ -49,11 +49,15 @@ function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
 
   // Convert SQLite constraint violations to 409
-  if (err.code === 'SQLITE_CONSTRAINT' || err.errno === 19) {
+  if (err.code === 'SQLITE_CONSTRAINT' || err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.errno === 19) {
     err = new ConflictError('Database constraint violation', {
       sqliteCode: err.code || 'SQLITE_CONSTRAINT',
-      detail: err.message,
     });
+  }
+
+  // Convert optimistic lock conflicts to 409
+  if (err.message?.startsWith('OPTIMISTIC_LOCK_CONFLICT')) {
+    err = new ConflictError(err.message, { type: 'optimistic_lock_conflict' });
   }
 
   const statusCode = err.statusCode || 500;
@@ -61,7 +65,8 @@ function errorHandler(err, req, res, next) {
     error: err.name || 'InternalServerError',
     message: err.message || 'An unexpected error occurred',
   };
-  if (err.details) body.details = err.details;
+  // Only expose details in non-production
+  if (process.env.NODE_ENV !== 'production' && err.details) body.details = err.details;
   if (process.env.NODE_ENV !== 'production' && statusCode === 500) {
     body.stack = err.stack;
   }

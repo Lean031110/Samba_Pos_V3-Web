@@ -49,6 +49,7 @@ class Ticket {
     this._ticketLogs = data.TicketLogs || null;
     this.ExchangeRate = data.ExchangeRate || 1;
     this.TaxIncluded = data.TaxIncluded !== undefined ? !!data.TaxIncluded : true;
+    this.Version = data.Version || 1;  // Optimistic locking version
 
     // Child collections
     this.Orders = data.Orders || [];

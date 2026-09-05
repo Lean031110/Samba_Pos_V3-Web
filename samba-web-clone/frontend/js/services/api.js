@@ -102,6 +102,14 @@ const Api = {
   splitTicket: (id, orderIds)    => request('POST', `/tickets/${id}/split`, { orderIds }),
   refundTicket:(id, amount, reason) => request('POST', `/tickets/${id}/refund`, { amount, reason }),
   mergeTickets:(sourceTicketIds) => request('POST', `/tickets/merge`, { sourceTicketIds }),
+  printTicketSend: (id, body)    => request('POST', `/tickets/${id}/print/send`, body),
+
+  // === Configuration (DB-driven, no hardcoded IDs) ===
+  getCalculationTypes: ()        => request('GET',  '/calculation-types'),
+  getPaymentTypes:     ()        => request('GET',  '/payment-types'),
+  getDepartments:      ()        => request('GET',  '/departments'),
+  getTicketTypes:      ()        => request('GET',  '/ticket-types'),
+  getTaxTemplates:     ()        => request('GET',  '/tax-templates'),
 
   // === Internal ===
   request,  // exposed for one-off calls

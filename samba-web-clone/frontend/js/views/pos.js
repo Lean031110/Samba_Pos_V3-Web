@@ -269,12 +269,73 @@ const PosView = {
 
   async gift() {
     if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
-    window.App.toast('Gift action — not yet wired to a CalculationType', 'warn');
+    const ticket = window.store.currentTicket;
+    if (!ticket.Orders || ticket.Orders.length === 0) {
+      return window.App.toast('No orders to gift', 'warn');
+    }
+    // Build order selection modal
+    const orderCheckboxes = ticket.Orders.map(o => {
+      const total = (Number(o.Price || 0) * Number(o.Quantity || 0)).toFixed(2);
+      const checked = o.CalculatePrice ? '' : 'checked';
+      const label = `${this._escape(o.MenuItemName)} x${Number(o.Quantity || 0)} ($${total})`;
+      return `<label style="display: flex; align-items: center; gap: 8px; padding: 6px; cursor: pointer;">
+        <input type="checkbox" class="gift-order-cb" data-order-id="${o.Id}" ${checked}>
+        <span>${label}</span>
+      </label>`;
+    }).join('');
+    window.App.showModal('Gift Orders', `
+      <p style="margin-bottom: 8px; color: var(--samba-fg-muted);">Select orders to mark as Gift (excluded from totals):</p>
+      <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--samba-border-light); border-radius: 4px; padding: 8px;">
+        ${orderCheckboxes}
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
+        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="discount" icon="fa-gift" label="Apply Gift" onclick="window.App.views.pos._applyGift()"></flex-button>
+      </div>
+    `);
   },
 
-  async voidAction() {
+  async _applyGift() {
+    const cbs = document.querySelectorAll('.gift-order-cb:checked');
+    const orderIds = Array.from(cbs).map(cb => parseInt(cb.dataset.orderId, 10));
+    if (orderIds.length === 0) {
+      return window.App.toast('No orders selected', 'warn');
+    }
+    try {
+      const res = await Api.giftOrders(window.store.currentTicket.Id, orderIds);
+      window.store.setState({ currentTicket: res.data }, 'gift-applied');
+      window.App.closeModal();
+      window.App.toast(`${orderIds.length} order(s) gifted`, 'success');
+    } catch (err) {
+      window.App.toast('Cannot apply gift: ' + err.message, 'error');
+    }
+  },
+
+  async void() {
     if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
-    window.App.toast('Void action — not yet wired', 'warn');
+    const ticket = window.store.currentTicket;
+    window.App.showModal('Void Ticket', `
+      <p style="margin-bottom: 12px;">Are you sure you want to void ticket #${ticket.TicketNumber || ticket.Id}?</p>
+      <p style="color: var(--samba-fg-error); margin-bottom: 12px;">
+        <i class="fa-solid fa-triangle-exclamation"></i> This will reverse all payments and mark the ticket as voided. This action cannot be undone.
+      </p>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="danger" icon="fa-ban" label="Void Ticket" onclick="window.App.views.pos._confirmVoid()"></flex-button>
+      </div>
+    `);
+  },
+
+  async _confirmVoid() {
+    try {
+      const res = await Api.voidTicket(window.store.currentTicket.Id);
+      window.store.setState({ currentTicket: res.data }, 'void-confirmed');
+      window.App.closeModal();
+      window.App.toast('Ticket voided', 'success');
+    } catch (err) {
+      window.App.toast('Cannot void ticket: ' + err.message, 'error');
+      window.App.closeModal();
+    }
   },
 
   note() {
@@ -302,22 +363,108 @@ const PosView = {
 
   tags() {
     if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
-    window.App.toast('Tags selector — not yet implemented (Sprint 5)', 'warn');
+    const existing = (() => {
+      try { return JSON.parse(window.store.currentTicket.TicketTags || '[]'); }
+      catch { return []; }
+    })();
+    const existingHtml = existing.map(t => `<input type="text" class="tag-name" value="${this._escape(t.TagName || '')}" placeholder="Tag name" style="width: 45%; padding: 6px; margin: 2px;">
+      <input type="text" class="tag-value" value="${this._escape(t.TagValue || '')}" placeholder="Value" style="width: 45%; padding: 6px; margin: 2px;">`).join('');
+    window.App.showModal('Ticket Tags', `
+      <p style="margin-bottom: 8px; color: var(--samba-fg-muted);">Tag name / value pairs:</p>
+      <div id="tags-container" style="max-height: 250px; overflow-y: auto;">
+        ${existingHtml}
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: space-between;">
+        <flex-button icon="fa-plus" label="Add Tag" onclick="window.App.views.pos._addTagRow()"></flex-button>
+        <div style="display: flex; gap: 8px;">
+          <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
+          <flex-button variant="success" label="Save Tags" onclick="window.App.views.pos._saveTags()"></flex-button>
+        </div>
+      </div>
+    `);
+  },
+
+  _addTagRow() {
+    const container = document.getElementById('tags-container');
+    const row = document.createElement('div');
+    row.innerHTML = `<input type="text" class="tag-name" placeholder="Tag name" style="width: 45%; padding: 6px; margin: 2px;">
+      <input type="text" class="tag-value" placeholder="Value" style="width: 45%; padding: 6px; margin: 2px;">`;
+    container.appendChild(row);
+  },
+
+  async _saveTags() {
+    const names = document.querySelectorAll('.tag-name');
+    const values = document.querySelectorAll('.tag-value');
+    const tags = [];
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i].value.trim();
+      const value = values[i].value.trim();
+      if (name) tags.push({ name, value });
+    }
+    try {
+      const res = await Api.setTags(window.store.currentTicket.Id, tags);
+      window.store.setState({ currentTicket: res.data }, 'tags-set');
+      window.App.closeModal();
+      window.App.toast(`${tags.length} tag(s) saved`, 'success');
+    } catch (err) {
+      window.App.toast('Cannot save tags: ' + err.message, 'error');
+    }
   },
 
   async discount() {
     if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
-    // Use the seeded Discount CalculationType (id=1, CalculationMethod=0 = percent)
-    const percent = prompt('Enter discount percentage:', '10');
-    if (!percent) return;
-    const amount = parseFloat(percent);
-    if (isNaN(amount) || amount < 0 || amount > 100) {
-      return window.App.toast('Invalid percentage', 'error');
+    // Fetch calculation types from backend (no hardcoded IDs)
+    let calcTypes = window.store.state.calculationTypes;
+    if (!calcTypes || calcTypes.length === 0) {
+      try {
+        const res = await Api.getCalculationTypes();
+        calcTypes = res.data;
+        window.store.setState({ calculationTypes: calcTypes }, 'calc-types-loaded');
+      } catch (err) {
+        return window.App.toast('Cannot load calculation types: ' + err.message, 'error');
+      }
     }
+    // Build modal with available discount types
+    const discountTypes = calcTypes.filter(c => c.DecreaseAmount);
+    if (discountTypes.length === 0) {
+      return window.App.toast('No discount calculation types configured', 'warn');
+    }
+    const optionsHtml = discountTypes.map(c => {
+      const methodLabel = c.CalculationMethod === 0 ? '%' : c.CalculationMethod === 2 ? 'fixed' : 'round';
+      return `<label style="display: flex; align-items: center; gap: 8px; padding: 6px; cursor: pointer;">
+        <input type="radio" name="calc-type" value="${c.Id}" ${c.Id === discountTypes[0].Id ? 'checked' : ''}>
+        <span>${this._escape(c.Name)} (${methodLabel})</span>
+      </label>`;
+    }).join('');
+    window.App.showModal('Apply Discount', `
+      <div style="margin-bottom: 12px;">
+        <p style="margin-bottom: 6px; color: var(--samba-fg-muted);">Discount type:</p>
+        ${optionsHtml}
+      </div>
+      <div style="margin-bottom: 12px;">
+        <p style="margin-bottom: 6px; color: var(--samba-fg-muted);">Amount:</p>
+        <input type="number" id="discount-amount" value="10" min="0" step="0.01"
+               style="width: 100%; padding: 10px; font-size: 18px; border: 1px solid var(--samba-border-input); border-radius: 4px;">
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="discount" icon="fa-percent" label="Apply" onclick="window.App.views.pos._applyDiscount()"></flex-button>
+      </div>
+    `);
+  },
+
+  async _applyDiscount() {
+    const selectedType = document.querySelector('input[name="calc-type"]:checked');
+    const amountInput = document.getElementById('discount-amount');
+    if (!selectedType) return window.App.toast('Select a discount type', 'warn');
+    const calculationTypeId = parseInt(selectedType.value, 10);
+    const amount = parseFloat(amountInput.value);
+    if (isNaN(amount) || amount < 0) return window.App.toast('Invalid amount', 'error');
     try {
-      const res = await Api.addCalculation(window.store.currentTicket.Id, { calculationTypeId: 1, amount });
+      const res = await Api.addCalculation(window.store.currentTicket.Id, { calculationTypeId, amount });
       window.store.setState({ currentTicket: res.data }, 'discount-applied');
-      window.App.toast(`${amount}% discount applied`, 'success');
+      window.App.closeModal();
+      window.App.toast('Discount applied', 'success');
     } catch (err) {
       window.App.toast('Cannot apply discount: ' + err.message, 'error');
     }
@@ -334,7 +481,7 @@ const PosView = {
         </div>
         <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
           <flex-button label="Close" onclick="window.App.closeModal()"></flex-button>
-          <flex-button variant="action" icon="fa-print" label="Print" onclick="window.App.views.pos._doPrint('${res.data.escposBase64}')"></flex-button>
+          <flex-button variant="action" icon="fa-print" label="Send to Printer" onclick="window.App.views.pos._doPrint('${res.data.escposBase64}')"></flex-button>
         </div>
       `);
     } catch (err) {
@@ -342,9 +489,27 @@ const PosView = {
     }
   },
 
-  _doPrint(_base64) {
-    window.App.toast('Print sent to mock ESC/POS (real WebUSB in Sprint 5)', 'info');
-    window.App.closeModal();
+  async _doPrint(base64) {
+    // Send the ESC/POS buffer to the backend printer endpoint
+    try {
+      await Api.printTicketSend(window.store.currentTicket.Id, { escposBase64: base64 });
+      window.App.toast('Print job sent to printer', 'success');
+      window.App.closeModal();
+    } catch (err) {
+      window.App.toast('Print failed: ' + err.message + '. Falling back to browser print.', 'warn');
+      // Fallback: open a new window with the formatted text and call window.print()
+      try {
+        const printRes = await Api.printTicket(window.store.currentTicket.Id);
+        const w = window.open('', '_blank', 'width=400,height=600');
+        w.document.write(`<pre style="font-family: 'Courier New', monospace; font-size: 12px; white-space: pre-wrap;">${printRes.data.formatted}</pre>`);
+        w.document.close();
+        w.focus();
+        w.print();
+      } catch (fallbackErr) {
+        window.App.toast('Print fallback also failed: ' + fallbackErr.message, 'error');
+      }
+      window.App.closeModal();
+    }
   },
 
   async pay() {

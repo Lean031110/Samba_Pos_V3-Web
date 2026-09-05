@@ -216,8 +216,18 @@ class TicketRepository {
 
       let ticketId;
       if (ticket.Id) {
-        // Update existing
-        await trx('Tickets').where({ Id: ticket.Id }).update(ticketRow);
+        // Optimistic locking: only update if Version matches what we loaded
+        const expectedVersion = ticket.Version || 1;
+        const updated = await trx('Tickets')
+          .where({ Id: ticket.Id, Version: expectedVersion })
+          .update({ ...ticketRow, Version: expectedVersion + 1 });
+
+        if (updated === 0) {
+          // Another terminal modified this ticket — conflict
+          const current = await trx('Tickets').where({ Id: ticket.Id }).select('Version').first();
+          throw new Error(`OPTIMISTIC_LOCK_CONFLICT: Ticket ${ticket.Id} was modified by another terminal (expected version ${expectedVersion}, current ${current?.Version || 'unknown'})`);
+        }
+        ticket.Version = expectedVersion + 1;
         ticketId = ticket.Id;
         // Cascade delete existing children that are no longer in the array
         const currentOrderIds = (ticket.Orders || []).map(o => o.Id).filter(Boolean);

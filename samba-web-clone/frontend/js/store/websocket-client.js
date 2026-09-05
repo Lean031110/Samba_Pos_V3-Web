@@ -12,13 +12,13 @@
 // Each event updates the Store singleton, which then notifies subscribers.
 // =====================================================================
 
-// Load socket.io client from CDN
+// Load socket.io client from local vendor (offline/LAN support)
 (function loadSocketIo(cb) {
   if (window.io) { cb(); return; }
   const s = document.createElement('script');
-  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js';
+  s.src = '/vendor/js/socket.io.min.js';
   s.onload = cb;
-  s.onerror = () => console.error('[ws] Failed to load socket.io client');
+  s.onerror = () => console.error('[ws] Failed to load socket.io client from local vendor');
   document.head.appendChild(s);
 })(initWebSocket);
 

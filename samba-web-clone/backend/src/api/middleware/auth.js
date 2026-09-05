@@ -1,26 +1,45 @@
 // =====================================================================
-// auth.js — JWT authentication middleware
+// auth.js — JWT authentication middleware (production-ready)
 // =====================================================================
-// Per Architect's directive (Sprint 5):
-//   - Replace mock admin/1234 with real JWT auth
-//   - Login returns a token included in Authorization: Bearer <token>
-//   - Middleware validates token + extracts userId
-//
-// Token payload: { userId, username, roleId, isAdmin, iat, exp }
-// Default expiry: 8 hours (POS terminal session length)
+// Per Sprint 5 audit:
+//   - bcrypt REQUIRED (no plaintext PIN acceptance)
+//   - JWT secret MUST be set via env (no insecure defaults)
+//   - Rate limiting on login endpoint (brute force protection)
+//   - req.user populated on every authenticated request
 // =====================================================================
 
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const { db } = require('../../infrastructure/db/db');
 const { UnauthorizedError, ValidationError } = require('./errorHandler');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'samba-web-clone-dev-secret-change-in-production';
+// JWT secret MUST be set via environment variable. No insecure defaults.
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[FATAL] JWT_SECRET environment variable is required. Refusing to start.');
+  console.error('Set it with: export JWT_SECRET=$(openssl rand -hex 32)');
+  process.exit(1);
+}
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 
 /**
+ * Rate limiter for login endpoint — prevents brute force on 4-digit PINs.
+ * 5 attempts per 15 minutes per IP.
+ */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,   // 15 minutes
+  max: 5,                      // 5 attempts per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'TooManyRequests',
+    message: 'Too many login attempts. Please try again in 15 minutes.',
+  },
+});
+
+/**
  * Generate a JWT for a user.
- * @param {{Id: number, Name: string, UserRoleId: number, UserRole?: {IsAdmin: number}}} user
  */
 function signToken(user) {
   return jwt.sign(
@@ -37,9 +56,6 @@ function signToken(user) {
 
 /**
  * Verify a JWT and return its payload.
- * @param {string} token
- * @returns {object} decoded payload
- * @throws UnauthorizedError if invalid/expired
  */
 function verifyToken(token) {
   try {
@@ -50,24 +66,15 @@ function verifyToken(token) {
 }
 
 /**
- * Express middleware: extract Bearer token from Authorization header,
- * verify it, and attach req.user = { userId, username, roleId, isAdmin }.
- *
- * Skip auth for: /health, /api/auth/login, static files.
+ * Express middleware: extract Bearer token, verify it, attach req.user.
+ * Skips /auth/login (public) and non-/api routes (static files).
  */
 async function authenticate(req, res, next) {
-  // Skip auth for public routes
-  // NOTE: when mounted on '/api', req.path strips the '/api' prefix,
-  // so '/api/auth/login' becomes '/auth/login'.
+  // Skip auth for login route
   const publicPaths = ['/auth/login'];
-  const isPublic = publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'));
-  // Also allow /auth/login POST explicitly
-  if (isPublic) {
+  if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) {
     return next();
   }
-  // Skip for non-/api requests (static files, /health, SPA fallback)
-  // NOTE: when this middleware is mounted on '/api', we're always inside /api
-  // so this check is mostly redundant — kept for safety if mounted differently.
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -92,6 +99,8 @@ async function authenticate(req, res, next) {
  * Login handler — POST /api/auth/login
  * Body: { username, pin }
  * Returns: { token, user }
+ *
+ * SECURITY: bcrypt is REQUIRED. Plaintext PINs are rejected.
  */
 async function loginHandler(req, res, next) {
   try {
@@ -108,17 +117,20 @@ async function loginHandler(req, res, next) {
       .first();
 
     if (!user) {
-      throw new UnauthorizedError('Invalid credentials', { field: 'username' });
+      throw new UnauthorizedError('Invalid credentials');
     }
 
-    // PIN may be stored as bcrypt hash OR as plain text (for backward compat
-    // with the seed that inserts plain '1234'). Detect and verify accordingly.
-    const pinValid = user.PinCode?.startsWith('$2')
-      ? bcrypt.compareSync(pin, user.PinCode)
-      : (user.PinCode === pin);
+    // SECURITY: PinCode MUST be a bcrypt hash (starts with $2).
+    // Plaintext PINs are rejected — no backward-compat backdoor.
+    if (!user.PinCode || !user.PinCode.startsWith('$2')) {
+      console.error(`[SECURITY] User "${username}" has a non-bcrypt PinCode. Refusing login. Run the bcrypt migration.`);
+      throw new UnauthorizedError('Invalid credentials');
+    }
 
+    // Use async compare to avoid blocking the event loop
+    const pinValid = await bcrypt.compare(pin, user.PinCode);
     if (!pinValid) {
-      throw new UnauthorizedError('Invalid credentials', { field: 'pin' });
+      throw new UnauthorizedError('Invalid credentials');
     }
 
     const token = signToken({
@@ -161,4 +173,5 @@ module.exports = {
   authenticate,
   loginHandler,
   meHandler,
+  loginLimiter,
 };

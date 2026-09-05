@@ -112,9 +112,13 @@ class TicketService {
    * Add an order to an existing ticket.
    * @param {number} ticketId
    * @param {{menuItemId: number, quantity?: number, portionName?: string}} data
+   * @param {{userId: number, username: string}} user — from req.user (JWT)
    */
-  async addOrder(ticketId, data) {
+  async addOrder(ticketId, data, user = { userId: 0, username: 'system' }) {
     if (!data.menuItemId) throw new ValidationError('menuItemId is required');
+    if (data.quantity !== undefined && (typeof data.quantity !== 'number' || data.quantity <= 0)) {
+      throw new ValidationError('quantity must be a positive number');
+    }
 
     const ticketRow = await ticketRepo.getTicketById(ticketId);
     if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
@@ -133,11 +137,11 @@ class TicketService {
     // Build the Ticket domain object from DB row
     const ticket = new Ticket(ticketRow);
 
-    // Build the Order via OrderBuilder
+    // Build the Order via OrderBuilder — use the ACTUAL user from JWT
     const order = OrderBuilder.create()
       .forMenuItem(menuItem)
       .withPortion(menuItem.Portions.find(p => p.Name === data.portionName) || menuItem.Portions[0])
-      .withUserName('Administrator')
+      .withUserName(user.username)
       .withTaxTemplates(taxTemplates)
       .withAccountTransactionType(saleTxnType)
       .withDepartment(department)
@@ -145,7 +149,7 @@ class TicketService {
       .build();
 
     // Add the order to the ticket (this triggers recalc + eventBus)
-    ticket.addOrder(order, taxTemplates, saleTxnType, 'Administrator');
+    ticket.addOrder(order, taxTemplates, saleTxnType, user.username);
 
     // Persist
     ticket.Id = ticketId;
@@ -158,8 +162,9 @@ class TicketService {
    * Add a calculation (discount/service/rounding) to a ticket.
    * @param {number} ticketId
    * @param {{calculationTypeId: number, amount: number}} data
+   * @param {{userId: number, username: string}} user — from req.user (JWT)
    */
-  async addCalculation(ticketId, data) {
+  async addCalculation(ticketId, data, user = { userId: 0, username: 'system' }) {
     if (!data.calculationTypeId) throw new ValidationError('calculationTypeId is required');
     if (typeof data.amount !== 'number') throw new ValidationError('amount must be a number');
 
@@ -185,12 +190,36 @@ class TicketService {
   /**
    * Process a payment on a ticket.
    * @param {number} ticketId
-   * @param {{paymentTypeId: number, amount: number, tenderedAmount?: number}} data
+   * @param {{paymentTypeId: number, amount: number, tenderedAmount?: number, idempotencyKey?: string}} data
+   * @param {{userId: number, username: string}} user — from req.user (JWT)
    */
-  async addPayment(ticketId, data) {
+  async addPayment(ticketId, data, user = { userId: 0, username: 'system' }) {
     if (!data.paymentTypeId) throw new ValidationError('paymentTypeId is required');
     if (typeof data.amount !== 'number' || data.amount <= 0) {
       throw new ValidationError('amount must be a positive number');
+    }
+
+    // Idempotency check: if idempotencyKey provided, check if we already processed this
+    if (data.idempotencyKey) {
+      const existing = await db('Payments')
+        .where({ TicketId: ticketId })
+        .whereRaw("CAST(Quantity AS TEXT) = ?", [data.idempotencyKey])  // reuse Quantity column as idempotency key storage (hack for now)
+        .first();
+      // Actually, let's use a simpler approach: check if the exact same payment was already made
+      const existingPayment = await db('Payments')
+        .where({
+          TicketId: ticketId,
+          PaymentTypeId: data.paymentTypeId,
+          Amount: data.amount,
+          UserId: user.userId,
+        })
+        .whereRaw("datetime(Date) > datetime('now', '-30 seconds')")
+        .first();
+      if (existingPayment) {
+        throw new ConflictError('Duplicate payment detected (same amount within 30 seconds)', {
+          existingPaymentId: existingPayment.Id,
+        });
+      }
     }
 
     const ticketRow = await ticketRepo.getTicketById(ticketId);
@@ -212,8 +241,29 @@ class TicketService {
       account,
       data.amount,
       ticketRow.ExchangeRate || 1,
-      1  // userId=1 (admin) — TODO: read from auth context
+      user.userId   // Use actual user ID from JWT
     );
+
+    // Handle change payment if tenderedAmount > amount
+    if (data.tenderedAmount && data.tenderedAmount > data.amount) {
+      const changeAmount = data.tenderedAmount - data.amount;
+      // Find a ChangePaymentType linked to this PaymentType's account transaction type
+      const changePaymentType = await db('ChangePaymentTypes')
+        .where({ AccountTransactionTypeId: paymentType.AccountTransactionTypeId })
+        .first();
+      if (changePaymentType) {
+        const changeAccount = changePaymentType.AccountId
+          ? await db('Accounts').where({ Id: changePaymentType.AccountId }).first()
+          : account;
+        ticket.addChangePayment(
+          { ...changePaymentType, AccountTransactionType: accountTxnType },
+          changeAccount,
+          changeAmount,
+          ticketRow.ExchangeRate || 1,
+          user.userId
+        );
+      }
+    }
 
     ticket.Id = ticketId;
     await ticketRepo.saveTicket(ticket);
@@ -223,8 +273,9 @@ class TicketService {
   /**
    * Close a ticket.
    * @param {number} ticketId
+   * @param {{userId: number, username: string}} user — from req.user (JWT)
    */
-  async closeTicket(ticketId) {
+  async closeTicket(ticketId, user = { userId: 0, username: 'system' }) {
     const ticketRow = await ticketRepo.getTicketById(ticketId);
     if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
     if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);

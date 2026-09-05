@@ -6,11 +6,11 @@
 // =====================================================================
 
 const express = require('express');
-const { loginHandler, meHandler } = require('../middleware/auth');
+const { loginHandler, meHandler, loginLimiter } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/login', loginHandler);
+router.post('/login', loginLimiter, loginHandler);
 router.get('/me', meHandler);
 
 module.exports = router;

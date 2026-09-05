@@ -1,0 +1,361 @@
+     1→     1→# FULL ARCHITECTURE REPORT — SambaPOS V3
+     2→     2→
+     3→     3→> Forensic analysis of the SambaPOS V3 source code (https://github.com/josephwambura/SambaPOS-3).
+     4→     4→> This document drives the WPF → Web migration plan. Every section is sourced from real `.cs` / `.xaml` files in the repository.
+     5→     5→
+     6→     6→**Repo root (in this workspace):** `/home/z/my-project/samba-web-clone/source/`
+     7→     7→**Solution file:** `SambaPos.sln` (30+ C# projects, ~550 KB solution file).
+     8→     8→**SambaPOS V3 platform:** .NET 4.5 / WPF / Entity Framework 4.4 Code-First / SQL Server CE 4.0 (`.sdf`).
+     9→     9→**Default language:** Turkish strings in resources (e.g. `Resources.CanNotAddItemToLockedTicket`); UI default culture is en-US but seed data uses English.
+    10→    10→
+    11→    11→---
+    12→    12→
+    13→    13→## 1. Solution Decomposition (Projects)
+    14→    14→
+    15→    15→SambaPOS V3 is a **modular composite WPF application** built on top of the Microsoft Patterns & Practices **PRISM** library (event aggregation, region manager, module catalog). The solution is organised in **Clean Architecture / DDD-lite** style: a pure domain, infrastructure that knows about EF, application services, and a presentation shell composed of independently-loaded modules.
+    16→    16→
+    17→    17→### 1.1 Project catalogue
+    18→    18→
+    19→    19→| # | Project | Type | Layer | Responsibility |
+    20→    20→|---|---------|------|-------|----------------|
+    21→    21→| 1 | `Samba.Infrastructure` | ClassLib | Infrastructure (cross-cutting) | `LocalSettings` (global config), `JsonHelper`, `ObjectCloner`, expression parsers (`QuantityFuncParser`, `DateFuncParser`), `Utility`. **NO DB coupling.** |
+    22→    22→| 2 | `Samba.Infrastructure.Data` | ClassLib | Infrastructure (persistence primitives) | Abstract base classes: `ValueClass` (Id), `EntityClass` (Id+Name), `AbstractMap` (Terminal/Department/UserRole/TicketType scoping), interfaces `IEntityClass`, `IValueClass`, `IAbstractMapModel`, `ICacheable`, `IOrderable`. |
+    23→    23→| 3 | `Samba.Domain` | ClassLib | **Domain (pure POCO, no deps)** | 90+ entity classes across `Tickets`, `Menus`, `Accounts`, `Inventory`, `Settings`, `Users`, `Tasks`, `Entities`, `Automation`. Fluent Builders namespace. **The heart of the system.** |
+    24→    24→| 4 | `Samba.Domain.Tests` | UnitTest | Test | MSTest tests for the Domain layer (tax, calculations, builders). |
+    25→    25→| 5 | `Samba.Persistance` | ClassLib | Infrastructure (EF) | `DataContext : DbContext` (EF Code-First), `OnModelCreating` mapping, DAO interfaces + implementations (`TicketDao`, `SettingDao`, `AccountDao`, `WorkPeriodDao`, `CacheDao`). |
+    26→    26→| 6 | `Samba.Persistance.DBMigration` | ClassLib | Infrastructure (migrations) | FluentMigrator `[Migration(n)]` classes 001–024. Tracks schema evolution. |
+    27→    27→| 7 | `Samba.Services` | ClassLib | Application Services | Service interfaces + implementations for **Cache, Settings, Accounts, Menu, Inventory, Reports, Automation, Printer, Expression, Messaging, EMail, Device**. |
+    28→    28→| 8 | `Samba.Services.Tests` | UnitTest | Test | Service-layer unit tests. |
+    29→    29→| 9 | `Samba.Presentation.Services` | ClassLib | Application Services (Presentation-coupled) | `TicketService`, `PaymentEditor`, `WorkPeriodService`, `UserService`, `EntityServiceClient`, `TaskService`, `TriggerService`, `ReportServiceClient`, `DataCreationService` (seed), `RuleGenerator`. |
+    30→    30→| 10 | `Samba.Presentation.Common` | ClassLib | Presentation (shared) | `ViewModelBase` (bindable, INotifyPropertyChanged), `CommandBase` / `CaptionCommand<T>` (delegate commands), `Common.Services` (UI services: `IUserDialog`, `IMessageService`), `ActionProcessors` (automation action implementations), `Widgets`, `ErrorReport`. |
+    31→    31→| 11 | `Samba.Presentation.Controls` | ClassLib | Presentation (custom controls) | `FlexButton` (THE touch button — auto-contrasting foreground, glow animation), `NumberPad` (calc-style keypad), `TicketButton` (table tiles), `TicketButtonGroup`, `EditorButton`, `TicketOrdersButton`, `ScrollableText`, `CaptionControl`, `IsPressControl`, `KineticBehaviour` (touch kinetic scrolling), `OfficeTabControl`, `OutlookBar`, `EditableComboBox`. |
+    32→    32→| 12 | `Samba.Presentation.ViewModels` | ClassLib | Presentation (ViewModels) | Pure VMs: `PosViewModel` (root ticket VM), `TicketViewModel`, `TicketOrdersViewModel`, `PaymentEditorViewModel`, `MenuItemSelectorViewModel`, `TicketListViewModel`, `NumberPadViewModel`, `AutomationCommandViewModel`. |
+    33→    33→| 13 | `Samba.Presentation` | WPF App | Shell | `App.xaml` / `App.xaml.cs`, `Shell.xaml` / `ShellViewModel.cs`, `Common.xaml` (merged resources), `Bootstrapper.cs` (PRISM bootstrap, DI registration), `MainWindow.xaml`. |
+    34→    34→| 14 | `Samba.Modules.PosModule` | ClassLib | Module (root POS UI) | `PosView.xaml` (ticket dashboard), `PosViewModel.cs`, ActionProcessors (`CreateTicket`, `AddOrder`, `PayTicket`, `CloseActiveTicket`, `DisplayTicket`, `LocateTicket`, `UpdateTicketState`, `UpdateOrderState`). |
+    35→    35→| 15 | `Samba.Modules.TicketModule` | ClassLib | Module (ticket UI) | `TicketView.xaml`, `TicketOrdersView.xaml`, `AutomationCommandSelectorView.xaml`, `TicketNoteEditorView.xaml`, `TicketTagEditorView.xaml`, `TicketTagListView.xaml`, ActionProcessors (`MarkTicketAsClosed`, `CloseTicket`, `LockTicket`, `UnlockTicket`, `MoveSelectedOrders`, `AddOrder`, `UpdateEntity`). |
+    36→    36→| 16 | `Samba.Modules.PaymentModule` | ClassLib | Module (payment) | `PaymentEditorView.xaml`, `NumberPadView.xaml`, `ChangePaymentTypeView.xaml`, `PaymentTypeView.xaml`, `TenderedValueView.xaml`, `ReturningAmountView.xaml`, `CommandButtonsView.xaml`, `ForeignCurrencyButtonsView.xaml`, `OrderSelectorView.xaml`. |
+    37→    37→| 17 | `Samba.Modules.MenuModule` | ClassLib | Module (menu mgmt) | Menu items, portions, prices, screen menu editor. |
+    38→    38→| 18 | `Samba.Modules.ModifierModule` | ClassLib | Module (order tags) | `OrderTagGroupEditorView.xaml`, `OrderTagEditorView.xaml`. |
+    39→    39→| 19 | `Samba.Modules.AccountModule` | ClassLib | Module (accounts) | `AccountDetailsView.xaml`, `AccountTransactionView.xaml`, `AccountScreenView.xaml`. |
+    40→    40→| 20 | `Samba.Modules.EntityModule` | ClassLib | Module (tables/customers) | `EntityDashboardView.xaml`, `EntitySelectorView.xaml`, `EntitySearchView.xaml`, `EntityScreenView.xaml`. |
+    41→    41→| 21 | `Samba.Modules.NavigationModule` | ClassLib | Module (menu navigation) | `NavigationView.xaml`, `NavigationViewModel.cs` (outlook-bar-style tiles). |
+    42→    42→| 22 | `Samba.Modules.LoginModule` | ClassLib | Module (login) | `LoginView.xaml`, `LoginPadControl.xaml` (numeric keypad login). |
+    43→    43→| 23 | `Samba.Modules.SettingsModule` | ClassLib | Module (settings) | Printer, terminal, work period, foreign currency, automation UI. |
+    44→    44→| 24 | `Samba.Modules.ManagementModule` | ClassLib | Module (management dashboard) | `ManagementView.xaml` (Outlook bar with rules, actions, triggers, reports). |
+    45→    45→| 25 | `Samba.Modules.AutomationModule` | ClassLib | Module (rules/actions) | `RuleViewModel`, `ActionViewModel`, `ScriptViewModel`, `TriggerViewModel`. |
+    46→    46→| 26 | `Samba.Modules.PrinterModule` | ClassLib | Module (printer mgmt) | Printer, printer template, print job editors. |
+    47→    47→| 27 | `Samba.Modules.TaskModule` | ClassLib | Module (tasks) | Task card / ticket-like tasks. |
+    48→    48→| 28 | `Samba.Modules.WorkperiodModule` | ClassLib | Module (work period) | Start/stop work period UI. |
+    49→    49→| 29 | `Samba.Modules.UserModule` | ClassLib | Module (users) | User / role / permission editors. |
+    50→    50→| 30 | `Samba.Modules.InventoryModule` | ClassLib | Module (inventory) | Warehouse, inventory items, recipes, periodic consumption. |
+    51→    51→| 31 | `Samba.Modules.BasicReports` | ClassLib | Module (reports) | `BasicReportView.xaml`, `ReportView.xaml` — Crystal-style reports. |
+    52→    52→| 32 | `Samba.Modules.DepartmentModule` | ClassLib | Module (departments) | Department editor. |
+    53→    53→| 33 | `Samba.Modules.MarketModule` | ClassLib | Module (market) | App-store-like integration. |
+    54→    54→| 34 | `Samba.Modules.CidMonitor` | ClassLib | Module (caller-ID) | Telephony integration. |
+    55→    55→| 35 | `Samba.ApiServer` | ClassLib | API (legacy) | Self-hosted HTTP API (NancyFx-style). |
+    56→    56→| 36 | `Samba.MessagingServer` | ConsoleApp | Service | TCP messaging hub between POS terminals. |
+    57→    57→| 37 | `Samba.MessagingServer.WindowsService` | WinSvc | Service | Windows Service wrapper for the messaging server. |
+    58→    58→| 38 | `Samba.MessagingServerServiceTool` | Tool | Service | Installer tool for the messaging service. |
+    59→    59→| 39 | `SambaSetup` | WixProj | Installer | WiX-based MSI installer. |
+    60→    60→| 40 | `Lib/EntityFramework.dll` | Binary | Lib | EF 4.4 binary. |
+    61→    61→| 41 | `Lib/FluentMigrator.dll` | Binary | Lib | FluentMigrator binary. |
+    62→    62→| 42 | `Lib/FluentScript` | Source | Lib | Custom scripting engine used for automation expressions. |
+    63→    63→| 43 | `Lib/Stateless` | Source | Lib | State-machine library (referenced but barely used in V3). |
+    64→    64→
+    65→    65→### 1.2 Dependency rules (enforced by project references)
+    66→    66→
+    67→    67→```
+    68→    68→Samba.Infrastructure        ← depends on nothing
+    69→    69→Samba.Infrastructure.Data   ← Samba.Infrastructure
+    70→    70→Samba.Domain                ← Samba.Infrastructure, Samba.Infrastructure.Data, FluentScript, Stateless
+    71→    71→Samba.Persistance           ← Samba.Domain, Samba.Infrastructure, Samba.Infrastructure.Data, EntityFramework
+    72→    72→Samba.Persistance.DBMigration ← Samba.Persistance, FluentMigrator
+    73→    73→Samba.Services              ← Samba.Domain, Samba.Persistance, Samba.Infrastructure
+    74→    74→Samba.Presentation.Services ← Samba.Services, Samba.Domain, Samba.Presentation.Common
+    75→    75→Samba.Presentation.Common   ← Samba.Domain, Samba.Services
+    76→    76→Samba.Presentation.Controls ← (WPF only, no Domain dep)
+    77→    77→Samba.Presentation.ViewModels ← Samba.Presentation.Common, Samba.Presentation.Services
+    78→    78→Samba.Presentation          ← Samba.Presentation.ViewModels, Samba.Presentation.Controls, Samba.Modules.*
+    79→    79→Samba.Modules.*             ← Samba.Presentation.Common, Samba.Presentation.Services, Samba.Presentation.Controls
+    80→    80→```
+    81→    81→
+    82→    82→### 1.3 Critical architectural finding
+    83→    83→
+    84→    84→**SambaPOS V3 uses a rich-domain-model, NOT an anemic model.** There are NO standalone `OrderCalculator`, `TaxCalculator`, `TicketTotalCalculator`, `DiscountCalculator` classes. All math is embedded as methods on the entities themselves:
+    85→    85→
+    86→    86→- `Ticket.GetSum()` / `Ticket.Recalculate()` / `Ticket.CalculateServices()` / `Ticket.CalculateTax()` / `Ticket.GetRemainingAmount()`
+    87→    87→- `Order.GetTotal()` / `Order.GetValue()` / `Order.GetTaxablePrice()` / `Order.GetTotalTaxAmount()`
+    88→    88→- `TaxValue.GetTax()` / `TaxValue.GetTaxAmount()`
+    89→    89→- `Calculation.Update()` — THE unified discount/service/rounding engine (5 calculation types in a single method)
+    90→    90→- `AccountTransaction.UpdateAmount()` — handles auto-reversal on negative amounts
+    91→    91→
+    92→    92→There are also NO domain service interfaces inside `Samba.Domain`. Service interfaces (`ITicketService`, `IAccountService`, `IInventoryService`, etc.) live in `Samba.Services` and `Samba.Presentation.Services`.
+    93→    93→
+    94→    94→---
+    95→    95→
+    96→    96→## 2. Dependency Graph (Layered)
+    97→    97→
+    98→    98→```mermaid
+    99→    99→graph TB
+   100→   100→    subgraph "PRESENTATION LAYER"
+   101→   101→        Shell[Samba.Presentation<br/>Shell.xaml + Bootstrapper]
+   102→   102→        VMs[Samba.Presentation.ViewModels<br/>PosViewModel, TicketViewModel, PaymentEditorViewModel]
+   103→   103→        Ctrls[Samba.Presentation.Controls<br/>FlexButton, NumberPad, TicketButton]
+   104→   104→        Common[Samba.Presentation.Common<br/>ViewModelBase, CaptionCommand, ActionProcessors]
+   105→   105→        Mod1[Samba.Modules.PosModule]
+   106→   106→        Mod2[Samba.Modules.TicketModule]
+   107→   107→        Mod3[Samba.Modules.PaymentModule]
+   108→   108→        Mod4[Samba.Modules.MenuModule]
+   109→   109→        Mod5[Samba.Modules.EntityModule]
+   110→   110→        Mod6[Samba.Modules.AccountModule]
+   111→   111→        Mod7[Samba.Modules.AutomationModule]
+   112→   112→        Mod8[Samba.Modules.NavigationModule]
+   113→   113→        Mod9[Samba.Modules.LoginModule]
+   114→   114→        ModN[Samba.Modules.* 18 more]
+   115→   115→    end
+   116→   116→
+   117→   117→    subgraph "APPLICATION SERVICES LAYER"
+   118→   118→        PS[Samba.Presentation.Services<br/>TicketService, PaymentEditor, WorkPeriodService]
+   119→   119→        Svc[Samba.Services<br/>CacheService, SettingService, AccountService, MenuService,<br/>PrinterService, ExpressionService, AutomationService]
+   120→   120→    end
+   121→   121→
+   122→   122→    subgraph "DOMAIN LAYER (pure)"
+   123→   123→        Dom[Samba.Domain<br/>90+ entities + Builders<br/>NO external deps except Infrastructure.Data]
+   124→   124→    end
+   125→   125→
+   126→   126→    subgraph "INFRASTRUCTURE LAYER"
+   127→   127→        Per[Samba.Persistance<br/>DataContext, DAOs]
+   128→   128→        Mig[Samba.Persistance.DBMigration<br/>FluentMigrator 001-024]
+   129→   129→        InfD[Samba.Infrastructure.Data<br/>EntityClass, ValueClass, AbstractMap]
+   130→   130→        Inf[Samba.Infrastructure<br/>LocalSettings, JsonHelper, ObjectCloner]
+   131→   131→        Lib[Lib/EntityFramework 4.4<br/>Lib/FluentMigrator<br/>Lib/FluentScript<br/>Lib/Stateless]
+   132→   132→    end
+   133→   133→
+   134→   134→    subgraph "DATABASE"
+   135→   135→        DB[(SQL Server CE 4.0<br/>SambaPOS3.sdf<br/>96 tables)]
+   136→   136→    end
+   137→   137→
+   138→   138→    Shell --> VMs
+   139→   139→    Shell --> Ctrls
+   140→   140→    Shell --> Common
+   141→   141→    Shell --> Mod1 & Mod2 & Mod3 & Mod4 & Mod5 & Mod6 & Mod7 & Mod8 & Mod9 & ModN
+   142→   142→    Mod1 & Mod2 & Mod3 & Mod4 & Mod5 & Mod6 & Mod7 & Mod8 & Mod9 & ModN --> Common
+   143→   143→    Mod1 & Mod2 & Mod3 & Mod4 & Mod5 & Mod6 & Mod7 & Mod8 & Mod9 & ModN --> PS
+   144→   144→    VMs --> PS
+   145→   145→    VMs --> Common
+   146→   146→    Common --> Svc
+   147→   147→    PS --> Svc
+   148→   148→    Svc --> Dom
+   149→   149→    PS --> Dom
+   150→   150→    Svc --> Per
+   151→   151→    PS --> Per
+   152→   152→    Per --> Dom
+   153→   153→    Per --> InfD
+   154→   154→    Per --> Inf
+   155→   155→    Per --> Lib
+   156→   156→    Mig --> Per
+   157→   157→    Dom --> InfD
+   158→   158→    Dom --> Inf
+   159→   159→    Per --> DB
+   160→   160→```
+   161→   161→
+   162→   162→### 2.1 Communication flow example: "user taps a product button"
+   163→   163→
+   164→   164→```
+   165→   165→[FlexButton Click XAML event]
+   166→   166→   ↓ bound to ICommand
+   167→   167→[MenuItemSelectorViewModel.MenuItemCommand]   (Presentation)
+   168→   168→   ↓ publishes EventTopicNames.ScreenMenuItemDataSelected
+   169→   169→[PosViewModel.OnMenuItemSelected]              (Presentation)
+   170→   170→   ↓ calls
+   171→   171→[TicketOrdersViewModel.AddOrder]               (Presentation)
+   172→   172→   ↓ calls
+   173→   173→[TicketService.AddOrder]                       (Application Service)
+   174→   174→   ↓ calls
+   175→   175→[Ticket.AddOrder → OrderBuilder.Build]         (Domain)
+   176→   176→   ↓ calls
+   177→   177→[Order.UpdateMenuItem / UpdatePortion / UpdateTaxTemplates]   (Domain)
+   178→   178→   ↓ mutates Order entity
+   179→   179→[TicketService.RecalculateTicket]              (Application Service)
+   180→   180→   ↓ calls
+   181→   181→[Ticket.Recalculate → GetSum → CalculateServices → CalculateTax]   (Domain math)
+   182→   182→   ↓ mutates Ticket.TotalAmount / RemainingAmount
+   183→   183→[TicketService._applicationState.NotifyEvent]  (Automation)
+   184→   184→   ↓ rule engine fires AppRules mapped to "OrderAdded"
+   185→   185→[ActionProcessor.Execute]                      (Presentation.Common)
+   186→   186→   ↓ may trigger further actions (print, update state, etc.)
+   187→   187→[TicketDao.Save]                               (Infrastructure)
+   188→   188→   ↓ EF Code-First persists to SQL CE
+   189→   189→[SambaPOS3.sdf]                                (Database)
+   190→   190→```
+   191→   191→
+   192→   192→---
+   193→   193→
+   194→   194→## 3. Technology Stack Detected
+   195→   195→
+   196→   196→| Layer | Technology | Version | Notes |
+   197→   197→|-------|-----------|---------|-------|
+   198→   198→| Runtime | .NET Framework | 4.5 (net45) | Verified in `.csproj` files. |
+   199→   199→| UI Framework | WPF | 4.5 | XAML + code-behind. |
+   200→   200→| Composition | PRISM (likely v4) | — | `EventAggregator`, `IRegionManager`, module catalog inferred from `EventTopicNames` and `IRegion` usage in `Samba.Presentation.Common`. |
+   201→   201→| MVVM | Custom (`ViewModelBase`, `CaptionCommand<T>`) | — | No MVVM Light / Caliburn. |
+   202→   202→| ORM | Entity Framework | 4.4.0.0 | Code-First (no EDMX). `Lib/EntityFramework.dll`. |
+   203→   203→| Migrations | FluentMigrator | — | `Lib/FluentMigrator.dll`, `Lib/FluentMigrator.Runner.dll`. 24 migrations. |
+   204→   204→| Database | SQL Server Compact 4.0 | 4.0 | `.sdf` file in `Documents\SambaPOS3\`. Optional full SQL Server. **NOT SQLite.** |
+   205→   205→| Logging | Custom `LogService` | — | Logs to a text file in the app data folder. |
+   206→   206→| Scripting | FluentScript (custom lib) | — | Used by `Script` entity and `ExpressionService` for automation expressions. |
+   207→   207→| State machine | Stateless (lib) | — | Referenced but minimally used. |
+   208→   208→| Messaging | Custom TCP server | — | `Samba.MessagingServer` for multi-terminal sync. |
+   209→   209→| HTTP API | Self-hosted (`Samba.ApiServer`) | — | Optional REST-ish API. |
+   210→   210→| Printing | Microsoft PointOfService + RawPrinter (winspool) | — | ESC/POS for thermal, XPS for Windows printers. |
+   211→   211→| Installer | WiX | — | `SambaSetup/SambaSetup.wixproj`. |
+   212→   212→| Test framework | MSTest | — | `Microsoft.VisualStudio.QualityTools.UnitTestFramework`. |
+   213→   213→
+   214→   214→---
+   215→   215→
+   216→   216→## 4. Folder & File Layout (Web-Clone Mapping)
+   217→   217→
+   218→   218→The original codebase is **flat** (no `src/` / `test/` split). Below is the recommended mapping to the **/samba-web-clone/** target structure mandated by the user.
+   219→   219→
+   220→   220→| Original (C#) | Web-Clone Target (JS/TS) | Justification |
+   221→   221→|---------------|--------------------------|---------------|
+   222→   222→| `Samba.Domain/Models/**` | `/backend/src/domain/entities/**` | Pure POCO → ES6 classes or TS interfaces. |
+   223→   223→| `Samba.Domain/Builders/**` | `/backend/src/domain/builders/**` | Fluent builders for tests + factories. |
+   224→   224→| `Samba.Infrastructure/Settings/LocalSettings.cs` | `/backend/src/domain/LocalSettings.ts` | `Decimals=2`, currency/quantity formats. |
+   225→   225→| `Samba.Infrastructure/Helpers/JsonHelper.cs` | `/backend/src/infrastructure/JsonHelper.ts` | Same JSON short-name convention. |
+   226→   226→| `Samba.Infrastructure/Data/Serializer/ObjectCloner.cs` | `/backend/src/infrastructure/ObjectCloner.ts` | Deep clone via `structuredClone`. |
+   227→   227→| `Samba.Persistance/Data/DataContext.cs` + `OnModelCreating` | `/backend/src/infrastructure/db/schema.sql` + Knex/Prisma migrations | EF Code-First → explicit DDL. |
+   228→   228→| `Samba.Persistance/Implementations/*Dao.cs` | `/backend/src/infrastructure/repositories/*Repository.ts` | DAO pattern → Repository pattern. |
+   229→   229→| `Samba.Persistance.DBMigration/Migration_*.cs` | `/backend/src/infrastructure/db/migrations/*.{js,ts}` | FluentMigrator → Knex/Umzug. |
+   230→   230→| `Samba.Services/**/*Service.cs` | `/backend/src/application/services/*Service.ts` | Application services. |
+   231→   231→| `Samba.Presentation.Services/**/*Service.cs` | `/backend/src/application/services/*Service.ts` (UI-coupled ones go to frontend) | Mostly `TicketService`, `PaymentEditor` → frontend store + backend endpoints. |
+   232→   232→| `Samba.Presentation.Common/ActionProcessors/**` | `/backend/src/application/actions/**` | Automation action processors. |
+   233→   233→| `Samba.Presentation.ViewModels/**` | `/frontend/src/store/**` (Zustand) | VMs → React stores. |
+   234→   234→| `Samba.Presentation.Controls/**` | `/frontend/src/components/**` | Custom controls → React components. |
+   235→   235→| `Samba.Modules.*/Views/*.xaml` | `/frontend/src/components/screens/*.tsx` | One XAML view → one TSX component. |
+   236→   236→| `Samba.Presentation/Shell.xaml` | `/frontend/src/App.tsx` + `/frontend/index.html` | App root. |
+   237→   237→| `Samba.Presentation/Common.xaml` | `/frontend/src/styles/tokens.css` + `tailwind.config.js` | Resource dictionaries → CSS variables + Tailwind theme. |
+   238→   238→| `Samba.Services/Implementations/PrinterModule/**` | `/frontend/src/services/printer.ts` (PDF) + `/backend/src/services/escpos.ts` (WebUSB/escpos) | Print module split. |
+   239→   239→
+   240→   240→---
+   241→   241→
+   242→   242→## 5. Cross-Cutting Concerns
+   243→   243→
+   244→   244→### 5.1 Caching strategy
+   245→   245→
+   246→   246→`Samba.Services/Implementations/CacheService.cs` is the **in-memory cache** that pre-loads all reference data (MenuItems, TaxTemplates, PaymentTypes, CalculationSelectors, ScreenMenus, EntityTypes, AppRules, AppActions, Printers, PrinterTemplates, TicketTypes, Departments, Terminals) at application startup. **The DB is hit once, then everything is read from memory.** Mutations go through DAOs which update both the DB and the cache.
+   247→   247→
+   248→   248→**Implication for web clone:** For a single-tenant single-terminal replica, an in-memory cache on the backend (or even on the client) is fine. For multi-tenant, the cache must be per-tenant.
+   249→   249→
+   250→   250→### 5.2 Automation engine
+   251→   251→
+   252→   252→The automation system (`Samba.Services/Implementations/AutomationModule/`) is a **rule engine**:
+   253→   253→
+   254→   254→1. **`AppRule`** declares an `EventName` to listen for (e.g. `"TicketCreated"`, `"OrderAdded"`, `"PaymentProcessed"`, `"TicketClosing"`).
+   255→   255→2. **`RuleConstraintValue`** predicates are evaluated against the data object (e.g. `{Ticket.TotalAmount} > 100`).
+   256→   256→3. **`ActionContainer`** instances run sequentially, each invoking an `AppAction` with parameter values formatted from the data object.
+   257→   257→4. **`AppAction.Parameter`** uses `[:PropertyName]` placeholders replaced at runtime.
+   258→   258→
+   259→   259→Built-in action types (in `Samba.Presentation.Common/ActionProcessors/`): `UpdateOrder`, `UpdateTicketStatus`, `UpdateOrderStatus`, `UpdateOrderGiftState`, `UpdateEntityState`, `CreateTicket`, `CloseTicket`, `DisplayPaymentScreen`, `ExecutePrintBillJob`, `ExecuteKitchenOrdersPrintJob`, `LockTicket`, `UnlockTicket`, `MarkTicketAsClosed`, `PayTicket`, `MoveSelectedOrders`, `AddOrder`, `UpdateEntity`, `SetTicketTag`, `UpdateTicketTag`, `SetTicketState`, `UpdateTicketEntityState`, `UpdateProgramSetting`, `SendEmail`, `ExecuteScript`, `LoopbackValues`, `AskQuestion`, `DisplayTicketList`, `SetCurrentDepartment`, `SetTicketType`, etc.
+   260→   260→
+   261→   261→### 5.3 Multi-terminal messaging
+   262→   262→
+   263→   263→`Samba.MessagingServer` is a **TCP hub** (port 8080 by default) that broadcasts `Message` objects between POS terminals. Each `Message` has a string `Topic` (e.g. `"TicketRefreshMessage"`, `"Ping"`, `"EntityRefreshMessage"`) and a payload. Used for cross-terminal ticket table refresh (so terminal A sees terminal B's open tickets).
+   264→   264→
+   265→   265→**Web clone:** Replace with **WebSocket** (`socket.io` or native `ws`). Same topic-based pub/sub model.
+   266→   266→
+   267→   267→### 5.4 Concurrency
+   268→   268→
+   269→   269→`Numerator.LastUpdateTime` is a `byte[]` configured as `IsConcurrencyToken` + `HasColumnType("timestamp")` — EF's optimistic concurrency token. **Every ticket/order number increment is atomic with retry on `DbUpdateConcurrencyException`** (`SettingDao.GetNextNumber` retry loop).
+   270→   270→
+   271→   271→`TicketDao.CheckConcurrency` (called inside `CloseTicket`) compares the in-memory ticket against a fresh DB-loaded copy: if `TicketEntities` count/IDs, `IsClosed`, `LastPaymentDate`, or `GetSum()` (when `RemainingAmount==0`) differ, the close is rejected with `"TicketPaidLastChangesNotSaved"`.
+   272→   272→
+   273→   273→**Web clone:** Use Postgres `UPDATE ... WHERE last_updated_at = $1` returning pattern, or Knex `FOR UPDATE` row locks.
+   274→   274→
+   275→   275→---
+   276→   276→
+   277→   277→## 6. Key Findings & Risks for Web Migration
+   278→   278→
+   279→   279→### 6.1 Things that translate cleanly
+   280→   280→
+   281→   281→| Original | Web equivalent | Effort |
+   282→   282→|----------|---------------|--------|
+   283→   283→| `Samba.Domain` entities (POCO) | TypeScript interfaces + classes | Low — mechanical translation. |
+   284→   284→| `OrderBuilder` / `TicketBuilder` (fluent) | Same fluent API in TS | Low. |
+   285→   285→| `TaxValue.GetTax` / `Calculation.Update` | Same math, `decimal.js` instead of `decimal` | Low — math is pure. |
+   286→   286→| DAO pattern | Repository pattern | Low. |
+   287→   287→| `CacheService` | Module-level cache or Redis | Low. |
+   288→   288→| PRISM EventAggregator | Custom EventEmitter or RxJS | Low. |
+   289→   289→| `FlexButton` control | `<Button>` React component with same CSS | Medium. |
+   290→   290→
+   291→   291→### 6.2 Things that DO NOT translate directly
+   292→   292→
+   293→   293→| Original | Issue | Mitigation |
+   294→   294→|----------|-------|------------|
+   295→   295→| **WPF XAML layout** (Grid with `Width="*"`) | CSS Grid / Flexbox have different sizing semantics | Carefully convert each Grid → CSS Grid with `grid-template-columns: ...fr`. |
+   296→   296→| **WPF Resource Dictionaries** (brushes, styles) | No direct equivalent | Map to CSS custom properties + Tailwind theme. |
+   297→   297→| **`Microsoft.PointOfService` + RawPrinterHelper** (winspool.Drv P/Invoke) | Browser cannot print raw bytes directly | Use **WebUSB** for ESC/POS, or `window.print()` with a hidden iframe of formatted HTML. |
+   298→   298→| **SQL Server CE `.sdf`** | No portable JS driver | **Switch to SQLite (better-sqlite3) or Postgres.** Schema is portable (nvarchar→TEXT, datetime→TIMESTAMP, decimal→NUMERIC). |
+   299→   299→| **WPF Storyboards** (animations) | CSS transitions / keyframes | Re-animate `Silver→Gainsboro` etc. as CSS transitions. |
+   300→   300→| **`KineticBehaviour.HandleKineticScrolling`** (touch kinetic scroll) | iScroll / native `-webkit-overflow-scrolling: touch` | Use native CSS touch scrolling. |
+   301→   301→| **`Microsoft Win32` P/Invoke** (cash drawer, raw print) | Browser sandbox | WebUSB / Web Serial API (Chrome only) or backend-side print service. |
+   302→   302→| **PRISM Module Catalog** (dynamic loading) | Webpack code splitting | Lazy-load route components. |
+   303→   303→| **`EntityFramework.CodeFirst` conventions** (shadow FK columns like `AccountTransactionType_Id`) | Prisma/Knex require explicit columns | Make all FKs explicit (rename `_Id` → `Id`). |
+   304→   304→| **`Stateless` library** (state machines) | XState or custom | Mostly used loosely — could be inline state fields. |
+   305→   305→| **`FluentScript`** (custom scripting for automation) | JS `eval` or `vm2` sandbox | Re-implement with `Function` constructor + restricted scope. |
+   306→   306→
+   307→   307→### 6.3 Critical rounding-mode inconsistency to preserve
+   308→   308→
+   309→   309→SambaPOS V3 uses **two different rounding modes** depending on the code path:
+   310→   310→
+   311→   311→| Code path | Mode | Source |
+   312→   312→|-----------|------|--------|
+   313→   313→| `Ticket.CalculateTax` | `decimal.Round(value, 2)` (defaults to `MidpointRounding.ToEven` / banker's rounding) | `Ticket.cs:350` |
+   314→   314→| `Ticket.CalculateServices` | `decimal.Round(value, 2)` (banker's) | `Ticket.cs:376` |
+   315→   315→| `Ticket.GetTaxTotal` | `decimal.Round(value, 2, MidpointRounding.AwayFromZero)` (schoolbook) | `Ticket.cs:694, 700` |
+   316→   316→| `AccountTransaction.UpdateAmount` | `Decimal.Round(Amount, 2, MidpointRounding.AwayFromZero)` | `AccountTransaction.cs:203` |
+   317→   317→| `TaxValue.GetTax` (per-line, when `Rounding>0`) | `decimal.Round(..., Rounding, MidpointRounding.AwayFromZero)` | `TaxValue.cs:47` |
+   318→   318→| `Calculation.Update` type 4 (rounding) | `decimal.Round(currentSum / Amount, MidpointRounding.AwayFromZero)` | `Calculation.cs:45` |
+   319→   319→| `ProductTimerValue.GetPrice` | `decimal.Round(..., LocalSettings.Decimals)` (banker's) | `ProductTimerValue.cs:32` |
+   320→   320→
+   321→   321→**Web clone MUST preserve this inconsistency** for byte-perfect monetary parity with the original. JavaScript `Math.round` rounds half-up (toward +∞ for `.5`), which matches `AwayFromZero` for positives but NOT for negatives. Use:
+   322→   322→
+   323→   323→```javascript
+   324→   324→const roundBankers = (v, d=2) => { const f = Math.pow(10, d); const n = v * f; return Math.round(n % 1 === 0.5 || n % 1 === -0.5 ? Math.sign(n) * Math.floor(Math.abs(n)) : n) / f; };
+   325→   325→const roundAwayFromZero = (v, d=2) => { const f = Math.pow(10, d); return Math.sign(v) * Math.round(Math.abs(v) * f) / f; };
+   326→   326→```
+   327→   327→
+   328→   328→Or just use `decimal.js` with explicit `rounding` modes.
+   329→   329→
+   330→   330→### 6.4 JSON field short-name convention
+   331→   331→
+   332→   332→`Ticket.TicketTags`, `Ticket.TicketStates`, `Ticket.TicketLogs`, `Order.Taxes`, `Order.OrderTags`, `Order.OrderStates`, `Task.CustomData`, `Entity.CustomData`, `EntityStateValue.EntityStates`, `AccountScreen.AutomationCommandMapData`, `AppRule.RuleConstraints`, `AppAction.Parameter`, `Widget.Properties`, `ScreenMenuItem.OrderTags/OrderStates/AutomationCommand` are all JSON strings persisted in DB columns. The DataContract serializer uses **short `[DataMember(Name="XX")]` names** (e.g. `"TN"`, `"TV"`, `"TR"`, `"RN"`) for compactness.
+   333→   333→
+   334→   334→**Web clone must replicate the exact JSON wire format** if reading/writing existing `.sdf` files; otherwise can use full property names with a migration adapter.
+   335→   335→
+   336→   336→### 6.5 Seed data is mandatory for parity
+   337→   337→
+   338→   338→The seed (`Samba.Presentation.Services/Common/DataGeneration/DataCreationService.cs`) creates a fully-working POS at first launch: 1 admin user (PIN `1234`), 5 account types, 7 accounts (Sales, Receivables, Cash, Credit Card, Voucher, Discount, Rounding), 7 account transaction types, 2 calculation types (Discount, Round), 4 payment types (Cash/Credit/Voucher/Customer Account), 2 entity types (Customers, Tables), 1 department (Restaurant), 1 warehouse, 3 printers, 3 printer templates, 2 print jobs, 9 automation commands, 13 actions, 19+ rules. **The web clone MUST replicate this seed** for behavioural parity.
+   339→   339→
+   340→   340→---
+   341→   341→
+   342→   342→## 7. Glossary
+   343→   343→
+   344→   344→- **Ticket** = order ticket / table check / receipt.
+   345→   345→- **Order** = a single line item on a ticket (NOT a purchase order). Same as "TicketItem" in other POS systems.
+   346→   346→- **Calculation** = a discount, service charge, rounding, or manual adjustment applied to a ticket. The `CalculationType` int (0–5) picks the math.
+   347→   347→- **OrderTag** = a modifier on an order (e.g. "Extra Cheese", "No Onions"). Belongs to an `OrderTagGroup`.
+   348→   348→- **TicketTag** = a free-form or pre-defined tag on a ticket (e.g. "Dine-in", "Takeaway").
+   349→   349→- **TicketEntity** = a link between a ticket and an Entity (table, customer, etc.).
+   350→   350→- **Entity** = a generic business object — typically a Table or a Customer. Defined by its `EntityType`.
+   351→   351→- **AccountTransaction** = a double-entry ledger movement (source → target, debit/credit on each side).
+   352→   352→- **WorkPeriod** = a shift / day boundary. Reports are scoped to work periods.
+   353→   353→- **Terminal** = a POS terminal registration (used for multi-terminal config scoping).
+   354→   354→- **Department** = a context that bundles a TicketType + Warehouse + ScreenMenu + PriceTag.
+   355→   355→- **Numerator** = a sequential number generator for ticket/order numbers.
+   356→   356→- **ScreenMenu** = the POS product button layout (categories → items → buttons).
+   357→   357→
+   358→   358→---
+   359→   359→
+   360→   360→**End of FULL_ARCHITECTURE_REPORT.md** — source for `/samba-web-clone/analysis/FULL_ARCHITECTURE_REPORT.md`.
+   361→   361→

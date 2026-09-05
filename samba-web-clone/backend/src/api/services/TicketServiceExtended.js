@@ -75,15 +75,16 @@ class TicketServiceExtended {
   // ===================================================================
   // VOID — POST /api/tickets/:id/void
   // Marks the entire ticket as voided: IsClosed=1, TicketStates=Void,
-  // reverses all AccountTransactions.
+  // reverses all AccountTransactions, recalculates (naturally zeros totals).
   // ===================================================================
   async voidTicket(ticketId) {
     const ticketRow = await ticketRepo.getTicketById(ticketId);
     if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
     if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
 
-    // Reverse all payments by calling AccountTransaction.Reverse() on each
     const ticket = new Ticket(ticketRow);
+
+    // Reverse all AccountTransactions
     if (ticket.TransactionDocument) {
       for (const txn of ticket.TransactionDocument.AccountTransactions) {
         if (txn instanceof AccountTransaction && txn.canReverse()) {
@@ -92,7 +93,7 @@ class TicketServiceExtended {
       }
     }
 
-    // Mark all orders as Void
+    // Mark all orders as Void (CalculatePrice=false → excluded from totals)
     for (const order of ticket.Orders) {
       let states = [];
       try { states = JSON.parse(order.OrderStates || '[]'); } catch {}
@@ -111,9 +112,12 @@ class TicketServiceExtended {
     else ticketStates.push({ StateName: 'Status', State: 'Void' });
     ticket.TicketStates = JSON.stringify(ticketStates);
 
+    // Recalculate — this will naturally zero out TotalAmount because
+    // all orders have CalculatePrice=false. This also cleans up
+    // zero-amount Calculations automatically (per SambaPOS behavior).
+    recalculateTicket(ticket);
+
     ticket.IsClosed = true;
-    ticket.RemainingAmount = 0;
-    ticket.TotalAmount = 0;
 
     await ticketRepo.saveTicket(ticket);
     publish(EventTopicNames.TicketClosed, { Ticket: ticket, reason: 'voided' });
