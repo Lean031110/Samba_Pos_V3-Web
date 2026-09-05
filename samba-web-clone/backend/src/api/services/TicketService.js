@@ -13,6 +13,7 @@ const { TableRepository } = require('../../infrastructure/repositories/TableRepo
 const { Ticket } = require('../../domain/Ticket');
 const { TicketBuilder } = require('../../domain/TicketBuilder');
 const { OrderBuilder } = require('../../domain/OrderBuilder');
+const { KitchenService } = require('./KitchenService');
 const engine = require('../../domain/CalculationEngine');
 const { recalculateTicket } = require('../../domain/TicketRecalculator');
 const { NotFoundError, ConflictError, ValidationError } = require('../middleware/errorHandler');
@@ -21,6 +22,7 @@ const { publish, EventTopicNames } = require('../../application/eventBus');
 const ticketRepo = new TicketRepository();
 const productRepo = new ProductRepository();
 const tableRepo = new TableRepository();
+const kitchenService = new KitchenService();
 
 class TicketService {
   /**
@@ -155,6 +157,18 @@ class TicketService {
     ticket.Id = ticketId;
     await ticketRepo.saveTicket(ticket);
     const saved = await ticketRepo.getTicketById(ticketId);
+
+    // Route the new order to kitchen stations
+    const newOrder = saved.Orders[saved.Orders.length - 1];
+    if (newOrder) {
+      try {
+        await kitchenService.routeOrderToKitchen(newOrder, saved, user.userId);
+      } catch (err) {
+        console.error('[TicketService.addOrder] Kitchen routing failed:', err.message);
+        // Don't fail the order if kitchen routing fails — log and continue
+      }
+    }
+
     return saved;
   }
 
@@ -199,27 +213,30 @@ class TicketService {
       throw new ValidationError('amount must be a positive number');
     }
 
-    // Idempotency check: if idempotencyKey provided, check if we already processed this
+    // Idempotency: check IdempotencyKeys table if key provided
     if (data.idempotencyKey) {
-      const existing = await db('Payments')
-        .where({ TicketId: ticketId })
-        .whereRaw("CAST(Quantity AS TEXT) = ?", [data.idempotencyKey])  // reuse Quantity column as idempotency key storage (hack for now)
-        .first();
-      // Actually, let's use a simpler approach: check if the exact same payment was already made
-      const existingPayment = await db('Payments')
-        .where({
-          TicketId: ticketId,
-          PaymentTypeId: data.paymentTypeId,
-          Amount: data.amount,
-          UserId: user.userId,
-        })
-        .whereRaw("datetime(Date) > datetime('now', '-30 seconds')")
-        .first();
-      if (existingPayment) {
-        throw new ConflictError('Duplicate payment detected (same amount within 30 seconds)', {
-          existingPaymentId: existingPayment.Id,
-        });
+      const existing = await db('IdempotencyKeys').where({ Key: data.idempotencyKey }).first();
+      if (existing) {
+        // Return the cached response instead of re-processing
+        return JSON.parse(existing.ResponseBody);
       }
+    }
+
+    // Also check for duplicate payment (same amount, same type, same user, within 30s)
+    // This catches double-clicks even without an explicit idempotencyKey
+    const recentDuplicate = await db('Payments')
+      .where({
+        TicketId: ticketId,
+        PaymentTypeId: data.paymentTypeId,
+        Amount: data.amount,
+        UserId: user.userId,
+      })
+      .whereRaw("datetime(Date) > datetime('now', '-30 seconds')")
+      .first();
+    if (recentDuplicate) {
+      throw new ConflictError('Duplicate payment detected (same amount within 30 seconds)', {
+        existingPaymentId: recentDuplicate.Id,
+      });
     }
 
     const ticketRow = await ticketRepo.getTicketById(ticketId);
@@ -241,13 +258,12 @@ class TicketService {
       account,
       data.amount,
       ticketRow.ExchangeRate || 1,
-      user.userId   // Use actual user ID from JWT
+      user.userId
     );
 
     // Handle change payment if tenderedAmount > amount
     if (data.tenderedAmount && data.tenderedAmount > data.amount) {
       const changeAmount = data.tenderedAmount - data.amount;
-      // Find a ChangePaymentType linked to this PaymentType's account transaction type
       const changePaymentType = await db('ChangePaymentTypes')
         .where({ AccountTransactionTypeId: paymentType.AccountTransactionTypeId })
         .first();
@@ -267,7 +283,22 @@ class TicketService {
 
     ticket.Id = ticketId;
     await ticketRepo.saveTicket(ticket);
-    return await ticketRepo.getTicketById(ticketId);
+    const result = await ticketRepo.getTicketById(ticketId);
+
+    // Store idempotency key if provided
+    if (data.idempotencyKey) {
+      await db('IdempotencyKeys').insert({
+        Key: data.idempotencyKey,
+        UserId: user.userId,
+        Endpoint: `POST /api/tickets/${ticketId}/payments`,
+        RequestBody: JSON.stringify(data).slice(0, 5000),
+        ResponseStatus: 200,
+        ResponseBody: JSON.stringify({ data: result }).slice(0, 10000),
+        ExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),  // 24h
+      }).catch(err => console.error('[idempotency] Failed to store key:', err.message));
+    }
+
+    return result;
   }
 
   /**

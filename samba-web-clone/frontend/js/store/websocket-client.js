@@ -1,18 +1,10 @@
 // =====================================================================
-// websocket-client.js — Socket.io client with exponential backoff
+// websocket-client.js — Socket.io client with JWT auth + room management
 // =====================================================================
-// Per Architect's directive:
-//   "La conexión WebSocket debe establecerse automáticamente al cargar la
-//    página y reconectarse si se cae (con backoff exponencial)."
-//
-// Subscribes to events from the backend's eventBus bridge:
-//   - TicketCreated, TicketOpened, TicketClosing, TicketClosed
-//   - TicketTotalChanged, OrderAdded, PaymentProcessed, EntityUpdated
-//
-// Each event updates the Store singleton, which then notifies subscribers.
+// Per FASE 8: WebSocket must authenticate with JWT, join role-based
+// rooms, and recover missed events on reconnect.
 // =====================================================================
 
-// Load socket.io client from local vendor (offline/LAN support)
 (function loadSocketIo(cb) {
   if (window.io) { cb(); return; }
   const s = document.createElement('script');
@@ -23,19 +15,36 @@
 })(initWebSocket);
 
 function initWebSocket() {
+  const token = localStorage.getItem('samba_jwt') || '';
+  if (!token) {
+    console.warn('[ws] No JWT token — WebSocket will not connect until login');
+    // Set up a retry: check every 3s for a token
+    setTimeout(() => {
+      if (localStorage.getItem('samba_jwt')) {
+        initWebSocket();
+      } else {
+        // Try again in 3s
+        setTimeout(initWebSocket, 3000);
+      }
+    }, 3000);
+    return;
+  }
+
   const socket = io({
     transports: ['websocket'],
+    auth: { token },
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,        // 1s initial
-    reconnectionDelayMax: 30000,    // cap at 30s
-    randomizationFactor: 0.3,       // 30% jitter to avoid thundering herd
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
+    randomizationFactor: 0.3,
   });
 
   const connIndicator = document.getElementById('conn-indicator');
   const connLabel = document.getElementById('conn-label');
 
   function setConnState(state, label) {
+    if (!connIndicator) return;
     connIndicator.classList.remove('is-connected', 'is-reconnecting');
     if (state === 'connected') connIndicator.classList.add('is-connected');
     else if (state === 'reconnecting') connIndicator.classList.add('is-reconnecting');
@@ -44,34 +53,87 @@ function initWebSocket() {
   }
 
   // === Connection lifecycle ===
-  socket.on('connect',    () => { setConnState('connected', 'Connected');   console.log('[ws] connected'); });
-  socket.on('disconnect', () => { setConnState('reconnecting', 'Reconnecting…'); console.warn('[ws] disconnected'); });
-  socket.on('connect_error', (err) => { setConnState('reconnecting', 'Conn. error'); console.error('[ws] connect_error', err.message); });
-  socket.on('reconnect_attempt', (n) => { setConnState('reconnecting', `Reconnect #${n}…`); });
-  socket.on('reconnect', (n) => { setConnState('connected', `Reconnected (#${n})`); });
+  socket.on('connect', () => {
+    setConnState('connected', 'Connected');
+    console.log('[ws] connected');
 
-  // === Event handlers (bridge → Store) ===
-  socket.on('TicketCreated',      (payload) => { window.store.setState({ openTickets: [...window.store.openTickets, payload.Ticket] }, 'TicketCreated'); });
-  socket.on('TicketOpened',       (payload) => { console.log('[ws] TicketOpened', payload); });
-  socket.on('TicketClosing',      (payload) => { console.log('[ws] TicketClosing', payload); });
+    // Join role-based rooms based on user info
+    const user = window.store.state.currentUser;
+    if (user) {
+      // Join POS room by default (all logged-in terminals get POS events)
+      socket.emit('subscribe:role', 'pos');
+      // If admin, join admin room
+      if (user.isAdmin) {
+        socket.emit('subscribe:role', 'admin');
+      }
+      // Kitchen role is set explicitly when navigating to KDS view
+    }
+
+    // Request missed events / state resync
+    socket.emit('resync', { lastEventId: window.store.state.lastEventId || null });
+  });
+
+  socket.on('disconnect', () => {
+    setConnState('reconnecting', 'Reconnecting…');
+    console.warn('[ws] disconnected');
+  });
+  socket.on('connect_error', (err) => {
+    setConnState('reconnecting', 'Auth error');
+    console.error('[ws] connect_error', err.message);
+    // If auth failed (401), the token might be expired — redirect to login
+    if (err.message?.includes('Invalid or expired')) {
+      localStorage.removeItem('samba_jwt');
+      if (window.App) window.App.navigate('login');
+    }
+  });
+  socket.on('reconnect_attempt', (n) => { setConnState('reconnecting', `Reconnect #${n}…`); });
+  socket.on('reconnect', (n) => {
+    setConnState('connected', `Reconnected (#${n})`);
+    // Re-join rooms after reconnect
+    const user = window.store.state.currentUser;
+    if (user) {
+      socket.emit('subscribe:role', 'pos');
+      if (user.isAdmin) socket.emit('subscribe:role', 'admin');
+    }
+    // Request state resync
+    socket.emit('resync', {});
+  });
+
+  // === Resync response: server sends current state snapshot ===
+  socket.on('resync:state', (snapshot) => {
+    console.log('[ws] Received state resync:', snapshot);
+    if (snapshot?.openTickets) {
+      window.store.setState({ openTickets: snapshot.openTickets }, 'resync');
+    }
+    if (snapshot?.tables) {
+      window.store.setState({ tables: snapshot.tables }, 'resync');
+    }
+  });
+
+  // === Ticket events (POS terminals) ===
+  socket.on('TicketCreated', (payload) => {
+    window.store.setState({
+      openTickets: [...(window.store.openTickets || []), payload.Ticket].filter((t, i, arr) => arr.findIndex(x => x.Id === t.Id) === i),
+    }, 'TicketCreated');
+  });
 
   socket.on('TicketClosed', (payload) => {
     const closedId = payload?.Ticket?.Id;
-    const newList = window.store.openTickets.filter(t => t.Id !== closedId);
+    const newList = (window.store.openTickets || []).filter(t => t.Id !== closedId);
     const isCurrent = window.store.currentTicket?.Id === closedId;
     window.store.setState({
       openTickets: newList,
       currentTicket: isCurrent ? null : window.store.currentTicket,
     }, 'TicketClosed');
-    window.App.toast('Ticket #' + (payload?.Ticket?.TicketNumber || closedId) + ' closed', 'success');
+    if (window.App?.toast) {
+      window.App.toast('Ticket #' + (payload?.Ticket?.TicketNumber || closedId) + ' closed', 'success');
+    }
   });
 
   socket.on('TicketTotalChanged', (payload) => {
     const t = payload?.Ticket;
     if (!t) return;
-    // Update openTickets list
-    const newList = window.store.openTickets.map(o => o.Id === t.Id ? t : o);
-    // Update currentTicket if it's the one that changed
+    const newList = (window.store.openTickets || []).map(o => o.Id === t.Id ? t : o);
     const isCurrent = window.store.currentTicket?.Id === t.Id;
     window.store.setState({
       openTickets: newList,
@@ -80,24 +142,38 @@ function initWebSocket() {
   });
 
   socket.on('OrderAdded', (payload) => {
-    console.log('[ws] OrderAdded', payload);
     // The TicketTotalChanged event will follow with the updated ticket
   });
 
   socket.on('PaymentProcessed', (payload) => {
-    console.log('[ws] PaymentProcessed', payload);
-    window.App.toast('Payment processed: $' + (payload?.ProcessedAmount || 0).toFixed(2), 'success');
+    // Only show toast if this is NOT the current terminal's payment
+    // (the current terminal already shows its own toast via the HTTP response)
+    if (payload?.fromTerminal !== window.store.state.terminalId) {
+      if (window.App?.toast) {
+        window.App.toast('Payment processed: $' + (payload?.ProcessedAmount || 0).toFixed(2), 'info');
+      }
+    }
   });
 
   socket.on('EntityUpdated', (payload) => {
-    // A table's state changed (e.g. another terminal opened a ticket on it)
-    console.log('[ws] EntityUpdated', payload);
-    // Reload tables list
     if (window.App?.views?.dashboard) {
       window.App.views.dashboard.refresh();
     }
   });
 
-  // Expose for debugging
+  // === Kitchen events ===
+  socket.on('KitchenOrderAdded', (payload) => {
+    if (window.App?.views?.kitchen) {
+      window.App.views.kitchen.addOrder(payload);
+    }
+  });
+
+  socket.on('KitchenOrderUpdated', (payload) => {
+    if (window.App?.views?.kitchen) {
+      window.App.views.kitchen.updateOrder(payload);
+    }
+  });
+
+  // Expose for debugging and for KDS view to use
   window.socket = socket;
 }

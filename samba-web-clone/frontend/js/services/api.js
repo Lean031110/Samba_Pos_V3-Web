@@ -111,6 +111,15 @@ const Api = {
   getTicketTypes:      ()        => request('GET',  '/ticket-types'),
   getTaxTemplates:     ()        => request('GET',  '/tax-templates'),
 
+  // === Kitchen (KDS) ===
+  getKitchenStations:  ()        => request('GET',  '/kitchen/stations'),
+  getKitchenOrders:    (stationId) => request('GET', `/kitchen/orders${stationId ? '?stationId=' + stationId : ''}`),
+  kitchenBump:         (id)      => request('POST', `/kitchen/orders/${id}/bump`),
+  kitchenServe:        (id)      => request('POST', `/kitchen/orders/${id}/serve`),
+  kitchenVoid:         (id)      => request('POST', `/kitchen/orders/${id}/void`),
+  kitchenRecall:       (id)      => request('POST', `/kitchen/orders/${id}/recall`),
+  kitchenUpdateState:  (id, state) => request('POST', `/kitchen/orders/${id}/state`, { state }),
+
   // === Internal ===
   request,  // exposed for one-off calls
 };

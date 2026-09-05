@@ -116,6 +116,7 @@ function createApp() {
   app.use('/api/tickets', require('./routes/tickets'));
   app.use('/api/products', require('./routes/products'));
   app.use('/api/tables', require('./routes/tables'));
+  app.use('/api/kitchen', require('./routes/kitchen'));
   app.use('/api', require('./routes/config'));
 
   // === 404 + Error handlers ===
@@ -131,7 +132,7 @@ function createApp() {
  * Uses rooms: events for a specific ticket go to `ticket:${id}` room.
  */
 function bridgeEventsToSocket(io) {
-  const eventsToBridge = [
+  const ticketEvents = [
     EventTopicNames.TicketCreated,
     EventTopicNames.TicketClosed,
     EventTopicNames.TicketTotalChanged,
@@ -140,20 +141,35 @@ function bridgeEventsToSocket(io) {
     EventTopicNames.EntityUpdated,
   ];
 
-  for (const event of eventsToBridge) {
+  for (const event of ticketEvents) {
     subscribe(event, (payload) => {
       const ticketId = payload?.Ticket?.Id || payload?.ticketId;
       if (ticketId) {
-        // Send to the ticket-specific room AND to all "admin" terminals
+        // Send to the ticket-specific room (POS terminals watching this ticket)
         io.to(`ticket:${ticketId}`).emit(event, payload);
-        io.to('admin').emit(event, payload);
+        // Admin terminals get all events
+        io.to('role:admin').emit(event, payload);
+        // POS terminals get ticket events
+        io.to('role:pos').emit(event, payload);
       } else {
-        // Global events (TicketCreated, EntityUpdated) go to everyone
-        io.emit(event, payload);
+        // Global events (TicketCreated, EntityUpdated) go to all POS + admin
+        io.to('role:pos').emit(event, payload);
+        io.to('role:admin').emit(event, payload);
       }
       log(LEVELS.DEBUG, `WebSocket broadcast: ${event}`, { ticketId });
     });
   }
+
+  // Kitchen-specific events — only go to kitchen room
+  subscribe('KitchenOrderAdded', (payload) => {
+    io.to('role:kitchen').emit('KitchenOrderAdded', payload);
+    log(LEVELS.DEBUG, `WebSocket broadcast: KitchenOrderAdded`, { orderId: payload?.orderId });
+  });
+  subscribe('KitchenOrderUpdated', (payload) => {
+    io.to('role:kitchen').emit('KitchenOrderUpdated', payload);
+    io.to('role:pos').emit('KitchenOrderUpdated', payload);
+    log(LEVELS.DEBUG, `WebSocket broadcast: KitchenOrderUpdated`, { orderId: payload?.orderId });
+  });
 }
 
 /**
@@ -216,22 +232,89 @@ async function startServer() {
     cors: CORS_ORIGIN === '*' ? { origin: '*' } : { origin: CORS_ORIGIN.split(','), credentials: true },
   });
 
-  // Socket.io connection handler
+  // Socket.io connection handler with JWT authentication
   ioInstance.on('connection', (socket) => {
     log(LEVELS.INFO, `WebSocket client connected: ${socket.id}`);
+
+    // Extract JWT from handshake auth
+    const token = socket.handshake?.auth?.token || socket.handshake?.query?.token;
+    let socketUser = null;
+
+    if (token) {
+      try {
+        const { verifyToken } = require('./middleware/auth');
+        const payload = verifyToken(token);
+        socketUser = {
+          userId: payload.userId,
+          username: payload.username,
+          roleId: payload.roleId,
+          isAdmin: payload.isAdmin,
+        };
+        socket.data.user = socketUser;
+        log(LEVELS.INFO, `WebSocket authenticated: ${socket.id} → user ${socketUser.username}`);
+      } catch (err) {
+        log(LEVELS.WARN, `WebSocket auth failed for ${socket.id}: ${err.message}`);
+        socket.disconnect();
+        return;
+      }
+    } else {
+      log(LEVELS.WARN, `WebSocket unauthenticated client: ${socket.id} — disconnecting`);
+      socket.disconnect();
+      return;
+    }
+
     socket.on('disconnect', () => {
       log(LEVELS.INFO, `WebSocket client disconnected: ${socket.id}`);
     });
+
+    // Subscribe to ticket-specific room (POS terminals watching a ticket)
     socket.on('subscribe:ticket', (ticketId) => {
       socket.join(`ticket:${ticketId}`);
-      log(LEVELS.DEBUG, `Client ${socket.id} subscribed to ticket:${ticketId}`);
+      log(LEVELS.DEBUG, `Client ${socket.id} (${socketUser.username}) subscribed to ticket:${ticketId}`);
     });
     socket.on('unsubscribe:ticket', (ticketId) => {
       socket.leave(`ticket:${ticketId}`);
     });
+
+    // Subscribe to role-based room (kitchen, admin, etc.)
+    // Only allow subscribing to roles the user actually has
     socket.on('subscribe:role', (role) => {
+      // Validate: user can only join their own role or 'admin' if isAdmin
+      if (role === 'admin' && !socketUser.isAdmin) {
+        log(LEVELS.WARN, `WebSocket ${socket.id} (${socketUser.username}) denied admin room (not admin)`);
+        return;
+      }
+      if (role !== 'admin' && role !== 'kitchen' && role !== 'pos') {
+        log(LEVELS.WARN, `WebSocket ${socket.id} denied unknown role: ${role}`);
+        return;
+      }
       socket.join(`role:${role}`);
-      log(LEVELS.DEBUG, `Client ${socket.id} joined role:${role}`);
+      log(LEVELS.DEBUG, `Client ${socket.id} (${socketUser.username}) joined role:${role}`);
+    });
+
+    // Subscribe to terminal room (for terminal-specific events)
+    socket.on('subscribe:terminal', (terminalId) => {
+      socket.join(`terminal:${terminalId}`);
+      log(LEVELS.DEBUG, `Client ${socket.id} joined terminal:${terminalId}`);
+    });
+
+    // Resync: client requests current state snapshot after reconnect
+    socket.on('resync', async () => {
+      try {
+        const { db } = require('../infrastructure/db/db');
+        const openTickets = await db('Tickets').where({ IsClosed: 0 })
+          .select('Id', 'TicketNumber', 'Date', 'TotalAmount', 'RemainingAmount',
+                  'LastModifiedUserName', 'DepartmentId', 'TicketTypeId')
+          .orderBy('Date', 'desc');
+        const tables = await db('Entities')
+          .leftJoin('EntityTypes', 'Entities.EntityTypeId', 'EntityTypes.Id')
+          .where({ 'EntityTypes.Name': 'Tables' })
+          .select('Entities.Id', 'Entities.Name');
+        socket.emit('resync:state', { openTickets, tables, timestamp: new Date().toISOString() });
+        log(LEVELS.DEBUG, `Sent resync to ${socket.id}: ${openTickets.length} tickets, ${tables.length} tables`);
+      } catch (err) {
+        log(LEVELS.ERROR, `Resync failed for ${socket.id}: ${err.message}`);
+      }
     });
   });
 

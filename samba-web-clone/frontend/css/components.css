@@ -206,3 +206,46 @@
 .conn-indicator.is-connected .conn-indicator__dot { background: var(--samba-bg-button-success); }
 .conn-indicator.is-reconnecting .conn-indicator__dot { background: var(--samba-bg-button-warning); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
+
+/* =====================================================================
+   KDS (Kitchen Display System) styles
+   ===================================================================== */
+.kds-stations-bar {
+  display: flex; gap: 4px; padding: 8px 12px; background: var(--samba-bg-panel);
+  border-bottom: 2px solid var(--samba-border-default); overflow-x: auto;
+}
+.kds-orders-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px; padding: 16px; overflow-y: auto; flex: 1;
+}
+.kds-card {
+  border-radius: 8px; border: 3px solid; display: flex; flex-direction: column;
+  min-height: 200px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;
+}
+.kds-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; font-weight: bold;
+}
+.kds-ticket-info { display: flex; gap: 8px; align-items: center; }
+.kds-ticket-num { font-size: 18px; }
+.kds-table { font-size: 13px; opacity: 0.8; }
+.kds-timer { font-family: 'Courier New', monospace; font-size: 16px; background: rgba(0,0,0,0.1); padding: 2px 8px; border-radius: 4px; }
+.kds-card-body { padding: 8px 12px; flex: 1; overflow-y: auto; }
+.kds-item { padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
+.kds-item-qty { font-weight: bold; margin-right: 6px; }
+.kds-item-name { font-size: 14px; }
+.kds-item-portion { font-size: 12px; color: var(--samba-fg-muted); }
+.kds-item-notes { font-size: 12px; color: #E65100; margin-top: 2px; margin-left: 20px; }
+.kds-card-footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; gap: 4px; }
+.kds-state { font-size: 12px; font-weight: bold; text-transform: uppercase; }
+.kds-btn {
+  padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer;
+  font-size: 13px; font-weight: bold; transition: opacity 100ms;
+}
+.kds-btn:hover { opacity: 0.85; }
+.kds-btn:active { transform: scale(0.96); }
+.kds-btn--ready { background: #4CAF50; color: white; }
+.kds-btn--preparing { background: #FF9800; color: white; }
+.kds-btn--served { background: #2196F3; color: white; }
+.kds-btn--recall { background: #9E9E9E; color: white; }
+.kds-btn--void { background: #F44336; color: white; }

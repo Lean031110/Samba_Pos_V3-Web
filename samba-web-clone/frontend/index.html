@@ -31,6 +31,9 @@
           <span id="conn-label">Connecting…</span>
         </span>
         <span id="header-user">Administrator</span>
+        <flex-button variant="info" icon="fa-utensils" label="Kitchen"
+                     style="min-height: 32px; padding: 0 10px; font-size: 12px;"
+                     onclick="window.App.navigate('kitchen')"></flex-button>
         <flex-button variant="danger" icon="fa-right-from-bracket" label="Logout"
                      style="min-height: 32px; padding: 0 10px; font-size: 12px;"
                      onclick="window.App.logout()"></flex-button>
@@ -169,6 +172,11 @@
           </div>
         </div>
       </section>
+
+      <!-- KitchenView (KDS) -->
+      <section class="view view-kitchen" id="view-kitchen" style="flex-direction: column; overflow: hidden;">
+        <div id="kds-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;"></div>
+      </section>
     </main>
 
     <!-- =========================================================== -->
@@ -204,6 +212,7 @@
   <script src="/js/views/dashboard.js"></script>
   <script src="/js/views/pos.js"></script>
   <script src="/js/views/payment.js"></script>
+  <script src="/js/views/kitchen.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>
