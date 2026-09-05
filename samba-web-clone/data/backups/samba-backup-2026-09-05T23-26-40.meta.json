@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-09-05T23-26-40",
+  "file": "samba-backup-2026-09-05T23-26-40.db",
+  "size": 823296,
+  "sourceDb": "/home/z/my-project/samba-web-clone/data/samba.db",
+  "integrityCheck": "ok",
+  "version": "0.3.0"
+}

@@ -14,7 +14,9 @@
     "test:sprint2": "node scripts/sprint2-acceptance-test.js",
     "test:e2e": "node scripts/sprint4-e2e-test.js",
     "test:playwright": "npx playwright test --reporter=line",
-    "test:print": "node scripts/print-checksum-test.js"
+    "test:print": "node scripts/print-checksum-test.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
