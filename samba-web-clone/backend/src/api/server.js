@@ -118,6 +118,8 @@ function createApp() {
   app.use('/api/tables', require('./routes/tables'));
   app.use('/api/kitchen', require('./routes/kitchen'));
   app.use('/api/inventory', require('./routes/inventory'));
+  app.use('/api/printers', require('./routes/printers'));
+  app.use('/api/print', require('./routes/printers'));  // alias for /api/print/tickets/:id/send
   app.use('/api', require('./routes/config'));
 
   // === 404 + Error handlers ===
