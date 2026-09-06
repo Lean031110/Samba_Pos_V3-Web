@@ -36,12 +36,18 @@ module.exports = defineConfig({
       use: { browserName: 'chromium' },
     },
   ],
-  // Auto-start the server before tests, stop after
+  // Run seed before all tests (migrations run automatically in server startup)
+  globalSetup: require.resolve('./tests/e2e/global-setup.js'),
   webServer: {
     command: 'node src/api/server.js',
     port: 3001,
     cwd: __dirname,
-    timeout: 15000,
-    reuseExistingServer: true,
+    timeout: 30000,
+    reuseExistingServer: true,  // Always reuse — globalSetup handles seed
+    env: {
+      JWT_SECRET: process.env.JWT_SECRET || 'playwright-test-secret-32-chars-min!!',
+      ADMIN_PIN: process.env.ADMIN_PIN || '1234',
+      NODE_ENV: 'test',
+    },
   },
 });

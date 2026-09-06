@@ -188,7 +188,7 @@ async function runMigrations() {
   const knex = require('knex');
   const config = require('../infrastructure/db/knexfile.js');
   const env = process.env.NODE_ENV || 'development';
-  const migrationDb = knex(config[env]);
+  const migrationDb = knex(config[env] || config.development);
   log(LEVELS.INFO, 'Running database migrations...');
   await migrationDb.migrate.latest();
   log(LEVELS.INFO, 'Migrations complete.');
@@ -241,88 +241,195 @@ async function startServer() {
     cors: CORS_ORIGIN === '*' ? { origin: '*' } : { origin: CORS_ORIGIN.split(','), credentials: true },
   });
 
-  // Socket.io connection handler with JWT authentication
+  // Socket.io connection handler with JWT authentication + authorization
   ioInstance.on('connection', (socket) => {
     log(LEVELS.INFO, `WebSocket client connected: ${socket.id}`);
 
-    // Extract JWT from handshake auth
-    const token = socket.handshake?.auth?.token || socket.handshake?.query?.token;
+    // === AUTHENTICATION ===
+    // Only accept JWT from handshake.auth (NOT from query string — avoid URL/logs exposure)
+    const token = socket.handshake?.auth?.token;
     let socketUser = null;
 
-    if (token) {
-      try {
-        const { verifyToken } = require('./middleware/auth');
-        const payload = verifyToken(token);
-        socketUser = {
-          userId: payload.userId,
-          username: payload.username,
-          roleId: payload.roleId,
-          isAdmin: payload.isAdmin,
-        };
-        socket.data.user = socketUser;
-        log(LEVELS.INFO, `WebSocket authenticated: ${socket.id} → user ${socketUser.username}`);
-      } catch (err) {
-        log(LEVELS.WARN, `WebSocket auth failed for ${socket.id}: ${err.message}`);
-        socket.disconnect();
-        return;
-      }
-    } else {
-      log(LEVELS.WARN, `WebSocket unauthenticated client: ${socket.id} — disconnecting`);
+    if (!token) {
+      log(LEVELS.WARN, `WebSocket ${socket.id}: no token — disconnecting`);
+      socket.emit('auth:error', { message: 'Authentication required' });
       socket.disconnect();
       return;
+    }
+
+    try {
+      const { verifyToken } = require('./middleware/auth');
+      const payload = verifyToken(token);
+      socketUser = {
+        userId: payload.userId,
+        username: payload.username,
+        roleId: payload.roleId,
+        isAdmin: payload.isAdmin,
+      };
+      socket.data.user = socketUser;
+      log(LEVELS.INFO, `WebSocket authenticated: ${socket.id} → user ${socketUser.username} (admin=${socketUser.isAdmin})`);
+    } catch (err) {
+      log(LEVELS.WARN, `WebSocket ${socket.id}: invalid token — ${err.message}`);
+      socket.emit('auth:error', { message: 'Invalid or expired token' });
+      socket.disconnect();
+      return;
+    }
+
+    // === Helper: check if user has a specific permission ===
+    async function userHasPermission(permissionCode) {
+      if (socketUser.isAdmin) return true;
+      try {
+        const { hasPermission } = require('./middleware/rbac');
+        return await hasPermission(socketUser, permissionCode);
+      } catch { return false; }
     }
 
     socket.on('disconnect', () => {
       log(LEVELS.INFO, `WebSocket client disconnected: ${socket.id}`);
     });
 
-    // Subscribe to ticket-specific room (POS terminals watching a ticket)
-    socket.on('subscribe:ticket', (ticketId) => {
-      socket.join(`ticket:${ticketId}`);
-      log(LEVELS.DEBUG, `Client ${socket.id} (${socketUser.username}) subscribed to ticket:${ticketId}`);
+    // === ROOM AUTHORIZATION ===
+
+    // subscribe:role — join a role-based room
+    // Authorization: user must have the corresponding permission
+    socket.on('subscribe:role', async (role, callback) => {
+      const allowedRoles = ['pos', 'kitchen', 'admin'];
+      if (!allowedRoles.includes(role)) {
+        log(LEVELS.WARN, `WS ${socket.id} (${socketUser.username}): denied unknown role '${role}'`);
+        if (callback) callback({ success: false, error: 'Unknown role' });
+        return;
+      }
+
+      // Check permission for this role
+      const requiredPermission = role === 'kitchen' ? 'kitchen.view'
+                               : role === 'admin' ? 'admin.all'
+                               : 'pos.login';
+      const has = await userHasPermission(requiredPermission);
+
+      if (!has) {
+        log(LEVELS.WARN, `WS ${socket.id} (${socketUser.username}): denied role '${role}' (lacks ${requiredPermission})`);
+        if (callback) callback({ success: false, error: `Forbidden: requires '${requiredPermission}'` });
+        return;
+      }
+
+      socket.join(`role:${role}`);
+      log(LEVELS.DEBUG, `WS ${socket.id} (${socketUser.username}) joined role:${role}`);
+      if (callback) callback({ success: true });
     });
+
+    // subscribe:ticket — join a ticket-specific room
+    // Authorization: user must have pos.login permission
+    // (In production, should also check if user has access to this specific ticket)
+    socket.on('subscribe:ticket', async (ticketId, callback) => {
+      if (!ticketId || typeof ticketId !== 'number') {
+        if (callback) callback({ success: false, error: 'Invalid ticketId' });
+        return;
+      }
+
+      const has = await userHasPermission('pos.login');
+      if (!has) {
+        log(LEVELS.WARN, `WS ${socket.id} (${socketUser.username}): denied ticket:${ticketId} (no pos.login)`);
+        if (callback) callback({ success: false, error: 'Forbidden: requires pos.login' });
+        return;
+      }
+
+      // TODO: verify user has access to this specific ticket (department/terminal check)
+      socket.join(`ticket:${ticketId}`);
+      log(LEVELS.DEBUG, `WS ${socket.id} (${socketUser.username}) subscribed to ticket:${ticketId}`);
+      if (callback) callback({ success: true });
+    });
+
     socket.on('unsubscribe:ticket', (ticketId) => {
       socket.leave(`ticket:${ticketId}`);
     });
 
-    // Subscribe to role-based room (kitchen, admin, etc.)
-    // Only allow subscribing to roles the user actually has
-    socket.on('subscribe:role', (role) => {
-      // Validate: user can only join their own role or 'admin' if isAdmin
-      if (role === 'admin' && !socketUser.isAdmin) {
-        log(LEVELS.WARN, `WebSocket ${socket.id} (${socketUser.username}) denied admin room (not admin)`);
+    // subscribe:terminal — join a terminal-specific room
+    // Authorization: admin only (or the terminal's assigned user)
+    socket.on('subscribe:terminal', async (terminalId, callback) => {
+      if (!terminalId) {
+        if (callback) callback({ success: false, error: 'Invalid terminalId' });
         return;
       }
-      if (role !== 'admin' && role !== 'kitchen' && role !== 'pos') {
-        log(LEVELS.WARN, `WebSocket ${socket.id} denied unknown role: ${role}`);
-        return;
-      }
-      socket.join(`role:${role}`);
-      log(LEVELS.DEBUG, `Client ${socket.id} (${socketUser.username}) joined role:${role}`);
-    });
 
-    // Subscribe to terminal room (for terminal-specific events)
-    socket.on('subscribe:terminal', (terminalId) => {
+      // Only admin or the user assigned to this terminal can join
+      if (!socketUser.isAdmin) {
+        // TODO: check if user is assigned to this terminal in DB
+        log(LEVELS.WARN, `WS ${socket.id} (${socketUser.username}): denied terminal:${terminalId} (not admin)`);
+        if (callback) callback({ success: false, error: 'Forbidden: admin required for terminal rooms' });
+        return;
+      }
+
       socket.join(`terminal:${terminalId}`);
-      log(LEVELS.DEBUG, `Client ${socket.id} joined terminal:${terminalId}`);
+      log(LEVELS.DEBUG, `WS ${socket.id} (${socketUser.username}) joined terminal:${terminalId}`);
+      if (callback) callback({ success: true });
     });
 
-    // Resync: client requests current state snapshot after reconnect
-    socket.on('resync', async () => {
+    // === RESYNC — role-based state snapshot ===
+    socket.on('resync', async (data, callback) => {
       try {
         const { db } = require('../infrastructure/db/db');
-        const openTickets = await db('Tickets').where({ IsClosed: 0 })
-          .select('Id', 'TicketNumber', 'Date', 'TotalAmount', 'RemainingAmount',
-                  'LastModifiedUserName', 'DepartmentId', 'TicketTypeId')
-          .orderBy('Date', 'desc');
-        const tables = await db('Entities')
-          .leftJoin('EntityTypes', 'Entities.EntityTypeId', 'EntityTypes.Id')
-          .where({ 'EntityTypes.Name': 'Tables' })
-          .select('Entities.Id', 'Entities.Name');
-        socket.emit('resync:state', { openTickets, tables, timestamp: new Date().toISOString() });
-        log(LEVELS.DEBUG, `Sent resync to ${socket.id}: ${openTickets.length} tickets, ${tables.length} tables`);
+        const snapshot = { timestamp: new Date().toISOString() };
+
+        // POS users get: open tickets + tables
+        if (await userHasPermission('pos.login')) {
+          snapshot.openTickets = await db('Tickets').where({ IsClosed: 0 })
+            .select('Id', 'TicketNumber', 'Date', 'TotalAmount', 'RemainingAmount',
+                    'LastModifiedUserName', 'DepartmentId', 'TicketTypeId', 'Version')
+            .orderBy('Date', 'desc');
+          snapshot.tables = await db('Entities')
+            .leftJoin('EntityTypes', 'Entities.EntityTypeId', 'EntityTypes.Id')
+            .where({ 'EntityTypes.Name': 'Tables' })
+            .select('Entities.Id', 'Entities.Name');
+        }
+
+        // Kitchen users get: stations + active kitchen orders with items
+        if (await userHasPermission('kitchen.view')) {
+          snapshot.kitchenStations = await db('KitchenStations')
+            .where({ IsActive: 1 })
+            .select('Id', 'Code', 'DisplayName', 'Color', 'SortOrder', 'IsDefault')
+            .orderBy('SortOrder');
+
+          const activeOrders = await db('KitchenOrders')
+            .whereNotIn('State', ['SERVED', 'VOIDED'])
+            .orderBy('Priority', 'desc')
+            .orderBy('CreatedAt', 'asc');
+
+          const orderIds = activeOrders.map(o => o.Id);
+          if (orderIds.length > 0) {
+            const items = await db('KitchenOrderItems').whereIn('KitchenOrderId', orderIds);
+            const itemsByOrder = {};
+            for (const item of items) {
+              if (!itemsByOrder[item.KitchenOrderId]) itemsByOrder[item.KitchenOrderId] = [];
+              itemsByOrder[item.KitchenOrderId].push(item);
+            }
+            snapshot.kitchenOrders = activeOrders.map(o => ({
+              ...o,
+              Items: itemsByOrder[o.Id] || [],
+            }));
+          } else {
+            snapshot.kitchenOrders = [];
+          }
+        }
+
+        // Admin gets everything + system status
+        if (socketUser.isAdmin) {
+          snapshot.systemStatus = {
+            uptime: process.uptime(),
+            memoryUsage: Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB',
+            nodeVersion: process.version,
+          };
+        }
+
+        log(LEVELS.DEBUG, `WS resync ${socket.id} (${socketUser.username}): tickets=${snapshot.openTickets?.length || 0}, kitchen=${snapshot.kitchenOrders?.length || 0}`);
+
+        if (callback) {
+          callback({ success: true, snapshot });
+        } else {
+          socket.emit('resync:state', snapshot);
+        }
       } catch (err) {
-        log(LEVELS.ERROR, `Resync failed for ${socket.id}: ${err.message}`);
+        log(LEVELS.ERROR, `WS resync failed for ${socket.id}: ${err.message}`);
+        if (callback) callback({ success: false, error: err.message });
       }
     });
   });

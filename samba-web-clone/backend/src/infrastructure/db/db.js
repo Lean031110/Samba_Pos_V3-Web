@@ -13,12 +13,14 @@ const knex = require('knex');
 const config = require('./knexfile.js');
 
 const environment = process.env.NODE_ENV || 'development';
-const db = knex(config[environment]);
+// Fallback: if the environment is not in the config (e.g., 'test'), use 'development'
+const activeConfig = config[environment] || config.development;
+const db = knex(activeConfig);
 
 // Force-create the data directory if missing (so first `migrate` works)
 const path = require('path');
 const fs = require('fs');
-const dataDir = path.dirname(config[environment].connection.filename);
+const dataDir = path.dirname(activeConfig.connection.filename);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }

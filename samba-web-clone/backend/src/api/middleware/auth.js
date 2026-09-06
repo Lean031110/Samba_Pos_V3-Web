@@ -26,17 +26,20 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 /**
  * Rate limiter for login endpoint — prevents brute force on 4-digit PINs.
  * 5 attempts per 15 minutes per IP.
+ * Disabled in test environment to allow multiple logins in E2E tests.
  */
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,   // 15 minutes
-  max: 5,                      // 5 attempts per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    error: 'TooManyRequests',
-    message: 'Too many login attempts. Please try again in 15 minutes.',
-  },
-});
+const loginLimiter = process.env.NODE_ENV === 'test'
+  ? (req, res, next) => next()  // No-op in test
+  : rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 5,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: {
+        error: 'TooManyRequests',
+        message: 'Too many login attempts. Please try again in 15 minutes.',
+      },
+    });
 
 /**
  * Generate a JWT for a user.
