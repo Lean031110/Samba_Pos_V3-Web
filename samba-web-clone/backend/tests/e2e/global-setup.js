@@ -28,7 +28,8 @@ module.exports = async function globalSetup() {
     const knex = require('knex');
     const config = require('../../src/infrastructure/db/knexfile');
     const env = process.env.NODE_ENV || 'development';
-    const db = knex(config[env]);
+    // Fallback: if env (e.g. 'test') is not defined in knexfile, use 'development'
+    const db = knex(config[env] || config.development);
     await seed(db);
     await db.destroy();
     console.log('[global-setup] Seed completed');

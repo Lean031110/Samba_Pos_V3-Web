@@ -34,5 +34,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
+  },
+  "allowScripts": {
+    "sqlite3@5.1.7": true
   }
 }

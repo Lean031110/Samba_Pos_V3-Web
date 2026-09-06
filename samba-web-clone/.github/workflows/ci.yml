@@ -2,8 +2,16 @@
 # SambaPOS V3 Web Clone — CI/CD Pipeline
 # =====================================================================
 # Runs on every push to main and on every PR.
-# Steps: install → migrate → seed → integration tests → KDS tests →
-#        inventory tests → concurrency tests → Docker build
+#
+# Pipeline stages:
+#   1. install      — npm ci (cached)
+#   2. lint         — syntax + style check
+#   3. migrations   — run via programmatic script (knex CLI breaks on env-based config)
+#   4. unit tests   — integration (47) + KDS (49) + inventory (13) + concurrency (8)
+#   5. e2e tests    — Playwright (27 tests, failOnFlakyTests=true, --repeat-each=2)
+#   6. docker build — multi-stage image sanity check
+#
+# Total: 144 unit + 27 e2e = 171 tests must pass for green build.
 # =====================================================================
 
 name: CI
@@ -14,15 +22,22 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs for the same ref (saves CI minutes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Tests
+    name: Tests (unit + e2e)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       JWT_SECRET: ci-test-secret-do-not-use-in-production-32chars
       ADMIN_PIN: '1234'
       NODE_ENV: test
+      CI: 'true'
 
     steps:
       - uses: actions/checkout@v4
@@ -34,17 +49,21 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install backend dependencies
         working-directory: backend
         run: npm ci
 
-      - name: Run migrations
+      - name: Lint (node --check on every .js file)
         working-directory: backend
-        run: npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
+        run: |
+          set -e
+          # syntax-check every .js file under src/ and tests/
+          find src tests scripts -name '*.js' -type f -print0 \
+            | xargs -0 -n1 node --check
 
-      - name: Run seed
+      - name: Run migrations + seed (programmatic)
         working-directory: backend
-        run: npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+        run: node scripts/run-migrations.js
 
       - name: Integration tests (47)
         working-directory: backend
@@ -53,28 +72,65 @@ jobs:
       - name: KDS verification tests (49)
         working-directory: backend
         run: |
-          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
-          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+          node scripts/run-migrations.js
           node --test tests/kds-verification.test.js
 
       - name: Inventory verification tests (13)
         working-directory: backend
         run: |
-          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
-          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+          node scripts/run-migrations.js
           node --test tests/inventory-verification.test.js
 
       - name: Concurrency tests (8)
         working-directory: backend
         run: |
-          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
-          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+          node scripts/run-migrations.js
           node --test tests/concurrency-verification.test.js
+
+      # -----------------------------------------------------------------
+      # Playwright E2E
+      # -----------------------------------------------------------------
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('backend/package-lock.json') }}
+
+      - name: Install Playwright browser
+        working-directory: backend
+        run: npx playwright install --with-deps chromium
+
+      - name: Reset DB for E2E
+        working-directory: backend
+        run: |
+          rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
+          node scripts/run-migrations.js
+
+      - name: Run E2E tests (27, failOnFlakyTests=true, repeat-each=2)
+        working-directory: backend
+        run: npx playwright test --reporter=line --repeat-each=2
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: backend/tests/e2e/report
+          retention-days: 14
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: backend/test-results
+          retention-days: 7
 
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
     needs: test
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -82,8 +138,28 @@ jobs:
       - name: Build Docker image
         run: docker build -t samba-pos-web-clone:ci .
         env:
-          JWT_SECRET: ci-test-secret
+          JWT_SECRET: ci-test-secret-do-not-use-in-production-32chars
           ADMIN_PIN: '1234'
 
       - name: Verify image was created
         run: docker images samba-pos-web-clone:ci
+
+      - name: Smoke-test container (start + /health + stop)
+        run: |
+          set -e
+          docker run -d --name samba-ci \
+            -p 3001:3001 \
+            -e JWT_SECRET=ci-test-secret-do-not-use-in-production-32chars \
+            -e ADMIN_PIN=1234 \
+            -e NODE_ENV=production \
+            samba-pos-web-clone:ci
+          # Wait for /health to return 200
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              echo "Container healthy after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:3001/health | tee /tmp/health.json
+          docker stop samba-ci && docker rm samba-ci

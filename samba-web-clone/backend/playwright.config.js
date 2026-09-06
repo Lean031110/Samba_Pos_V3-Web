@@ -2,23 +2,36 @@
 // playwright.config.js
 // =====================================================================
 // Run with:
-//   npx playwright test                  # headless (CI)
-//   npx playwright test --headed         # show browser
-//   npx playwright test --debug          # step-by-step
+//   npx playwright test                       # headless (local)
+//   npx playwright test --headed              # show browser
+//   npx playwright test --debug               # step-by-step
+//   npx playwright test --repeat-each=3       # detect flaky tests
+//
+// CI behavior:
+//   - retries: 2          (auto-retry failed tests once)
+//   - failOnFlakyTests: true  (any retry-pass = CI FAIL)
 // =====================================================================
 
 const { defineConfig } = require('@playwright/test');
+
+const isCI = !!process.env.CI;
 
 module.exports = defineConfig({
   testDir: './tests/e2e',
   timeout: 30000,
   expect: { timeout: 5000 },
   fullyParallel: false,
-  retries: 0,
+  // In CI: retry once so flaky tests surface via failOnFlakyTests.
+  // Locally: no retries — fail fast for debugging.
+  retries: isCI ? 2 : 0,
+  // If a test passes after retry in CI, treat the whole run as failed.
+  failOnFlakyTests: isCI,
   workers: 1,
   reporter: [
     ['list'],
     ['html', { outputFolder: 'tests/e2e/report', open: 'never' }],
+    // In CI, emit a JUnit XML for test-result integrations.
+    ...(isCI ? [['junit', { outputFile: 'tests/e2e/results.xml' }]] : []),
   ],
   use: {
     baseURL: 'http://localhost:3001',
