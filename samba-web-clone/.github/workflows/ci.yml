@@ -2,7 +2,8 @@
 # SambaPOS V3 Web Clone — CI/CD Pipeline
 # =====================================================================
 # Runs on every push to main and on every PR.
-# Steps: install → lint → unit tests → integration tests → build Docker
+# Steps: install → migrate → seed → integration tests → KDS tests →
+#        inventory tests → concurrency tests → Docker build
 # =====================================================================
 
 name: CI
@@ -19,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      JWT_SECRET: ci-test-secret-do-not-use-in-production
+      JWT_SECRET: ci-test-secret-do-not-use-in-production-32chars
       ADMIN_PIN: '1234'
       NODE_ENV: test
 
@@ -45,17 +46,30 @@ jobs:
         working-directory: backend
         run: npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
 
-      - name: Run integration tests
+      - name: Integration tests (47)
         working-directory: backend
-        run: npm test
+        run: node --test tests/api-integration.test.js
 
-      - name: Run Sprint 2 acceptance tests
+      - name: KDS verification tests (49)
         working-directory: backend
-        run: npm run test:sprint2
+        run: |
+          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
+          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+          node --test tests/kds-verification.test.js
 
-      - name: Run ESC/POS checksum test
+      - name: Inventory verification tests (13)
         working-directory: backend
-        run: npm run test:print
+        run: |
+          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
+          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+          node --test tests/inventory-verification.test.js
+
+      - name: Concurrency tests (8)
+        working-directory: backend
+        run: |
+          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js
+          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js
+          node --test tests/concurrency-verification.test.js
 
   docker-build:
     name: Docker Build
