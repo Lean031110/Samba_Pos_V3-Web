@@ -157,6 +157,12 @@ jobs:
           node scripts/run-migrations.js
           node --test tests/printing-verification.test.js
 
+      - name: Recipes verification tests (25)
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/recipes-verification.test.js
+
       # -----------------------------------------------------------------
       # Playwright E2E
       # -----------------------------------------------------------------
