@@ -334,6 +334,12 @@ class InventoryService {
    * Reverse inventory deductions for a ticket (void/refund).
    * Records REVERSAL movements with positive quantity.
    *
+   * IDEMPOTENT: before inserting a REVERSAL for a SALE movement, checks
+   * if a REVERSAL already exists for (TicketId, OrderId, IngredientId,
+   * WarehouseId). If so, skips that movement. This prevents double-
+   * reversal if reverseForTicket is called twice (e.g., by a bug or
+   * concurrent retry that bypassed the IsRefunded guard).
+   *
    * @param {Object} ticket
    * @param {number} warehouseId
    * @param {number} userId
@@ -346,8 +352,22 @@ class InventoryService {
     const saleMovements = await conn('StockMovements')
       .where({ TicketId: ticket.Id, MovementType: MOVEMENT_TYPES.SALE });
 
+    // Find existing REVERSAL movements for this ticket (idempotency check)
+    const existingReversals = await conn('StockMovements')
+      .where({ TicketId: ticket.Id, MovementType: MOVEMENT_TYPES.REVERSAL });
+    const reversedKeys = new Set(
+      existingReversals.map(r => `${r.OrderId || 0}|${r.IngredientId}|${r.WarehouseId}`)
+    );
+
     const reversals = [];
     for (const movement of saleMovements) {
+      // Check if this SALE movement was already reversed
+      const key = `${movement.OrderId || 0}|${movement.IngredientId}|${movement.WarehouseId}`;
+      if (reversedKeys.has(key)) {
+        // Already reversed — skip (idempotency)
+        continue;
+      }
+
       // Record reversal with opposite sign
       const result = await this.recordMovement({
         ingredientId: movement.IngredientId,

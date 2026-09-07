@@ -78,14 +78,19 @@ class TicketServiceExtended {
 
   // ===================================================================
   // VOID — POST /api/tickets/:id/void
-  // Marks the entire ticket as voided: IsClosed=1, TicketStates=Void,
-  // reverses all AccountTransactions, recalculates (naturally zeros totals).
+  // Marks the entire ticket as voided: IsClosed=1, IsVoided=1,
+  // TicketStates=Void, reverses all AccountTransactions, recalculates
+  // (naturally zeros totals), reverses inventory (once, idempotent).
   // ===================================================================
   async voidTicket(ticketId) {
     return withTransaction(async (trx) => {
       const ticketRow = await ticketRepo.getTicketById(ticketId);
       if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
       if (ticketRow.IsClosed) throw new ConflictError(`Ticket ${ticketId} is already closed`);
+      // Idempotency guard: if already voided, refuse (don't duplicate reversal).
+      if (ticketRow.IsVoided) {
+        throw new ConflictError(`Ticket ${ticketId} is already voided`);
+      }
 
       const ticket = new Ticket(ticketRow);
 
@@ -114,7 +119,7 @@ class TicketServiceExtended {
       await kitchenService.voidOrdersForPosOrder(order.Id, 0, trx);
     }
 
-    // Reverse inventory deductions (REVERSAL movements)
+    // Reverse inventory deductions (REVERSAL movements) — idempotent
     const department = await trx('Departments').where({ Id: ticketRow.DepartmentId }).first();
     const warehouseId = department?.WarehouseId || 1;
     await inventoryService.reverseForTicket(ticket, warehouseId, 0, trx);
@@ -133,6 +138,10 @@ class TicketServiceExtended {
     recalculateTicket(ticket);
 
     ticket.IsClosed = true;
+    ticket.IsVoided = 1;          // ← explicit flag (was missing!)
+    ticket.VoidReason = 'Voided by operator';
+    ticket.VoidedAt = new Date().toISOString();
+    ticket.VoidedBy = 0;           // TODO: pass req.user.userId through
 
     await ticketRepo.saveTicket(ticket, trx);
     publish(EventTopicNames.TicketClosed, { Ticket: ticket, reason: 'voided' });
@@ -259,6 +268,10 @@ class TicketServiceExtended {
       if (!originalRow.IsClosed) {
         throw new ConflictError(`Ticket ${originalTicketId} must be closed before refunding`);
       }
+      // Idempotency guard: if already refunded, refuse (don't duplicate reversal).
+      if (originalRow.IsRefunded) {
+        throw new ConflictError(`Ticket ${originalTicketId} is already refunded`);
+      }
 
       // Check the ticket has payments to reverse
       const payments = await trx('Payments').where({ TicketId: originalTicketId }).orderBy('Id', 'desc');
@@ -311,10 +324,21 @@ class TicketServiceExtended {
       // Save using the same transaction
       await ticketRepo.saveTicket(originalTicket, trx);
 
-      // Reverse inventory deductions (REVERSAL movements)
+      // Reverse inventory deductions (REVERSAL movements) — idempotent
       const refundDept = await trx('Departments').where({ Id: originalRow.DepartmentId }).first();
       const refundWarehouseId = refundDept?.WarehouseId || 1;
       await inventoryService.reverseForTicket(originalTicket, refundWarehouseId, 0, trx);
+
+      // Mark ticket as refunded (AFTER inventory reversal, in same txn).
+      // This is the data-layer idempotency guard: a second refund call
+      // will see IsRefunded=1 and throw ConflictError before any reversal.
+      await trx('Tickets').where({ Id: originalTicketId }).update({
+        IsRefunded: 1,
+        IsClosed: true,          // re-close after refund
+        VoidReason: `Refund: $${amount.toFixed(2)} - ${reason}`,
+        VoidedAt: new Date().toISOString(),
+        VoidedBy: 0,
+      });
 
       publish(EventTopicNames.PaymentProcessed, {
         Ticket: originalTicket,
