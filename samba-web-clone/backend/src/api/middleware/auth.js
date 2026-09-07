@@ -107,10 +107,11 @@ async function authenticate(req, res, next) {
  */
 async function loginHandler(req, res, next) {
   try {
-    const { username, pin } = req.body || {};
-    if (!username || !pin) {
-      throw new ValidationError('username and pin are required');
-    }
+    const { loginSchema, parseOrThrow } = require('./schemas');
+    const { username, pin } = parseOrThrow(loginSchema, req.body || {});
+
+    // pin may have been transformed from number to string; ensure string
+    const pinStr = typeof pin === 'number' ? String(pin) : pin;
 
     const user = await db('Users')
       .leftJoin('UserRoles', 'Users.UserRoleId', 'UserRoles.Id')
@@ -131,7 +132,7 @@ async function loginHandler(req, res, next) {
     }
 
     // Use async compare to avoid blocking the event loop
-    const pinValid = await bcrypt.compare(pin, user.PinCode);
+    const pinValid = await bcrypt.compare(pinStr, user.PinCode);
     if (!pinValid) {
       throw new UnauthorizedError('Invalid credentials');
     }

@@ -18,6 +18,11 @@ const { TicketServiceExtended } = require('../services/TicketServiceExtended');
 const { ValidationError } = require('../middleware/errorHandler');
 const { auditLog } = require('../middleware/auditLog');
 const { requirePermission } = require('../middleware/rbac');
+const {
+  createTicketSchema, addOrderSchema, addCalculationSchema, addPaymentSchema,
+  closeTicketSchema, noteSchema, giftSchema, tagsSchema, splitTicketSchema,
+  refundTicketSchema, mergeTicketsSchema, parseOrThrow,
+} = require('../middleware/schemas');
 
 const router = express.Router();
 const ticketService = new TicketService();
@@ -44,8 +49,8 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/tickets — create new ticket
 router.post('/', requirePermission('pos.open_ticket'), async (req, res, next) => {
   try {
-    const { departmentId, ticketTypeId, tableId } = req.body || {};
-    const ticket = await ticketService.createTicket({ departmentId, ticketTypeId, tableId });
+    const parsed = parseOrThrow(createTicketSchema, req.body || {});
+    const ticket = await ticketService.createTicket(parsed);
     res.status(201).json({ data: ticket });
   } catch (err) { next(err); }
 });
@@ -54,7 +59,7 @@ router.post('/', requirePermission('pos.open_ticket'), async (req, res, next) =>
 // NOTE: must be defined BEFORE /:id routes to avoid path conflict
 router.post('/merge', requirePermission('pos.merge'), auditLog('ticket.merge', 'Ticket'), async (req, res, next) => {
   try {
-    const { sourceTicketIds } = req.body || {};
+    const { sourceTicketIds } = parseOrThrow(mergeTicketsSchema, req.body || {});
     const result = await ticketServiceExt.mergeTickets(sourceTicketIds);
     res.status(201).json({ data: result });
   } catch (err) { next(err); }
@@ -87,8 +92,8 @@ router.post('/:id/payments', requirePermission('pos.payment'), auditLog('payment
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const { paymentTypeId, amount, tenderedAmount, idempotencyKey } = req.body || {};
-    const ticket = await ticketService.addPayment(id, { paymentTypeId, amount, tenderedAmount, idempotencyKey }, req.user);
+    const { paymentTypeId, amount } = parseOrThrow(addPaymentSchema, req.body || {});
+    const ticket = await ticketService.addPayment(id, { paymentTypeId, amount, idempotencyKey: req.body?.idempotencyKey, tenderedAmount: req.body?.tenderedAmount }, req.user);
     res.json({ data: ticket });
   } catch (err) { next(err); }
 });
@@ -98,7 +103,8 @@ router.post('/:id/close', requirePermission('pos.close_ticket'), auditLog('ticke
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const ticket = await ticketService.closeTicket(id, req.user);
+    const { expectedVersion, idempotencyKey } = parseOrThrow(closeTicketSchema, req.body || {});
+    const ticket = await ticketService.closeTicket(id, req.user, { expectedVersion, idempotencyKey });
     res.json({ data: ticket });
   } catch (err) { next(err); }
 });
@@ -122,7 +128,7 @@ router.post('/:id/note', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const { note } = req.body || {};
+    const { note } = parseOrThrow(noteSchema, req.body || {});
     const ticket = await ticketServiceExt.setNote(id, note);
     res.json({ data: ticket });
   } catch (err) { next(err); }
@@ -155,7 +161,7 @@ router.post('/:id/tags', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const { tags } = req.body || {};
+    const { tags } = parseOrThrow(tagsSchema, req.body || {});
     const ticket = await ticketServiceExt.setTags(id, tags);
     res.json({ data: ticket });
   } catch (err) { next(err); }
@@ -166,7 +172,7 @@ router.post('/:id/split', requirePermission('pos.split'), auditLog('ticket.split
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const { orderIds } = req.body || {};
+    const { orderIds } = parseOrThrow(splitTicketSchema, req.body || {});
     const result = await ticketServiceExt.splitTicket(id, orderIds);
     res.status(201).json({ data: result });
   } catch (err) { next(err); }
@@ -177,7 +183,7 @@ router.post('/:id/refund', requirePermission('pos.refund'), auditLog('ticket.ref
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
-    const { amount, reason } = req.body || {};
+    const { amount, reason } = parseOrThrow(refundTicketSchema, req.body || {});
     const result = await ticketServiceExt.refundTicket(id, amount, reason);
     res.json({ data: result });
   } catch (err) { next(err); }
