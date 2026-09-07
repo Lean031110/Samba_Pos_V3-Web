@@ -228,4 +228,4 @@ class CashSession {
 CashSession.STATUS = STATUS;
 CashSession.EVENT_TYPES = EVENT_TYPES;
 
-module.exports = { CashSession };
+module.exports = { CashSession, EVENT_TYPES, STATUS };

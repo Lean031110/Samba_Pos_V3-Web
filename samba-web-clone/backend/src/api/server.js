@@ -130,6 +130,8 @@ function createApp() {
   app.use('/api/inventory', require('./routes/inventory'));
   app.use('/api/printers', require('./routes/printers'));
   app.use('/api/print', require('./routes/printers'));  // alias for /api/print/tickets/:id/send
+  app.use('/api/customers', require('./routes/customers'));           // FASE 3
+  app.use('/api', require('./routes/cash-sessions'));                 // FASE 3 (work-periods + cash-sessions)
   app.use('/api', require('./routes/config'));
 
   // === 404 + Error handlers ===
