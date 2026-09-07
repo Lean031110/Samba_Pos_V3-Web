@@ -151,6 +151,12 @@ jobs:
           node scripts/run-migrations.js
           node --test tests/domain-verification.test.js
 
+      - name: Printing verification tests (24)
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/printing-verification.test.js
+
       # -----------------------------------------------------------------
       # Playwright E2E
       # -----------------------------------------------------------------

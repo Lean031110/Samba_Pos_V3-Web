@@ -220,7 +220,7 @@ describe('Health Check', () => {
     const res = await authGet('/health');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.status, 'ok');
-    assert.strictEqual(res.body.service, 'samba-pos-web-clone');
+    assert.strictEqual(res.body.service, 'sambapos-lba');
     ok('GET /health → 200 (status: ok)');
   });
 
