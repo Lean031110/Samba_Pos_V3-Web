@@ -279,7 +279,7 @@ Pipeline `.github/workflows/ci.yml`:
 
 | # | Severidad | Componente | Descripción |
 |---|---|---|---|
-| B1 | Alta | `.github/workflows/ci.yml` | Línea `branches: ain]` truncada — CI no dispara en push a `main` |
+| B1 | ~~Alta~~ **Falso positivo** | `.github/workflows/ci.yml` | Inspección con `cat -A` y hex dump confirma que el YAML contiene `branches: [main]` correctamente. El `[m` fue interpretado como código de escape ANSI por el terminal, ocultando `[main` al ojo. NO es un bug. |
 | B2 | Alta | `data/samba.db` | Base de datos commiteada en el repo (git tracked) |
 | B3 | Media | `data/backups/samba-backup-*.meta.json` | Metadatos de backup commiteados |
 | B4 | Media | `backend/src/api/services/TicketService.js` | `generateMockEscPos()` y `generatePrintPreview()` son mocks (el driver real ESC/POS existe en `PrinterManager.js` pero TicketService todavía tiene el mock legacy) |

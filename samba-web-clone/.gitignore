@@ -16,6 +16,8 @@ data/samba.db-wal
 data/samba.db-shm
 data/*.db
 data/*.db-*
+data/backups/
+data/snapshots/
 *.sdf
 *.db
 *.db-journal
@@ -57,3 +59,5 @@ source/
 
 # === Playwright test artifacts ===
 backend/test-results/
+backend/tests/e2e/report/
+backend/tests/e2e/results.xml
