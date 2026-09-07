@@ -47,7 +47,7 @@ COPY backend/src ./src
 COPY frontend ./frontend
 
 # Create data directory for SQLite
-RUN mkdir -p /app/data && chown -s samba:samba /app/data
+RUN mkdir -p /app/data && chown -R samba:samba /app/data
 
 # Switch to non-root user
 USER samba
