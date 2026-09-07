@@ -25,6 +25,7 @@ data/snapshots/
 # === Environment / secrets (NEVER commit) ===
 .env
 .env.*
+!.env.example
 .env.local
 config/secrets.js
 config/local.js

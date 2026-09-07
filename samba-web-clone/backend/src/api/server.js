@@ -26,7 +26,17 @@ const { subscribe, EventTopicNames } = require('../application/eventBus');
 const { db } = require('../infrastructure/db/db');
 
 const PORT = process.env.PORT || 3001;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';  // In production, set to specific origins
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+
+// Phase 1 hardening: refuse '*' in production. The server must know exactly
+// which origins are allowed to call the API.
+const NODE_ENV = process.env.NODE_ENV || 'development';
+if (NODE_ENV === 'production' && (CORS_ORIGIN === '*' || !CORS_ORIGIN)) {
+  console.error('[FATAL] In production, CORS_ORIGIN must be set to a specific origin (or comma-separated list).');
+  console.error('       Refusing to start with CORS_ORIGIN=*.');
+  console.error('       Example: CORS_ORIGIN=https://pos.example.com,https://admin.example.com');
+  process.exit(1);
+}
 
 const FRONTEND_DIR = path.join(__dirname, '..', '..', '..', 'frontend');
 
