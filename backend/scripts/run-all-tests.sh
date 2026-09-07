@@ -30,11 +30,16 @@ run_unit () {
 }
 
 echo "=== UNIT TESTS ==="
-run_unit "api-integration"        tests/api-integration.test.js
-run_unit "kds-verification"       tests/kds-verification.test.js
-run_unit "inventory-verification" tests/inventory-verification.test.js
+run_unit "api-integration"          tests/api-integration.test.js
+run_unit "kds-verification"         tests/kds-verification.test.js
+run_unit "inventory-verification"   tests/inventory-verification.test.js
 run_unit "concurrency-verification" tests/concurrency-verification.test.js
-run_unit "security-verification"  tests/security-verification.test.js
+run_unit "idempotency-verification" tests/idempotency-verification.test.js
+run_unit "idempotency-concurrency"  tests/idempotency-concurrency.test.js
+run_unit "domain-verification"      tests/domain-verification.test.js
+run_unit "security-verification"   tests/security-verification.test.js
+run_unit "printing-verification"    tests/printing-verification.test.js
+run_unit "recipes-verification"    tests/recipes-verification.test.js
 
 echo "=== E2E (Playwright) ==="
 rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm

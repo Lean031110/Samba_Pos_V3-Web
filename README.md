@@ -8,7 +8,7 @@ Construido con Node.js + Express + Knex + SQLite + Socket.io + Vanilla JS
 [![CI](https://img.shields.io/github/actions/workflow/status/Lean031110/Samba_Pos_V3-Web/ci.yml?branch=main&label=CI)](https://github.com/Lean031110/Samba_Pos_V3-Web/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-20-green.svg)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-244%2F244-brightgreen.svg)](#pruebas)
+[![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen.svg)](#pruebas)
 [![Vulnerabilities](https://img.shields.io/badge/vulnerabilities-0-brightgreen.svg)](#seguridad)
 [![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](./CHANGELOG.md)
 [![PWA](https://img.shields.io/badge/PWA-installable-blue.svg)](#pwa--android)
@@ -105,7 +105,7 @@ tolerancia a pérdida de red temporal.
 - **Docker multi-stage** con endpoints de *health* y *readiness*.
 - **CI/CD** con *gitleaks* (secret scan) + *npm audit* gate antes de correr
   los tests.
-- **Suite de pruebas: 244 tests** (217 unit + 27 E2E).
+- **Suite de pruebas: 300 tests** (273 unit + 27 E2E).
 - **Seguridad**: JWT obligatorio (sin *defaults*), bcrypt, *rate-limiting* en
   login, CSP estricto con *helmet*, CORS estricto en producción.
 
@@ -386,7 +386,7 @@ Samba_Pos_V3-Web/               # Repo root (no samba-web-clone/ wrapper)
 
 ## Pruebas
 
-El proyecto mantiene **244 tests passing** distribuidos en tres capas:
+El proyecto mantiene **300 tests passing** distribuidos en múltiples capas:
 
 | Capa | Suite | # Tests | Cómo correrla |
 |------|-------|:---:|---------------|
@@ -395,18 +395,26 @@ El proyecto mantiene **244 tests passing** distribuidos en tres capas:
 | Unit / Integration | `inventory-verification.test.js` | 13 | `node --test tests/inventory-verification.test.js` |
 | Unit / Integration | `concurrency-verification.test.js` | 8 | `node --test tests/concurrency-verification.test.js` |
 | Unit / Integration | `idempotency-verification.test.js` | 7 | `node --test tests/idempotency-verification.test.js` |
+| **Concurrency** | `idempotency-concurrency.test.js` | 7 | `node --test tests/idempotency-concurrency.test.js` |
 | Unit / Integration | `domain-verification.test.js` | 72 | `node --test tests/domain-verification.test.js` |
 | **Security** | `security-verification.test.js` | 21 | `node --test tests/security-verification.test.js` |
+| **Printing** | `printing-verification.test.js` | 24 | `node --test tests/printing-verification.test.js` |
+| **Recipes** | `recipes-verification.test.js` | 25 | `node --test tests/recipes-verification.test.js` |
 | **E2E (Playwright)** | `api-isolated.spec.js` + `ui-isolated.spec.js` + `websocket-flow.spec.js` | 27 | `npm run test:playwright` |
-| **Total** | | **244** | |
+| **Total** | | **300** | |
+
+**Comandos unificados:**
+- `npm test` — solo api-integration (partial, para dev rápido).
+- `npm run test:unit` — todos los 10 archivos de tests unitarios.
+- `npm run test:all` — unit + E2E completo (vía `run-all-tests.sh`).
+- `npm run test:playwright` — solo Playwright E2E.
 
 ### Estrategia de tests
 
-- **Unit tests (`node --test`)** — 217 tests en 7 suites. Cubren el dominio
+- **Unit tests (`node --test`)** — 273 tests en 10 suites. Cubren el dominio
   (cálculos, ledger de doble entrada, auto-reversal, state machine), los
-  servicios de aplicación, las rutas REST, la concurrencia y la
-  idempotencia. Usan `supertest` + `node:assert` sin dependencias externas
-  pesadas.
+  servicios de aplicación, las rutas REST, la concurrencia, la idempotencia
+  (incluyendo concurrencia real), y la impresión (con golden fixtures).
 - **E2E tests (Playwright + Chromium)** — 27 tests en 3 suites. Cubren los
   flujos completos de UI (login → dashboard → POS → nota → pago → cierre),
   la API aislada y los flujos de WebSocket multi-cliente (incluye
@@ -618,7 +626,7 @@ dominio.
 - ✅ **FASE 0** — Auditoría forense (completa)
 - ✅ **FASE 1** — Seguridad y limpieza (completa, 0 vulns, 0 leaks)
 - ✅ **FASE 2** — Dominio: agregados + state machine formal (completa, 237/237 tests)
-- ✅ **FASE 3** — WorkPeriod, CashSession, Customer, idempotency middleware (completa, 244/244 tests)
+- ✅ **FASE 3** — WorkPeriod, CashSession, Customer, idempotency middleware (completa)
 - 🚧 **FASE 4** — Reorganización repositorio + identidad azul + PWA + mobile-first (en progreso)
 
 Última actualización: 2026-09-07 ·
