@@ -8,7 +8,7 @@ Construido con Node.js + Express + Knex + SQLite + Socket.io + Vanilla JS
 [![CI](https://img.shields.io/github/actions/workflow/status/Lean031110/Samba_Pos_V3-Web/ci.yml?branch=main&label=CI)](https://github.com/Lean031110/Samba_Pos_V3-Web/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-20-green.svg)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen.svg)](#pruebas)
+[![Tests](https://img.shields.io/badge/tests-320%2F320-brightgreen.svg)](#pruebas)
 [![Vulnerabilities](https://img.shields.io/badge/vulnerabilities-0-brightgreen.svg)](#seguridad)
 [![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](./CHANGELOG.md)
 [![PWA](https://img.shields.io/badge/PWA-installable-blue.svg)](#pwa--android)
@@ -105,7 +105,7 @@ tolerancia a pérdida de red temporal.
 - **Docker multi-stage** con endpoints de *health* y *readiness*.
 - **CI/CD** con *gitleaks* (secret scan) + *npm audit* gate antes de correr
   los tests.
-- **Suite de pruebas: 300 tests** (273 unit + 27 E2E).
+- **Suite de pruebas: 320 tests** (293 unit + 27 E2E).
 - **Seguridad**: JWT obligatorio (sin *defaults*), bcrypt, *rate-limiting* en
   login, CSP estricto con *helmet*, CORS estricto en producción.
 
@@ -386,7 +386,7 @@ Samba_Pos_V3-Web/               # Repo root (no samba-web-clone/ wrapper)
 
 ## Pruebas
 
-El proyecto mantiene **300 tests passing** distribuidos en múltiples capas:
+El proyecto mantiene **320 tests passing** distribuidos en múltiples capas:
 
 | Capa | Suite | # Tests | Cómo correrla |
 |------|-------|:---:|---------------|
@@ -400,8 +400,10 @@ El proyecto mantiene **300 tests passing** distribuidos en múltiples capas:
 | **Security** | `security-verification.test.js` | 21 | `node --test tests/security-verification.test.js` |
 | **Printing** | `printing-verification.test.js` | 24 | `node --test tests/printing-verification.test.js` |
 | **Recipes** | `recipes-verification.test.js` | 25 | `node --test tests/recipes-verification.test.js` |
+| **Refund** | `refund-verification.test.js` | 6 | `node --test tests/refund-verification.test.js` |
+| **Unit conversion** | `unit-conversion-verification.test.js` | 14 | `node --test tests/unit-conversion-verification.test.js` |
 | **E2E (Playwright)** | `api-isolated.spec.js` + `ui-isolated.spec.js` + `websocket-flow.spec.js` | 27 | `npm run test:playwright` |
-| **Total** | | **300** | |
+| **Total** | | **320** | |
 
 **Comandos unificados:**
 - `npm test` — solo api-integration (partial, para dev rápido).
@@ -411,10 +413,12 @@ El proyecto mantiene **300 tests passing** distribuidos en múltiples capas:
 
 ### Estrategia de tests
 
-- **Unit tests (`node --test`)** — 273 tests en 10 suites. Cubren el dominio
+- **Unit tests (`node --test`)** — 293 tests en 12 suites. Cubren el dominio
   (cálculos, ledger de doble entrada, auto-reversal, state machine), los
   servicios de aplicación, las rutas REST, la concurrencia, la idempotencia
-  (incluyendo concurrencia real), y la impresión (con golden fixtures).
+  (incluyendo concurrencia real), la impresión (con golden fixtures), el
+  refund (con IsRefunded + reversal idempotente) y la conversión de
+  unidades (kg↔gr, L↔ml, con tests matemáticos que verifican 200 gr = 0.2 kg).
 - **E2E tests (Playwright + Chromium)** — 27 tests en 3 suites. Cubren los
   flujos completos de UI (login → dashboard → POS → nota → pago → cierre),
   la API aislada y los flujos de WebSocket multi-cliente (incluye

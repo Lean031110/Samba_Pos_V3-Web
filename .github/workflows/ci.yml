@@ -175,6 +175,18 @@ jobs:
           node scripts/run-migrations.js
           node --test tests/recipes-verification.test.js
 
+      - name: Refund verification tests
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/refund-verification.test.js
+
+      - name: Unit conversion verification tests
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/unit-conversion-verification.test.js
+
       # -----------------------------------------------------------------
       # Playwright E2E
       # -----------------------------------------------------------------

@@ -40,6 +40,8 @@ run_unit "domain-verification"      tests/domain-verification.test.js
 run_unit "security-verification"   tests/security-verification.test.js
 run_unit "printing-verification"    tests/printing-verification.test.js
 run_unit "recipes-verification"    tests/recipes-verification.test.js
+run_unit "refund-verification"      tests/refund-verification.test.js
+run_unit "unit-conversion"         tests/unit-conversion-verification.test.js
 
 echo "=== E2E (Playwright) ==="
 rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
