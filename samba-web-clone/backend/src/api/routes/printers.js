@@ -20,16 +20,16 @@ const { db } = require('../../infrastructure/db/db');
 const router = express.Router();
 const printerManager = new PrinterManager();
 
-// GET /api/printers — list all
-router.get('/', async (req, res, next) => {
+// GET /api/printers — list all (requires manage.printers)
+router.get('/', requirePermission('manage.printers'), async (req, res, next) => {
   try {
     const printers = await db('Printers').orderBy('Name');
     res.json({ data: printers, count: printers.length });
   } catch (err) { next(err); }
 });
 
-// GET /api/printers/:id — get by ID
-router.get('/:id', async (req, res, next) => {
+// GET /api/printers/:id — get by ID (requires manage.printers)
+router.get('/:id', requirePermission('manage.printers'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) throw new ValidationError('id must be a number');
@@ -39,8 +39,8 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/printers/:id/status — check online status
-router.get('/:id/status', async (req, res, next) => {
+// GET /api/printers/:id/status — check online status (requires manage.printers)
+router.get('/:id/status', requirePermission('manage.printers'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) throw new ValidationError('id must be a number');

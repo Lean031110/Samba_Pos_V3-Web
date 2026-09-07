@@ -11,21 +11,23 @@ const express = require('express');
 const { TableRepository } = require('../../infrastructure/repositories/TableRepository');
 const { TicketRepository } = require('../../infrastructure/repositories/TicketRepository');
 const { ValidationError, NotFoundError, ConflictError } = require('../middleware/errorHandler');
+const { requirePermission } = require('../middleware/rbac');
+const { auditLog } = require('../middleware/auditLog');
 
 const router = express.Router();
 const tableRepo = new TableRepository();
 const ticketRepo = new TicketRepository();
 
-// GET /api/tables — list all
-router.get('/', async (req, res, next) => {
+// GET /api/tables — list all (requires pos.login)
+router.get('/', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const tables = await tableRepo.getTables();
     res.json({ data: tables, count: tables.length });
   } catch (err) { next(err); }
 });
 
-// GET /api/tables/:id — get by ID
-router.get('/:id', async (req, res, next) => {
+// GET /api/tables/:id — get by ID (requires pos.login)
+router.get('/:id', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -35,9 +37,8 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PATCH /api/tables/:id/state — update table state
-// Body: { state: "Available" | "New Orders" | "Bill Requested" | "Locked", stateValue?: string }
-router.patch('/:id/state', async (req, res, next) => {
+// PATCH /api/tables/:id/state — update table state (requires pos.change_table)
+router.patch('/:id/state', requirePermission('pos.change_table'), auditLog('table.changeState', 'Table'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');

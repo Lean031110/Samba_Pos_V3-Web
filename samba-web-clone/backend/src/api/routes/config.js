@@ -11,8 +11,15 @@
 
 const express = require('express');
 const { db } = require('../../infrastructure/db/db');
+const { requirePermission } = require('../middleware/rbac');
 
 const router = express.Router();
+
+// All config endpoints require at least pos.login (any logged-in POS user can
+// read configuration to render menus / payment buttons). This is stricter than
+// just authenticate() — it ensures the role has been explicitly granted POS
+// access and is not (for example) a read-only audit role.
+router.use(requirePermission('pos.login'));
 
 // GET /api/calculation-types
 router.get('/calculation-types', async (req, res, next) => {

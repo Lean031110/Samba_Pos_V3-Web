@@ -39,8 +39,8 @@ router.get('/orders', requirePermission('kitchen.view'), async (req, res, next) 
   } catch (err) { next(err); }
 });
 
-// GET /api/kitchen/stats/:stationId
-router.get('/stats/:stationId', async (req, res, next) => {
+// GET /api/kitchen/stats/:stationId (requires kitchen.view)
+router.get('/stats/:stationId', requirePermission('kitchen.view'), async (req, res, next) => {
   try {
     const stationId = parseInt(req.params.stationId, 10);
     if (isNaN(stationId)) throw new ValidationError('stationId must be a number');
@@ -50,7 +50,10 @@ router.get('/stats/:stationId', async (req, res, next) => {
 });
 
 // POST /api/kitchen/orders/:id/state — update state (with optimistic locking)
-router.post('/orders/:id/state', auditLog('kitchen.updateState', 'KitchenOrder'), async (req, res, next) => {
+// State changes are kitchen writes; require kitchen.view (any kitchen role can
+// change state). For finer-grained control, use bump/serve/void/recall which
+// have specific permissions.
+router.post('/orders/:id/state', requirePermission('kitchen.view'), auditLog('kitchen.updateState', 'KitchenOrder'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { state, expectedVersion } = req.body || {};

@@ -10,12 +10,15 @@
 const express = require('express');
 const { ProductRepository } = require('../../infrastructure/repositories/ProductRepository');
 const { ValidationError, NotFoundError } = require('../middleware/errorHandler');
+const { requirePermission } = require('../middleware/rbac');
+const { auditLog } = require('../middleware/auditLog');
 
 const router = express.Router();
 const productRepo = new ProductRepository();
 
-// GET /api/products — list all
-router.get('/', async (req, res, next) => {
+// Reading products/menu items requires at least pos.login (any logged-in POS
+// user needs to render the menu). Writing requires manage.products.
+router.get('/', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const items = await productRepo.getMenuItems();
     res.json({ data: items, count: items.length });
@@ -23,7 +26,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // GET /api/products/group/:code — filter by GroupCode
-router.get('/group/:code', async (req, res, next) => {
+router.get('/group/:code', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const code = req.params.code;
     if (!code) throw new ValidationError('group code is required');
@@ -33,7 +36,7 @@ router.get('/group/:code', async (req, res, next) => {
 });
 
 // GET /api/products/:id — get by ID
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -43,8 +46,8 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/products — create a new menu item (Sprint 5)
-router.post('/', async (req, res, next) => {
+// POST /api/products — create a new menu item (manage.products required)
+router.post('/', requirePermission('manage.products'), auditLog('product.create', 'MenuItem'), async (req, res, next) => {
   try {
     const { name, price, groupCode, barcode } = req.body || {};
     if (!name) throw new ValidationError('name is required');
