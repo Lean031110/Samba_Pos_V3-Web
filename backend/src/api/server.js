@@ -104,7 +104,7 @@ function createApp() {
   app.get('/version', (req, res) => {
     res.json({
       name: 'sambapos-lba',
-      version: require('../../../package.json').version || '0.0.0',
+      version: require('../../package.json').version || '0.0.0',
       node: process.version,
       uptime: process.uptime(),
     });

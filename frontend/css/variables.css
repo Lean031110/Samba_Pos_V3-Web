@@ -1,19 +1,149 @@
 /* =====================================================================
-   variables.css — SambaPOS V3 color palette (extracted from XAML)
+   variables.css — SambaPos_LBA color palette (blue brand identity)
    =====================================================================
-   Source: analysis/UI_SPECS_FOR_WEB.md section 1
+   Source: analysis/UI_SPECS_FOR_WEB.md section 1 (forensic baseline)
+   + SambaPos_LBA Fase 4 modernization: blue-first palette.
+
+   The brand color is BLUE. The interface uses a family of blue tones
+   (dark, deep, medium, bright, light, desaturated). Other colors are used
+   ONLY for semantic states (error, success, warning, danger) and neutral
+   surfaces (grays/whites). No pink/magenta legacy shades in the primary
+   palette — those are kept only as legacy aliases for backward compatibility
+   with existing components, but `--lba-*` variables are the canonical ones.
    ===================================================================== */
 
 :root {
-  /* === Shell gradient === */
-  --samba-shell-bg: linear-gradient(to bottom,
-    #FF70B8FF 0%,
-    #FF5CBBFF 50%,
-    #FF044392 100%);
+  /* === SambaPos_LBA brand — blue family (canonical) === */
+  --lba-blue-900:   #044392;  /* deep blue (matches original Shell-Mid) */
+  --lba-blue-800:   #0a4fb0;
+  --lba-blue-700:   #1565c0;  /* material blue 800 */
+  --lba-blue-600:   #1976d2;  /* material blue 700 */
+  --lba-blue-500:   #2196f3;  /* bright blue (primary action) */
+  --lba-blue-400:   #42a5f5;  /* light blue */
+  --lba-blue-300:   #64b5f6;
+  --lba-blue-200:   #bbdefb;  /* very light blue (hover bg) */
+  --lba-blue-100:   #e3f2fd;  /* pale blue (info bg) */
+  --lba-blue-50:    #f5fafe;  /* almost-white blue tint */
+
+  /* === SambaPos_LBA brand — shell & surfaces === */
+  --lba-shell-bg:   linear-gradient(135deg,
+    #044392 0%,
+    #0a4fb0 35%,
+    #1976d2 70%,
+    #2196f3 100%);
+  --lba-shell-bg-portrait: linear-gradient(180deg,
+    #044392 0%,
+    #0a4fb0 50%,
+    #1976d2 100%);
+
+  --lba-bg-app:       #f5fafe;       /* app background (very light blue) */
+  --lba-bg-panel:     #ffffff;       /* card surface */
+  --lba-bg-elevated:  #ffffff;       /* elevated surface (modal/popover) */
+  --lba-bg-sidebar:   #044392;       /* admin sidebar (deep blue) */
+  --lba-bg-header:    #1976d2;       /* top header bar */
+  --lba-bg-footer:    #044392;
+  --lba-bg-hover:     #e3f2fd;       /* list item hover */
+  --lba-bg-selected:  #bbdefb;       /* list item selected */
+  --lba-bg-disabled:  #f0f0f0;
+
+  /* === SambaPos_LBA — text === */
+  --lba-fg-default:    #0a2540;      /* deep navy text on light */
+  --lba-fg-inverse:    #ffffff;      /* white text on blue */
+  --lba-fg-muted:       #5f7185;      /* muted gray-blue */
+  --lba-fg-on-blue:    #ffffff;
+  --lba-fg-on-blue-muted: rgba(255, 255, 255, 0.78);
+  --lba-fg-primary-action: #044392;   /* deep blue action text */
+  --lba-fg-link:        #1976d2;
+  --lba-fg-error:       #d32f2f;
+  --lba-fg-success:     #2e7d32;
+  --lba-fg-warning:     #ed6c02;
+  --lba-fg-amount:      #044392;     /* ticket total: deep blue */
+
+  /* === SambaPos_LBA — accents & semantic === */
+  --lba-accent:         #2196f3;     /* bright blue accent */
+  --lba-accent-hover:   #1976d2;
+  --lba-accent-pressed: #0a4fb0;
+
+  --lba-success:        #2e7d32;
+  --lba-success-bg:     #e8f5e9;
+  --lba-warning:        #ed6c02;
+  --lba-warning-bg:    #fff3e0;
+  --lba-danger:         #d32f2f;
+  --lba-danger-bg:     #ffebee;
+  --lba-info:           #1976d2;
+  --lba-info-bg:        #e3f2fd;
+
+  /* === SambaPos_LBA — borders === */
+  --lba-border-default: #d1d9e6;
+  --lba-border-light:   #e8edf5;
+  --lba-border-strong:  #044392;
+  --lba-border-focus:   #2196f3;
+
+  /* === SambaPos_LBA — shadows === */
+  --lba-shadow-sm:    0 1px 2px rgba(4, 67, 146, 0.08);
+  --lba-shadow-md:    0 2px 8px rgba(4, 67, 146, 0.12);
+  --lba-shadow-lg:    0 8px 24px rgba(4, 67, 146, 0.16);
+  --lba-shadow-modal: 0 12px 36px rgba(4, 67, 146, 0.24);
+  --lba-shadow-pressed: inset 0 2px 4px rgba(4, 67, 146, 0.20);
+
+  /* === SambaPos_LBA — radii === */
+  --lba-radius-sm:    6px;
+  --lba-radius-md:    10px;
+  --lba-radius-lg:    14px;
+  --lba-radius-pill:  999px;
+
+  /* === SambaPos_LBA — animation === */
+  --lba-anim-fast:    120ms ease;
+  --lba-anim-normal:  220ms cubic-bezier(0.4, 0, 0.2, 1);
+  --lba-anim-slow:    400ms cubic-bezier(0.4, 0, 0.2, 1);
+  --lba-anim-elastic: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* === SambaPos_LBA — touch target sizes (mobile-first) === */
+  --lba-touch-min:       48px;   /* WCAG minimum touch target */
+  --lba-touch-comfort:   56px;   /* comfortable for tablet */
+  --lba-touch-large:     64px;   /* large POS buttons */
+  --lba-touch-xl:        80px;   /* primary POS action */
+
+  /* === SambaPos_LBA — layout dimensions === */
+  --lba-h-header:    56px;
+  --lba-h-footer:    32px;
+  --lba-h-cmdbar:    72px;
+  --lba-sidebar-w:   260px;
+  --lba-sidebar-w-collapsed: 64px;
+
+  /* === SambaPos_LBA — typography === */
+  --lba-font-family:    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                        'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --lba-font-mono:      'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  --lba-fs-xs:    12px;
+  --lba-fs-sm:    13px;
+  --lba-fs-md:    15px;
+  --lba-fs-lg:    17px;
+  --lba-fs-xl:    20px;
+  --lba-fs-2xl:   24px;
+  --lba-fs-3xl:   30px;
+  --lba-fs-4xl:   36px;
+  --lba-fs-5xl:   44px;
+
+  /* === SambaPos_LBA — z-index scale === */
+  --lba-z-base:    1;
+  --lba-z-sticky:  100;
+  --lba-z-overlay: 1000;
+  --lba-z-modal:   10000;
+  --lba-z-toast:   100000;
+
+  /* =====================================================================
+     LEGACY variables (kept for backward compatibility with existing CSS).
+     New components should use --lba-* variables above.
+     ===================================================================== */
+
+  /* === Shell gradient (legacy — use --lba-shell-bg instead) === */
+  --samba-shell-bg: var(--lba-shell-bg);
 
   /* === Surfaces === */
-  --samba-bg-panel:        #F5F5F5;  /* WhiteSmoke */
-  --samba-bg-modal:        #FFFFFF;
+  --samba-bg-panel:        var(--lba-bg-panel);
+  --samba-bg-modal:        var(--lba-bg-elevated);
   --samba-bg-modal-overlay: rgba(0, 0, 0, 0.5);
 
   /* === Button default states === */
@@ -23,94 +153,105 @@
   --samba-bg-button-disabled: #A9A9A9;  /* DarkGray */
 
   /* === Semantic button variants === */
-  --samba-bg-button-success: #008000;  /* Green */
-  --samba-bg-button-danger:  #FF0000;  /* Red */
-  --samba-bg-button-warning: #FFA500;  /* Orange */
-  --samba-bg-button-discount:#800080;  /* Purple */
-  --samba-bg-button-action:  #4169E1;  /* RoyalBlue */
-  --samba-bg-button-info:    #87CEFA;  /* LightSkyBlue */
+  --samba-bg-button-success: var(--lba-success);
+  --samba-bg-button-danger:  var(--lba-danger);
+  --samba-bg-button-warning: var(--lba-warning);
+  --samba-bg-button-discount:#800080;  /* Purple — kept for legacy discount button */
+  --samba-bg-button-action:  var(--lba-accent);
+  --samba-bg-button-info:    var(--lba-blue-400);
 
   /* === Ticket tile colors === */
-  --samba-bg-ticket-tile:    #FFA500;  /* Orange (open ticket) */
+  --samba-bg-ticket-tile:    var(--lba-warning);
   --samba-bg-ticket-tile-hover: #FF8C00;
 
   /* === Table states (EntityDashboardView) === */
   --samba-bg-table-available: #90EE90;  /* LightGreen */
-  --samba-bg-table-occupied:  #00008B;  /* DarkBlue (with white text) */
-  --samba-bg-table-bill:      #FFA500;  /* Orange (Bill Requested) */
-  --samba-bg-table-locked:    #808080;  /* Gray */
-  --samba-bg-table-selected:  #87CEFA;  /* LightSkyBlue */
+  --samba-bg-table-occupied:  var(--lba-blue-900);
+  --samba-bg-table-bill:      var(--lba-warning);
+  --samba-bg-table-locked:    #808080;
+  --samba-bg-table-selected:  var(--lba-blue-200);
 
   /* === Order row states === */
   --samba-bg-order-normal:  transparent;
-  --samba-bg-order-selected:#FFD700;  /* Gold */
-  --samba-bg-order-locked:  #D3D3D3;  /* LightGray */
-  --samba-bg-order-gift:    #FFE4C4;  /* Bisque */
-  --samba-bg-order-void:    #CD5C5C;  /* IndianRed */
-  --samba-bg-order-timer:   #FFE4C4;  /* Bisque */
+  --samba-bg-order-selected: #FFD700;  /* Gold — legacy highlight */
+  --samba-bg-order-locked:  #D3D3D3;
+  --samba-bg-order-gift:    #FFE4C4;
+  --samba-bg-order-void:    #CD5C5C;
+  --samba-bg-order-timer:   #FFE4C4;
 
   /* === Form fields === */
   --samba-bg-input:   #FFFFFF;
-  --samba-bg-note:    #FFFFE0;  /* LightYellow */
-  --samba-bg-info:    #E0FFFF;  /* LightCyan */
+  --samba-bg-note:    var(--lba-warning-bg);
+  --samba-bg-info:    var(--lba-info-bg);
 
   /* === Text colors === */
-  --samba-fg-default:  #000000;
-  --samba-fg-inverse:  #FFFFFF;
+  --samba-fg-default:  var(--lba-fg-default);
+  --samba-fg-inverse:  var(--lba-fg-inverse);
   --samba-fg-disabled: #A9A9A9;
-  --samba-fg-amount:   #9370DB;  /* MediumPurple — ticket total */
-  --samba-fg-error:    #DC143C;  /* Crimson */
-  --samba-fg-muted:    #808080;
+  --samba-fg-amount:   var(--lba-fg-amount);
+  --samba-fg-error:    var(--lba-fg-error);
+  --samba-fg-muted:    var(--lba-fg-muted);
 
   /* === Borders === */
-  --samba-border-default: #808080;
-  --samba-border-light:   #DCDCDC;
+  --samba-border-default: var(--lba-border-default);
+  --samba-border-light:   var(--lba-border-light);
   --samba-border-input:   #A9A9A9;
 
   /* === Shadows & glows === */
-  --samba-shadow-glow:    0 0 8px rgba(146, 156, 252, 0.3);
-  --samba-shadow-pressed: inset 0 1px 3px rgba(0, 0, 0, 0.6);
-  --samba-shadow-modal:   0 4px 20px rgba(0, 0, 0, 0.3);
+  --samba-shadow-glow:    0 0 8px rgba(33, 150, 243, 0.3);
+  --samba-shadow-pressed: var(--lba-shadow-pressed);
+  --samba-shadow-modal:   var(--lba-shadow-modal);
 
   /* === Radii === */
-  --samba-radius-button: 4px;
-  --samba-radius-panel:  6px;
-  --samba-radius-modal:  8px;
-  --samba-radius-tile:   6px;
+  --samba-radius-button: var(--lba-radius-sm);
+  --samba-radius-panel:  var(--lba-radius-md);
+  --samba-radius-modal:  var(--lba-radius-lg);
+  --samba-radius-tile:   var(--lba-radius-md);
 
   /* === Animation timings === */
-  --samba-anim-fast:   100ms ease;
-  --samba-anim-normal: 200ms ease;
-  --samba-anim-slow:   500ms ease;
-  --samba-anim-elastic: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --samba-anim-fast:   var(--lba-anim-fast);
+  --samba-anim-normal: var(--lba-anim-normal);
+  --samba-anim-slow:   var(--lba-anim-slow);
+  --samba-anim-elastic: var(--lba-anim-elastic);
 
   /* === Layout dimensions (touch-friendly) === */
-  --samba-h-header:    50px;
-  --samba-h-footer:    30px;
+  --samba-h-header:    var(--lba-h-header);
+  --samba-h-footer:    var(--lba-h-footer);
   --samba-h-ticketinfo: 25px;
-  --samba-h-cmd-bar:   65px;
+  --samba-h-cmd-bar:   var(--lba-h-cmdbar);
   --samba-h-openticket: 90px;
   --samba-w-openticket: 180px;
 
-  --samba-min-btn-h:   60px;
+  --samba-min-btn-h:   var(--lba-touch-min);
   --samba-min-btn-w:   80px;
   --samba-pad-btn:     0 12px;
-  --samba-gap-btn:     3px;
+  --samba-gap-btn:     4px;
 
   /* === Typography sizes === */
-  --samba-fs-xs:    11px;
-  --samba-fs-sm:    12px;
-  --samba-fs-md:    14px;
-  --samba-fs-lg:    16px;
-  --samba-fs-xl:    20px;
-  --samba-fs-2xl:   24px;
-  --samba-fs-3xl:   30px;
-  --samba-fs-4xl:   35px;
-  --samba-fs-5xl:   40px;
+  --samba-fs-xs:    var(--lba-fs-xs);
+  --samba-fs-sm:    var(--lba-fs-sm);
+  --samba-fs-md:    var(--lba-fs-md);
+  --samba-fs-lg:    var(--lba-fs-lg);
+  --samba-fs-xl:    var(--lba-fs-xl);
+  --samba-fs-2xl:   var(--lba-fs-2xl);
+  --samba-fs-3xl:   var(--lba-fs-3xl);
+  --samba-fs-4xl:   var(--lba-fs-4xl);
+  --samba-fs-5xl:   var(--lba-fs-5xl);
 
   /* === Z-index scale === */
-  --z-base:    1;
-  --z-overlay: 100;
-  --z-modal:   1000;
-  --z-toast:   10000;
+  --z-base:    var(--lba-z-base);
+  --z-overlay: var(--lba-z-overlay);
+  --z-modal:   var(--lba-z-modal);
+  --z-toast:   var(--lba-z-toast);
+}
+
+/* =====================================================================
+   Responsive breakpoints (mobile-first)
+   ===================================================================== */
+:root {
+  --bp-sm:  600px;    /* small tablets, large phones landscape */
+  --bp-md:  768px;    /* tablets portrait */
+  --bp-lg:  1024px;   /* tablets landscape, small laptops */
+  --bp-xl:  1280px;   /* desktops */
+  --bp-2xl: 1920px;   /* large displays */
 }

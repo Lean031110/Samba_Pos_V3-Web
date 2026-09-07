@@ -2,9 +2,19 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#044392">
+  <meta name="description" content="SambaPos_LBA — POS web moderno para restaurantes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>SambaPOS V3 — Web Clone</title>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SambaPos_LBA">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192-maskable.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512-maskable.png">
+  <title>SambaPos_LBA</title>
 
   <!-- Font Awesome 6 Free (vendored locally for offline/LAN support) -->
   <link rel="stylesheet" href="/vendor/css/fontawesome.min.css">
@@ -14,6 +24,7 @@
   <link rel="stylesheet" href="/css/variables.css">
   <link rel="stylesheet" href="/css/layout.css">
   <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/mobile.css">
 </head>
 <body>
   <div id="app">
@@ -48,7 +59,7 @@
       <section class="view view-login" id="view-login">
         <div class="login-card no-select">
           <div class="login-card__title">
-            <i class="fa-solid fa-cash-register"></i> SambaPOS V3 — Login
+            <i class="fa-solid fa-cash-register"></i> SambaPos_LBA
           </div>
           <input type="text" class="login-card__input" id="login-username"
                  placeholder="Username" value="Administrator" autocomplete="off">
@@ -183,7 +194,7 @@
     <!-- Footer                                                       -->
     <!-- =========================================================== -->
     <footer class="app-footer no-select">
-      <span>SambaPOS V3 Web Clone · Terminal: <strong>Server</strong></span>
+      <span>SambaPos_LBA · Terminal: <strong>Server</strong></span>
       <span id="footer-status">Ready</span>
     </footer>
 
@@ -206,6 +217,7 @@
   <!-- =========================================================== -->
   <script src="/js/components/flex-button.js"></script>
   <script src="/js/services/api.js"></script>
+  <script src="/js/services/pwa.js"></script>
   <script src="/js/store/store.js"></script>
   <script src="/js/store/websocket-client.js"></script>
   <script src="/js/views/login.js"></script>
@@ -214,5 +226,30 @@
   <script src="/js/views/payment.js"></script>
   <script src="/js/views/kitchen.js"></script>
   <script src="/js/app.js"></script>
+
+  <!-- PWA: register Service Worker (offline shell + installable) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker
+          .register('/sw.js', { scope: '/' })
+          .then((reg) => {
+            console.log('[PWA] Service Worker registered:', reg.scope);
+            // Listen for updates.
+            reg.addEventListener('updatefound', () => {
+              const nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', () => {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  // New version available — notify the app.
+                  window.dispatchEvent(new CustomEvent('sw:update-available'));
+                }
+              });
+            });
+          })
+          .catch((err) => console.warn('[PWA] SW registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>

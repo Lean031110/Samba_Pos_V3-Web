@@ -1,8 +1,15 @@
 // =====================================================================
 // websocket-client.js — Socket.io client with JWT auth + room management
 // =====================================================================
-// Per FASE 8: WebSocket must authenticate with JWT, join role-based
+// FASE 8: WebSocket must authenticate with JWT, join role-based
 // rooms, and recover missed events on reconnect.
+//
+// FASE 4 enhancements:
+//   - Heartbeat (ping) every 25s to detect stale connections.
+//   - Offline/online detection via navigator.onLine.
+//   - Visual indicator: green (online), orange (reconnecting), red (offline).
+//   - Reconnect with exponential backoff + jitter (delegated to socket.io).
+//   - Auto-resync after reconnect (server-side state snapshot).
 // =====================================================================
 
 (function loadSocketIo(cb) {
@@ -45,17 +52,65 @@ function initWebSocket() {
 
   function setConnState(state, label) {
     if (!connIndicator) return;
-    connIndicator.classList.remove('is-connected', 'is-reconnecting');
-    if (state === 'connected') connIndicator.classList.add('is-connected');
-    else if (state === 'reconnecting') connIndicator.classList.add('is-reconnecting');
-    connLabel.textContent = label;
-    window.store.setState({ wsConnected: state === 'connected' });
+    connIndicator.classList.remove('conn-indicator--online', 'conn-indicator--offline', 'is-connected', 'is-reconnecting');
+    if (state === 'connected') {
+      connIndicator.classList.add('is-connected', 'conn-indicator--online');
+    } else if (state === 'reconnecting') {
+      connIndicator.classList.add('is-reconnecting');
+    } else if (state === 'offline') {
+      connIndicator.classList.add('conn-indicator--offline');
+    }
+    if (connLabel) connLabel.textContent = label;
+    if (window.store) window.store.setState({ wsConnected: state === 'connected' });
   }
+
+  // === Heartbeat: detect stale connections ===
+  // Send a ping every 25s. If no pong within 10s, force-disconnect
+  // so socket.io triggers a reconnect.
+  let heartbeatTimer = null;
+  let pongTimer = null;
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (socket.connected) {
+        const t = Date.now();
+        socket.emit('ping', t, (ack) => {
+          // Server acked via acknowledgement callback
+          if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+        });
+        // If no ack in 10s, force reconnect
+        pongTimer = setTimeout(() => {
+          console.warn('[ws] heartbeat timeout — forcing reconnect');
+          socket.disconnect();
+          socket.connect();
+        }, 10000);
+      }
+    }, 25000);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+  }
+
+  // === Browser online/offline detection ===
+  window.addEventListener('online', () => {
+    console.log('[ws] browser online — attempting reconnect');
+    if (!socket.connected) socket.connect();
+    setConnState(socket.connected ? 'connected' : 'reconnecting',
+                 socket.connected ? 'Connected' : 'Reconnecting…');
+  });
+  window.addEventListener('offline', () => {
+    console.log('[ws] browser offline');
+    setConnState('offline', 'Offline');
+  });
 
   // === Connection lifecycle ===
   socket.on('connect', () => {
     setConnState('connected', 'Connected');
     console.log('[ws] connected');
+    startHeartbeat();
 
     // Join role-based rooms based on user info
     const user = window.store.state.currentUser;
@@ -76,6 +131,7 @@ function initWebSocket() {
   socket.on('disconnect', () => {
     setConnState('reconnecting', 'Reconnecting…');
     console.warn('[ws] disconnected');
+    stopHeartbeat();
   });
   socket.on('connect_error', (err) => {
     setConnState('reconnecting', 'Auth error');
@@ -86,9 +142,13 @@ function initWebSocket() {
       if (window.App) window.App.navigate('login');
     }
   });
-  socket.on('reconnect_attempt', (n) => { setConnState('reconnecting', `Reconnect #${n}…`); });
+  socket.on('reconnect_attempt', (n) => {
+    setConnState('reconnecting', `Reconnect #${n}…`);
+    console.log('[ws] reconnect attempt #' + n);
+  });
   socket.on('reconnect', (n) => {
     setConnState('connected', `Reconnected (#${n})`);
+    console.log('[ws] reconnected after ' + n + ' attempts');
     // Re-join rooms after reconnect
     const user = window.store.state.currentUser;
     if (user) {
@@ -97,6 +157,10 @@ function initWebSocket() {
     }
     // Request state resync
     socket.emit('resync', {});
+
+    if (window.App?.toast) {
+      window.App.toast('Conexión restablecida', 'success');
+    }
   });
 
   // === Resync response: server sends current state snapshot ===
