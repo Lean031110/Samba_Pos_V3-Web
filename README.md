@@ -2,29 +2,40 @@
 
 # SambaPos_LBA
 
-**Sistema POS web profesional — clon funcional de SambaPOS V3**
+**Sistema POS web moderno, táctil, instalable y offline-capable para restaurantes**  
 Construido con Node.js + Express + Knex + SQLite + Socket.io + Vanilla JS
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Lean031110/Samba_Pos_V3-Web/ci.yml?branch=main&label=CI)](https://github.com/Lean031110/Samba_Pos_V3-Web/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-20-green.svg)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-165%2F165-brightgreen.svg)](#pruebas)
+[![Tests](https://img.shields.io/badge/tests-244%2F244-brightgreen.svg)](#pruebas)
 [![Vulnerabilities](https://img.shields.io/badge/vulnerabilities-0-brightgreen.svg)](#seguridad)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](./CHANGELOG.md)
+[![PWA](https://img.shields.io/badge/PWA-installable-blue.svg)](#pwa--android)
 
 </div>
 
 ---
 
-SambaPos_LBA es una reimplementación web de **SambaPOS V3** (la versión de
-escritorio WPF/C# original de *emreeren*). Conserva el modelo de dominio
-(tickets, órdenes, cálculos, ledger de doble entrada, RBAC con 26 permisos,
-KDS multi-estación, inventario con recetas, impresión ESC/POS) pero lo
-ejecuta sobre un stack moderno y ligero: Node.js + Express + Knex + SQLite
-+ Socket.io + Vanilla JS.
+SambaPos_LBA es un **POS web profesional** construido sobre la referencia
+funcional de **SambaPOS V3** (la versión de escritorio WPF/C# original de
+*emreeren*), pero con una arquitectura web moderna superior: **mobile-first**,
+**PWA instalable**, **tiempo real**, **offline tolerante**, **impresión
+real ESC/POS**, **inventario con recetas**, **KDS multi-estación**, **RBAC**
+y **auditoría completa**.
 
 > **No es un fork del código WPF.** El código fuente original de SambaPOS V3
 > se usó únicamente como referencia funcional para reimplementar las reglas
-> de negocio. Ver [Créditos](#créditos).
+> de negocio en una arquitectura web moderna. Ver [Créditos](#créditos).
+
+### Identidad visual
+
+La interfaz utiliza una **familia de tonalidades azules** como color de
+marca (azul oscuro, azul profundo, azul medio, azul brillante, azul claro),
+con colores neutros para equilibrio y colores semánticos exclusivamente
+para estados (error, alerta, éxito, bloqueo). La UI está diseñada **primero
+para tablets Android y pantallas táctiles**, con botones grandes y
+tolerancia a pérdida de red temporal.
 
 ---
 
@@ -60,6 +71,7 @@ ejecuta sobre un stack moderno y ligero: Node.js + Express + Knex + SQLite
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Pruebas](#pruebas)
 - [Seguridad](#seguridad)
+- [PWA / Android](#pwa--android)
 - [Despliegue con Docker](#despliegue-con-docker)
 - [Roadmap](#roadmap)
 - [Documentación](#documentación)
@@ -74,21 +86,26 @@ ejecuta sobre un stack moderno y ligero: Node.js + Express + Knex + SQLite
 
 - **POS completo** — tickets, órdenes, pagos, cálculos, descuentos, regalos,
   *voids*, *refunds*, *splits* y *merges*.
+- **Mobile-first** — diseñado primero para tablets Android (7"–10"+),
+  teléfonos y pantallas táctiles. Soporta portrait y landscape.
 - **KDS multi-estación** con routing, *state machine* de órdenes y propagación
   de *voids* entre estaciones.
-- **Inventario y recetas** con deducción transaccional al cerrar el ticket.
-- **Impresión real ESC/POS** con transporte TCP, *retry* exponencial y *fallback*.
-- **WebSocket** con autenticación JWT, *rooms* por rol y *resync* tras
-  reconexión.
-- **RBAC granular** con 26 permisos.
-- **Auditoría completa** de acciones sensibles (creación/edición de productos,
-  cambio de estado de mesas, etc.).
-- **Idempotency protection** en operaciones críticas.
+- **Inventario y recetas** con deducción transaccional al cerrar el ticket,
+  costo de receta, margen y precio sugerido.
+- **Impresión real ESC/POS** con transporte TCP, *retry* exponencial y
+  *fallback*. Cola persistente con idempotency keys.
+- **WebSocket** con autenticación JWT, *rooms* por rol, *reconnect* con
+  *exponential backoff* + *heartbeat* y *resync* tras reconexión.
+- **RBAC granular** con 26 permisos y *audit log* en acciones sensibles.
+- **Idempotency protection** en operaciones críticas (pago, void, refund,
+  cierre, payout).
+- **PWA instalable** — `manifest.webmanifest`, *service worker* y soporte
+  *offline shell* para sobrevivir pérdida temporal de red.
 - **Migraciones Knex** + *seed* transaccional.
 - **Docker multi-stage** con endpoints de *health* y *readiness*.
 - **CI/CD** con *gitleaks* (secret scan) + *npm audit* gate antes de correr
   los tests.
-- **Suite de pruebas: 165 tests** (138 unit + 27 E2E).
+- **Suite de pruebas: 244 tests** (217 unit + 27 E2E).
 - **Seguridad**: JWT obligatorio (sin *defaults*), bcrypt, *rate-limiting* en
   login, CSP estricto con *helmet*, CORS estricto en producción.
 
@@ -266,7 +283,7 @@ bash scripts/run-all-tests.sh
 ## Estructura del proyecto
 
 ```
-Samba_Pos_V3-Web/
+Samba_Pos_V3-Web/               # Repo root (no samba-web-clone/ wrapper)
 ├── .env.example                # Template de variables de entorno
 ├── .gitleaks.toml              # Config de secret scan en CI
 ├── .github/workflows/ci.yml   # Pipeline: gitleaks + npm audit + tests + docker
@@ -292,21 +309,29 @@ Samba_Pos_V3-Web/
 │   │   ├── api/                # Capa de presentación (Express)
 │   │   │   ├── server.js
 │   │   │   ├── routes/         # auth, tickets, products, tables, kitchen,
-│   │   │   │                    # inventory, printers, config
+│   │   │   │                    # inventory, printers, config, customers,
+│   │   │   │                    # cash-sessions, work-periods
 │   │   │   ├── services/       # TicketService, KitchenService,
-│   │   │   │                    # InventoryService, PrinterManager
+│   │   │   │                    # InventoryService, PrinterManager,
+│   │   │   │                    # CashSessionService, CustomerService
 │   │   │   └── middleware/     # auth, rbac, auditLog, schemas (Zod),
-│   │   │                        # logger, errorHandler
+│   │   │                        # idempotency, logger, errorHandler
 │   │   ├── application/
 │   │   │   └── eventBus.js     # Pub/sub interno (emula PRISM EventAggregator)
 │   │   ├── domain/            # Puro, sin dependencias externas
 │   │   │   ├── Ticket.js
+│   │   │   ├── TicketStateMachine.js   # Transiciones formales (open→closed→void)
 │   │   │   ├── OrderBuilder.js
 │   │   │   ├── TicketBuilder.js
-│   │   │   ├── CalculationEngine.js   # Único punto de entrada a decimal.js
 │   │   │   ├── TicketRecalculator.js
+│   │   │   ├── CalculationEngine.js   # Único punto de entrada a decimal.js
 │   │   │   ├── AccountTransaction.js
-│   │   │   └── AccountTransactionDocument.js
+│   │   │   ├── AccountTransactionDocument.js
+│   │   │   ├── CashSession.js         # Sesión de caja (open/close/payout)
+│   │   │   ├── WorkPeriod.js          # Jornada de trabajo
+│   │   │   ├── Customer.js
+│   │   │   ├── PrintJob.js            # Idempotent print job abstraction
+│   │   │   └── Notification.js
 │   │   └── infrastructure/
 │   │       ├── db/             # Knex config + db.js + migraciones + seeds
 │   │       └── repositories/   # TicketRepository, ProductRepository, TableRepository
@@ -316,8 +341,10 @@ Samba_Pos_V3-Web/
 │       ├── kds-verification.test.js       # 49 tests
 │       ├── inventory-verification.test.js # 13 tests
 │       ├── concurrency-verification.test.js # 8 tests
-│       ├── security-verification.test.js  # 21 tests (CORS, auth bypass, fuzzing)
-│       └── e2e/                            # Playwright (27 tests)
+│       ├── idempotency-verification.test.js # 7 tests
+│       ├── domain-verification.test.js   # 72 tests (state machine, ledger)
+│       ├── security-verification.test.js # 21 tests (CORS, auth bypass, fuzzing)
+│       └── e2e/                           # Playwright (27 tests)
 │           ├── api-isolated.spec.js
 │           ├── ui-isolated.spec.js
 │           ├── websocket-flow.spec.js
@@ -326,6 +353,8 @@ Samba_Pos_V3-Web/
 ├── docs/                       # Documentación por módulo
 │   ├── BASELINE_REPORT.md
 │   ├── PHASE1_REPORT.md
+│   ├── PHASE2_REPORT.md
+│   ├── PHASE3_REPORT.md
 │   ├── PRODUCTION.md
 │   ├── KITCHEN.md
 │   ├── INVENTORY.md
@@ -333,16 +362,19 @@ Samba_Pos_V3-Web/
 │   ├── RBAC.md
 │   ├── BACKUP.md
 │   ├── OFFLINE.md
+│   ├── worklog-history.md     # Worklog histórico de auditoría forense
 │   └── screenshots/            # Capturas de pantalla referenciadas arriba
 │
 ├── frontend/
 │   ├── index.html
-│   ├── css/                    # variables, reset, layout, components
+│   ├── manifest.webmanifest    # PWA manifest (display: standalone, azul)
+│   ├── sw.js                   # Service Worker (offline shell)
+│   ├── css/                    # variables (azul), reset, layout, components
 │   ├── js/
 │   │   ├── app.js
 │   │   ├── views/              # login, dashboard, pos, payment, kitchen
 │   │   ├── services/           # api.js
-│   │   ├── store/              # store.js, websocket-client.js
+│   │   ├── store/              # store.js, websocket-client.js (reconnect)
 │   │   └── components/         # flex-button.js (Web Component)
 │   └── vendor/                 # Font Awesome 6 + socket.io client
 │
@@ -354,7 +386,7 @@ Samba_Pos_V3-Web/
 
 ## Pruebas
 
-El proyecto mantiene **165 tests passing** distribuidos en tres capas:
+El proyecto mantiene **244 tests passing** distribuidos en tres capas:
 
 | Capa | Suite | # Tests | Cómo correrla |
 |------|-------|:---:|---------------|
@@ -362,19 +394,23 @@ El proyecto mantiene **165 tests passing** distribuidos en tres capas:
 | Unit / Integration | `kds-verification.test.js` | 49 | `node --test tests/kds-verification.test.js` |
 | Unit / Integration | `inventory-verification.test.js` | 13 | `node --test tests/inventory-verification.test.js` |
 | Unit / Integration | `concurrency-verification.test.js` | 8 | `node --test tests/concurrency-verification.test.js` |
+| Unit / Integration | `idempotency-verification.test.js` | 7 | `node --test tests/idempotency-verification.test.js` |
+| Unit / Integration | `domain-verification.test.js` | 72 | `node --test tests/domain-verification.test.js` |
 | **Security** | `security-verification.test.js` | 21 | `node --test tests/security-verification.test.js` |
 | **E2E (Playwright)** | `api-isolated.spec.js` + `ui-isolated.spec.js` + `websocket-flow.spec.js` | 27 | `npm run test:playwright` |
-| **Total** | | **165** | |
+| **Total** | | **244** | |
 
 ### Estrategia de tests
 
-- **Unit tests (`node --test`)** — 138 tests en 5 suites. Cubren el dominio
-  (cálculos, ledger de doble entrada, auto-reversal), los servicios de
-  aplicación, las rutas REST y la concurrencia. Usan `supertest` + `node:assert`
-  sin dependencias externas pesadas.
+- **Unit tests (`node --test`)** — 217 tests en 7 suites. Cubren el dominio
+  (cálculos, ledger de doble entrada, auto-reversal, state machine), los
+  servicios de aplicación, las rutas REST, la concurrencia y la
+  idempotencia. Usan `supertest` + `node:assert` sin dependencias externas
+  pesadas.
 - **E2E tests (Playwright + Chromium)** — 27 tests en 3 suites. Cubren los
   flujos completos de UI (login → dashboard → POS → nota → pago → cierre),
-  la API aislada y los flujos de WebSocket multi-cliente.
+  la API aislada y los flujos de WebSocket multi-cliente (incluye
+  reconexión).
 - **Security tests** — 21 tests específicos de *hardening*:
   - CORS *hardening* (3): verifica que el server aborta en producción si
     `CORS_ORIGIN='*'`.
@@ -432,6 +468,29 @@ completo del endurecimiento de FASE 1.
 
 ---
 
+## PWA / Android
+
+SambaPos_LBA es una **PWA instalable**. En Android, desktop y tablets
+compatibles, el usuario puede "Agregar a pantalla de inicio" y obtener una
+experiencia tipo aplicación nativa (sin barra de navegador, standalone,
+orientación controlada).
+
+La instalación requiere:
+- `manifest.webmanifest` con `display: standalone` y `theme_color: #044392`.
+- *Service Worker* registrado para el *offline shell*.
+- Íconos 192/512 (y variantes `maskable` para Android).
+- HTTPS en producción (requisito del navegador).
+
+> **Android nativo (futuro):** cuando se requiera acceso a hardware que el
+> navegador no controla (impresoras USB, escáneres, etc.), el plan es envolver
+> la PWA con **Capacitor**, conservando la misma API y reglas de dominio. Sin
+> duplicar lógica de negocio.
+
+Ver [`docs/PWA.md`](./docs/PWA.md) para la guía de instalación y el estado
+de implementación.
+
+---
+
 ## Despliegue con Docker
 
 El `Dockerfile` es **multi-stage** (builder con Python + make + g++ para
@@ -463,24 +522,35 @@ El volumen `samba-data` persiste `/app/data/samba.db` entre reinicios.
 
 ## Roadmap
 
-El proyecto sigue un plan de 18 fases definido en el *prompt maestro*.
+El proyecto sigue un plan de fases definido en el *prompt maestro*.
 Estado actual:
 
 | Fase | Estado | Descripción |
 |------|:---:|-------------|
 | FASE 0 | ✅ | Auditoría forense del repositorio original |
-| FASE 1 | ✅ | Seguridad y limpieza (este release) |
-| FASE 2 | 🚧 | Dominio: agregados faltantes, *idempotency keys*, *state machine* formal |
-| FASE 3 | ⏳ | Casos de uso avanzados (splits complejos, voids retroactivos) |
-| FASE 4 | ⏳ | Refactor de aplicación y APIs |
-| FASE 5 | ⏳ | Módulo de reportes |
-| FASE 6 | ⏳ | Panel de administración UI |
-| FASE 7 | ⏳ | Limpieza de mocks y deuda técnica |
-| FASE 8 | ⏳ | Auditoría y observabilidad |
-| FASE 9–18 | ⏳ | PWA, Web Push, Android, PostgreSQL, admin panel, etc. |
+| FASE 1 | ✅ | Seguridad y limpieza (RBAC, Zod, gitleaks, CORS hardening) |
+| FASE 2 | ✅ | Dominio: agregados, *idempotency keys*, *state machine* formal |
+| FASE 3 | ✅ | WorkPeriod, CashSession, Customer, idempotency middleware |
+| FASE 4 | 🚧 | Reorganización repositorio + identidad azul + PWA + mobile-first |
+| FASE 5 | ⏳ | Recetas admin + costo/margen + integración inventario |
+| FASE 6 | ⏳ | KDS: sonido, prioridad, filtros, reconexión automática |
+| FASE 7 | ⏳ | Impresión: cola persistente, fallback printer, monitor |
+| FASE 8 | ⏳ | WebSocket: reconnect con backoff + heartbeat + resync |
+| FASE 9 | ⏳ | Web Push + Service Worker notifications |
+| FASE 10 | ⏳ | PWA completa + install prompt + offline shell |
+| FASE 11 | ⏳ | Offline + outbox + conflict policy |
+| FASE 12 | ⏳ | PostgreSQL production target |
+| FASE 13 | ⏳ | Caja: work period + cash session completo |
+| FASE 14 | ⏳ | Reportes (ventas, productos, categorías, cajas, auditoría) |
+| FASE 15 | ⏳ | Android (Capacitor wrapper) |
+| FASE 16 | ⏳ | UI final azul + tablet first + touch first |
+| FASE 17 | ⏳ | Testing final (visual, failure, security) |
+| FASE 18 | ⏳ | Producción: backups, restore, observabilidad, deployment guide |
 
-Ver [`docs/BASELINE_REPORT.md`](./docs/BASELINE_REPORT.md) y
-[`docs/PHASE1_REPORT.md`](./docs/PHASE1_REPORT.md) para el detalle.
+Ver [`docs/BASELINE_REPORT.md`](./docs/BASELINE_REPORT.md),
+[`docs/PHASE1_REPORT.md`](./docs/PHASE1_REPORT.md),
+[`docs/PHASE2_REPORT.md`](./docs/PHASE2_REPORT.md) y
+[`docs/PHASE3_REPORT.md`](./docs/PHASE3_REPORT.md) para el detalle de cada fase.
 
 ---
 
@@ -546,8 +616,10 @@ dominio.
 **En desarrollo activo.**
 
 - ✅ **FASE 0** — Auditoría forense (completa)
-- ✅ **FASE 1** — Seguridad y limpieza (completa, 165/165 tests, 0 vulns)
-- 🚧 **FASE 2** — Dominio (en progreso)
+- ✅ **FASE 1** — Seguridad y limpieza (completa, 0 vulns, 0 leaks)
+- ✅ **FASE 2** — Dominio: agregados + state machine formal (completa, 237/237 tests)
+- ✅ **FASE 3** — WorkPeriod, CashSession, Customer, idempotency middleware (completa, 244/244 tests)
+- 🚧 **FASE 4** — Reorganización repositorio + identidad azul + PWA + mobile-first (en progreso)
 
 Última actualización: 2026-09-07 ·
-[v0.4.0](./CHANGELOG.md#unreleased)
+[v0.4.0](./CHANGELOG.md#v040)
