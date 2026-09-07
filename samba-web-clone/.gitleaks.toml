@@ -1,0 +1,36 @@
+# =====================================================================
+# Gitleaks configuration — SambaPos_LBA
+# =====================================================================
+# Scans for committed secrets: API keys, tokens, passwords, private keys.
+# Runs in CI on every push and PR. Locally:
+#   gitleaks detect --source . --config .gitleaks.toml --no-banner
+# =====================================================================
+
+title = "SambaPos_LBA gitleaks config"
+
+[extend]
+useDefault = true
+
+# Allowlist (single map, not array) — gitleaks v8 format.
+# Each rule path/regex below is allowed (NOT flagged).
+[allowlist]
+description = "Combined allowlist for templates, test secrets, bcrypt hashes, docs"
+paths = [
+  '''^\.env\.example$''',
+  '''^samba-web-clone/\.env\.example$''',
+  '''^\.github/workflows/ci\.yml$''',
+  '''^backend/playwright\.config\.js$''',
+  '''^backend/tests/.*\.spec\.js$''',
+  '''^backend/tests/.*\.test\.js$''',
+  '''^docs/.*\.md$''',
+  '''^README\.md$''',
+  '''^analysis/.*\.md$''',
+]
+regexes = [
+  '''test-secret-32-chars-min!!''',
+  '''ci-test-secret-do-not-use-in-production-32chars''',
+  '''playwright-test-secret-32-chars-min!!''',
+  '''prod-secret-32-chars-min-please!''',
+  '''\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}''',
+  '''change-me-to-a-32-char-min-secret-please''',
+]

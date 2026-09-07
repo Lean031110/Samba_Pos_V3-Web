@@ -4,14 +4,15 @@
 # Runs on every push to main and on every PR.
 #
 # Pipeline stages:
-#   1. install      — npm ci (cached)
-#   2. lint         — syntax + style check
-#   3. migrations   — run via programmatic script (knex CLI breaks on env-based config)
-#   4. unit tests   — integration (47) + KDS (49) + inventory (13) + concurrency (8)
-#   5. e2e tests    — Playwright (27 tests, failOnFlakyTests=true, --repeat-each=2)
+#   0. security   — gitleaks secret scan + npm audit (0 vulnerabilities)
+#   1. install    — npm ci (cached)
+#   2. lint       — syntax + style check
+#   3. migrations — run via programmatic script (knex CLI breaks on env-based config)
+#   4. unit tests — integration (47) + KDS (49) + inventory (13) + concurrency (8) + security (21)
+#   5. e2e tests  — Playwright (27 tests, failOnFlakyTests=true, --repeat-each=2)
 #   6. docker build — multi-stage image sanity check
 #
-# Total: 144 unit + 27 e2e = 171 tests must pass for green build.
+# Total: 165 unit + 27 e2e = 192 tests must pass for green build.
 # =====================================================================
 
 name: CI
@@ -28,10 +29,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  security:
+    name: Security (gitleaks + npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for secret scan
+
+      - name: Gitleaks — scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - name: Setup Node.js for npm audit
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: npm audit (must be 0 vulnerabilities)
+        working-directory: backend
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=low
+          # Fail the job if any vulnerabilities are found
+          if npm audit --json | grep -q '"vulnerabilities":{}'; then
+            echo "OK: 0 vulnerabilities"
+          else
+            echo "FAIL: vulnerabilities found"
+            npm audit
+            exit 1
+          fi
+
   test:
     name: Tests (unit + e2e)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: security  # fail fast on security issues
 
     env:
       JWT_SECRET: ci-test-secret-do-not-use-in-production-32chars
