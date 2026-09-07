@@ -217,10 +217,13 @@ class TicketService {
       throw new ValidationError('amount must be a positive number');
     }
 
-    // Idempotency: check IdempotencyKeys table if key provided
+    // Idempotency: check IdempotencyKeys table if key provided.
+    // The idempotency middleware also writes to this table, so we only return
+    // the cached response if ResponseBody is non-null (i.e. the previous
+    // request actually completed successfully).
     if (data.idempotencyKey) {
       const existing = await db('IdempotencyKeys').where({ Key: data.idempotencyKey }).first();
-      if (existing) {
+      if (existing && existing.ResponseBody) {
         // Return the cached response instead of re-processing
         return JSON.parse(existing.ResponseBody);
       }
@@ -289,18 +292,10 @@ class TicketService {
     await ticketRepo.saveTicket(ticket);
     const result = await ticketRepo.getTicketById(ticketId);
 
-    // Store idempotency key if provided
-    if (data.idempotencyKey) {
-      await db('IdempotencyKeys').insert({
-        Key: data.idempotencyKey,
-        UserId: user.userId,
-        Endpoint: `POST /api/tickets/${ticketId}/payments`,
-        RequestBody: JSON.stringify(data).slice(0, 5000),
-        ResponseStatus: 200,
-        ResponseBody: JSON.stringify({ data: result }).slice(0, 10000),
-        ExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),  // 24h
-      }).catch(err => console.error('[idempotency] Failed to store key:', err.message));
-    }
+    // Note: IdempotencyKey storage is handled by the idempotency middleware
+    // (backend/src/api/middleware/idempotency.js) using a generic endpoint
+    // template 'POST /api/tickets/:id/payments'. We do NOT insert here to
+    // avoid duplicate key conflicts when the middleware already saved it.
 
     return result;
   }

@@ -18,6 +18,7 @@ const { TicketServiceExtended } = require('../services/TicketServiceExtended');
 const { ValidationError } = require('../middleware/errorHandler');
 const { auditLog } = require('../middleware/auditLog');
 const { requirePermission } = require('../middleware/rbac');
+const { idempotent } = require('../middleware/idempotency');
 const {
   createTicketSchema, addOrderSchema, addCalculationSchema, addPaymentSchema,
   closeTicketSchema, noteSchema, giftSchema, tagsSchema, splitTicketSchema,
@@ -87,8 +88,12 @@ router.post('/:id/calculations', requirePermission('pos.discount'), async (req, 
   } catch (err) { next(err); }
 });
 
-// POST /api/tickets/:id/payments — process payment
-router.post('/:id/payments', requirePermission('pos.payment'), auditLog('payment.process', 'Payment'), async (req, res, next) => {
+// POST /api/tickets/:id/payments — process payment (idempotent)
+router.post('/:id/payments',
+  idempotent('POST /api/tickets/:id/payments'),
+  requirePermission('pos.payment'),
+  auditLog('payment.process', 'Payment'),
+  async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -98,8 +103,12 @@ router.post('/:id/payments', requirePermission('pos.payment'), auditLog('payment
   } catch (err) { next(err); }
 });
 
-// POST /api/tickets/:id/close — close ticket
-router.post('/:id/close', requirePermission('pos.close_ticket'), auditLog('ticket.close', 'Ticket'), async (req, res, next) => {
+// POST /api/tickets/:id/close — close ticket (idempotent)
+router.post('/:id/close',
+  idempotent('POST /api/tickets/:id/close'),
+  requirePermission('pos.close_ticket'),
+  auditLog('ticket.close', 'Ticket'),
+  async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -146,8 +155,12 @@ router.post('/:id/gift', requirePermission('pos.gift'), auditLog('ticket.gift', 
   } catch (err) { next(err); }
 });
 
-// POST /api/tickets/:id/void — void the entire ticket
-router.post('/:id/void', requirePermission('pos.void'), auditLog('ticket.void', 'Ticket'), async (req, res, next) => {
+// POST /api/tickets/:id/void — void the entire ticket (idempotent)
+router.post('/:id/void',
+  idempotent('POST /api/tickets/:id/void'),
+  requirePermission('pos.void'),
+  auditLog('ticket.void', 'Ticket'),
+  async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -178,8 +191,12 @@ router.post('/:id/split', requirePermission('pos.split'), auditLog('ticket.split
   } catch (err) { next(err); }
 });
 
-// POST /api/tickets/:id/refund — refund a closed ticket (in-place reversal)
-router.post('/:id/refund', requirePermission('pos.refund'), auditLog('ticket.refund', 'Ticket'), async (req, res, next) => {
+// POST /api/tickets/:id/refund — refund a closed ticket (idempotent)
+router.post('/:id/refund',
+  idempotent('POST /api/tickets/:id/refund'),
+  requirePermission('pos.refund'),
+  auditLog('ticket.refund', 'Ticket'),
+  async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
