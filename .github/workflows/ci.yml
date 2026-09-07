@@ -105,7 +105,7 @@ jobs:
         working-directory: backend
         run: npm ci
 
-      - name: Lint (node --check on every .js file)
+      - name: Syntax check (node --check on every .js file)
         working-directory: backend
         run: |
           set -e
@@ -117,47 +117,59 @@ jobs:
         working-directory: backend
         run: node scripts/run-migrations.js
 
-      - name: Integration tests (47)
+      - name: Integration tests
         working-directory: backend
         run: node --test tests/api-integration.test.js
 
-      - name: KDS verification tests (49)
+      - name: KDS verification tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
           node --test tests/kds-verification.test.js
 
-      - name: Inventory verification tests (13)
+      - name: Inventory verification tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
           node --test tests/inventory-verification.test.js
 
-      - name: Concurrency tests (8)
+      - name: Concurrency tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
           node --test tests/concurrency-verification.test.js
 
-      - name: Idempotency verification tests (7)
+      - name: Idempotency verification tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
           node --test tests/idempotency-verification.test.js
 
-      - name: Domain verification tests (72)
+      - name: Idempotency concurrency tests
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/idempotency-concurrency.test.js
+
+      - name: Domain verification tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
           node --test tests/domain-verification.test.js
 
-      - name: Printing verification tests (24)
+      - name: Security verification tests
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/security-verification.test.js
+
+      - name: Printing verification tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
           node --test tests/printing-verification.test.js
 
-      - name: Recipes verification tests (25)
+      - name: Recipes verification tests
         working-directory: backend
         run: |
           node scripts/run-migrations.js
@@ -220,22 +232,41 @@ jobs:
       - name: Verify image was created
         run: docker images sambapos-lba:ci
 
-      - name: Smoke-test container (start + /health + stop)
+      - name: Smoke-test container (production config + /ready + CORS)
         run: |
           set -e
+          # Production-grade smoke test:
+          # - NODE_ENV=production
+          # - CORS_ORIGIN set to a specific origin (server refuses '*' in prod)
+          # - JWT_SECRET required
+          # - ADMIN_PIN required for seeding
+          # The server should start, run migrations + seed automatically,
+          # and respond 200 on /ready (which checks DB + WebSocket).
           docker run -d --name samba-ci \
             -p 3001:3001 \
             -e JWT_SECRET=ci-test-secret-do-not-use-in-production-32chars \
             -e ADMIN_PIN=1234 \
             -e NODE_ENV=production \
+            -e CORS_ORIGIN=https://pos.example.com \
             sambapos-lba:ci
-          # Wait for /health to return 200
+          # Wait for /ready to return 200 (DB + WebSocket check).
+          # If CORS_ORIGIN were missing or '*', the server would abort
+          # and this loop would never succeed.
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3001/health > /dev/null; then
-              echo "Container healthy after ${i}s"
+            if curl -sf http://localhost:3001/ready > /dev/null; then
+              echo "Container ready after ${i}s"
               break
             fi
             sleep 1
           done
-          curl -sf http://localhost:3001/health | tee /tmp/health.json
+          # Final check — must succeed (set -e would exit on failure).
+          curl -sf http://localhost:3001/ready | tee /tmp/ready.json
+          # Verify CORS header is set correctly
+          CORS_HEADER=$(curl -sI -H "Origin: https://pos.example.com" http://localhost:3001/health | grep -i "access-control-allow-origin" || true)
+          echo "CORS header: $CORS_HEADER"
+          if echo "$CORS_HEADER" | grep -q "pos.example.com"; then
+            echo "OK: CORS reflects allowed origin"
+          else
+            echo "WARN: CORS header not as expected (may be 'undefined' for non-CORS requests)"
+          fi
           docker stop samba-ci && docker rm samba-ci

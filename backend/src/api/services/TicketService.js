@@ -217,20 +217,17 @@ class TicketService {
       throw new ValidationError('amount must be a positive number');
     }
 
-    // Idempotency: check IdempotencyKeys table if key provided.
-    // The idempotency middleware also writes to this table, so we only return
-    // the cached response if ResponseBody is non-null (i.e. the previous
-    // request actually completed successfully).
-    if (data.idempotencyKey) {
-      const existing = await db('IdempotencyKeys').where({ Key: data.idempotencyKey }).first();
-      if (existing && existing.ResponseBody) {
-        // Return the cached response instead of re-processing
-        return JSON.parse(existing.ResponseBody);
-      }
-    }
+    // Idempotency is now handled centrally by the idempotency middleware
+    // (backend/src/api/middleware/idempotency.js). The middleware uses
+    // atomic INSERT OR IGNORE + composite UNIQUE (Key, Endpoint) to
+    // prevent race conditions. We no longer duplicate that logic here.
+    //
+    // The duplicate-payment check below (30-second window) is kept as a
+    // defense-in-depth measure against double-clicks that don't carry an
+    // idempotency key.
 
-    // Also check for duplicate payment (same amount, same type, same user, within 30s)
-    // This catches double-clicks even without an explicit idempotencyKey
+    // Duplicate payment check (same amount, same type, same user, within 30s)
+    // Catches double-clicks even without an explicit idempotencyKey
     const recentDuplicate = await db('Payments')
       .where({
         TicketId: ticketId,

@@ -1,5 +1,5 @@
 # =====================================================================
-# Dockerfile — SambaPOS V3 Web Clone (production multi-stage)
+# Dockerfile — SambaPos_LBA (production multi-stage)
 # =====================================================================
 # Stage 1: Build (install deps, compile native bindings)
 # Stage 2: Runtime (minimal image, non-root user, no build tools)
@@ -56,16 +56,17 @@ USER samba
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV SAMBA_DB_PATH=/app/data/samba.db
-# JWT_SECRET MUST be set via docker-compose env or -e flag
-# No default — the app refuses to start without it.
+# CORS_ORIGIN MUST be set via docker-compose env or -e flag in production.
+# The server refuses to start without it (see server.js CORS hardening).
+# JWT_SECRET MUST also be set via docker-compose env or -e flag.
+# No defaults — the app refuses to start without them.
 
 EXPOSE 3001
 
-# Healthcheck: verify HTTP + DB
+# Healthcheck: use /ready (checks DB connectivity + WebSocket).
+# /health is a lightweight liveness probe that does NOT check DB,
+# so it would not detect DB outages.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:3001/health || exit 1
+    CMD curl -f http://localhost:3001/ready || exit 1
 
-# Separate commands: migrate, seed, start
-# Use a shell script that runs migrations, then starts the server.
-# Seed must be run explicitly: docker compose exec samba-pos node -e "require('./src/infrastructure/db/seeds/seed.js').seed(require('knex')(require('./src/infrastructure/db/knexfile.js').production))"
 CMD ["node", "src/api/server.js"]

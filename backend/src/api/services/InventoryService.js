@@ -95,6 +95,41 @@ class InventoryService {
   }
 
   // ===================================================================
+  // Unit conversion
+  // ===================================================================
+
+  /**
+   * Convert a quantity from one unit to another using the UnitConversions
+   * table. If no conversion exists, throws ValidationError (incompatible
+   * units). If the units are the same, returns the quantity unchanged.
+   *
+   * The conversion is looked up by (FromUnitId, ToUnitId) and the
+   * quantity is multiplied by Factor. Both directions are seeded
+   * (kg→gr and gr→kg) so callers don't need to worry about direction.
+   *
+   * @param {number} quantity — quantity in fromUnitId
+   * @param {number} fromUnitId — source unit
+   * @param {number} toUnitId — target unit (ingredient's BaseUnitId)
+   * @param {trx} [trx]
+   * @returns {Promise<number>} quantity in toUnitId
+   */
+  async convertQuantity(quantity, fromUnitId, toUnitId, trx = null) {
+    if (fromUnitId === toUnitId) return Number(quantity);
+    const conn = this._conn(trx);
+    const conv = await conn('UnitConversions')
+      .where({ FromUnitId: fromUnitId, ToUnitId: toUnitId })
+      .first();
+    if (!conv) {
+      throw new ValidationError(
+        `No unit conversion from unitId=${fromUnitId} to unitId=${toUnitId}. ` +
+        `Add a row to UnitConversions table.`,
+        { fromUnitId, toUnitId }
+      );
+    }
+    return Number(quantity) * Number(conv.Factor);
+  }
+
+  // ===================================================================
   // Stock operations
   // ===================================================================
 
@@ -251,13 +286,25 @@ class InventoryService {
         const ingredient = await conn('Ingredients').where({ Id: item.IngredientId }).first();
         if (!ingredient) continue;
 
+        // Convert recipe quantity from RecipeItem.UnitId to ingredient.BaseUnitId.
+        // This is CRITICAL: if a recipe says "200 gr of beef" but the ingredient
+        // is stored in kg, we must convert 200 gr → 0.2 kg before deducting.
+        // Without this, we'd deduct 200 kg (1000× wrong).
+        const convertedQty = await this.convertQuantity(
+          Number(item.Quantity),
+          item.UnitId,
+          ingredient.BaseUnitId,
+          trx
+        );
+
         // Calculate quantity to deduct (recipe quantity × order quantity)
-        const deductQty = -(Number(item.Quantity) * Number(order.Quantity));
+        // in the ingredient's base unit.
+        const deductQty = -(convertedQty * Number(order.Quantity));
 
         const result = await this.recordMovement({
           ingredientId: item.IngredientId,
           warehouseId,
-          unitId: item.UnitId,
+          unitId: ingredient.BaseUnitId,  // ← record movement in BASE unit
           movementType: MOVEMENT_TYPES.SALE,
           quantity: deductQty,
           unitCost: ingredient.CostPerUnit,

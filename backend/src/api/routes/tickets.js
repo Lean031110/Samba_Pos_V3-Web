@@ -29,16 +29,16 @@ const router = express.Router();
 const ticketService = new TicketService();
 const ticketServiceExt = new TicketServiceExtended();
 
-// GET /api/tickets — list open tickets
-router.get('/', async (req, res, next) => {
+// GET /api/tickets — list open tickets (requires pos.login)
+router.get('/', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const tickets = await ticketService.getOpenTickets();
     res.json({ data: tickets, count: tickets.length });
   } catch (err) { next(err); }
 });
 
-// GET /api/tickets/:id — get ticket by ID
-router.get('/:id', async (req, res, next) => {
+// GET /api/tickets/:id — get ticket by ID (requires pos.login)
+router.get('/:id', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -90,8 +90,8 @@ router.post('/:id/calculations', requirePermission('pos.discount'), async (req, 
 
 // POST /api/tickets/:id/payments — process payment (idempotent)
 router.post('/:id/payments',
-  idempotent('POST /api/tickets/:id/payments'),
   requirePermission('pos.payment'),
+  idempotent('POST /api/tickets/:id/payments'),
   auditLog('payment.process', 'Payment'),
   async (req, res, next) => {
   try {
@@ -105,8 +105,8 @@ router.post('/:id/payments',
 
 // POST /api/tickets/:id/close — close ticket (idempotent)
 router.post('/:id/close',
-  idempotent('POST /api/tickets/:id/close'),
   requirePermission('pos.close_ticket'),
+  idempotent('POST /api/tickets/:id/close'),
   auditLog('ticket.close', 'Ticket'),
   async (req, res, next) => {
   try {
@@ -118,8 +118,8 @@ router.post('/:id/close',
   } catch (err) { next(err); }
 });
 
-// GET /api/tickets/:id/print — generate print preview
-router.get('/:id/print', async (req, res, next) => {
+// GET /api/tickets/:id/print — generate print preview (requires pos.login)
+router.get('/:id/print', requirePermission('pos.login'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -132,8 +132,8 @@ router.get('/:id/print', async (req, res, next) => {
 // Sprint 5 — Extended endpoints
 // =====================================================================
 
-// POST /api/tickets/:id/note — set ticket note
-router.post('/:id/note', async (req, res, next) => {
+// POST /api/tickets/:id/note — set ticket note (requires pos.add_order)
+router.post('/:id/note', requirePermission('pos.add_order'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -157,8 +157,8 @@ router.post('/:id/gift', requirePermission('pos.gift'), auditLog('ticket.gift', 
 
 // POST /api/tickets/:id/void — void the entire ticket (idempotent)
 router.post('/:id/void',
-  idempotent('POST /api/tickets/:id/void'),
   requirePermission('pos.void'),
+  idempotent('POST /api/tickets/:id/void'),
   auditLog('ticket.void', 'Ticket'),
   async (req, res, next) => {
   try {
@@ -169,8 +169,8 @@ router.post('/:id/void',
   } catch (err) { next(err); }
 });
 
-// POST /api/tickets/:id/tags — set ticket tags
-router.post('/:id/tags', async (req, res, next) => {
+// POST /api/tickets/:id/tags — set ticket tags (requires pos.add_order)
+router.post('/:id/tags', requirePermission('pos.add_order'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
@@ -193,8 +193,8 @@ router.post('/:id/split', requirePermission('pos.split'), auditLog('ticket.split
 
 // POST /api/tickets/:id/refund — refund a closed ticket (idempotent)
 router.post('/:id/refund',
-  idempotent('POST /api/tickets/:id/refund'),
   requirePermission('pos.refund'),
+  idempotent('POST /api/tickets/:id/refund'),
   auditLog('ticket.refund', 'Ticket'),
   async (req, res, next) => {
   try {

@@ -105,8 +105,12 @@ class RecipeService {
   /**
    * Calculate the total cost of a recipe.
    *
-   * cost = sum over RecipeItems of (item.Quantity × ingredient.CostPerUnit)
-   *      + recipe.FixedCost
+   * For each RecipeItem, the quantity is converted from RecipeItem.UnitId
+   * to the ingredient's BaseUnitId using the UnitConversions table.
+   * Only after conversion do we multiply by CostPerUnit (which is in
+   * base-unit currency).
+   *
+   * cost = Σ (convertedQty × ingredient.CostPerUnit) + recipe.FixedCost
    *
    * @param {number} recipeId
    * @param {trx} [trx]
@@ -122,7 +126,9 @@ class RecipeService {
       .join('Ingredients', 'RecipeItems.IngredientId', 'Ingredients.Id')
       .select(
         'RecipeItems.Quantity',
+        'RecipeItems.UnitId as RecipeUnitId',
         'Ingredients.CostPerUnit',
+        'Ingredients.BaseUnitId',
         'Ingredients.Name as IngredientName'
       );
 
@@ -130,7 +136,15 @@ class RecipeService {
     for (const item of items) {
       const qty = Number(item.Quantity || 0);
       const cost = Number(item.CostPerUnit || 0);
-      totalCost += qty * cost;
+      // Convert the recipe quantity from RecipeUnitId to BaseUnitId.
+      // If units are the same, this is a no-op.
+      const convertedQty = await inventoryService.convertQuantity(
+        qty,
+        item.RecipeUnitId,
+        item.BaseUnitId,
+        trx
+      );
+      totalCost += convertedQty * cost;
     }
     totalCost += Number(recipe.FixedCost || 0);
     return Math.round(totalCost * 10000) / 10000;  // 4 decimal places

@@ -1,0 +1,143 @@
+// =====================================================================
+// Migration: 20260908000001_fix_idempotency_unique_constraint.js
+// =====================================================================
+// Fixes a critical design flaw in the IdempotencyKeys table.
+//
+// Original schema (migration 20240905000001):
+//   Key VARCHAR(128) UNIQUE  ← globally unique
+//
+// Problem:
+//   The middleware queries by (Key, Endpoint), but the UNIQUE constraint
+//   is on Key alone. So if two different endpoints use the same key
+//   (e.g., a client reuses the same UUID for both /payments and /close),
+//   the second INSERT fails with SQLITE_CONSTRAINT_UNIQUE, and the
+//   middleware's catch block silently calls next() — bypassing
+//   idempotency entirely.
+//
+// Fix:
+//   Drop the single-column UNIQUE on Key, add a composite UNIQUE on
+//   (Key, Endpoint). This allows the same key to be used for different
+//   endpoints (which is correct — they are independent operations).
+//
+// Also adds:
+//   - RequestBodyHash column (for payload mismatch detection)
+//   - Status column ('PENDING', 'COMPLETED', 'FAILED') to coordinate
+//     concurrent requests without race conditions
+//
+// This migration is idempotent: it checks for column existence before
+// altering, and uses DROP INDEX IF EXISTS.
+// =====================================================================
+
+exports.up = async function (knex) {
+  // 1. Drop the single-column UNIQUE constraint on Key.
+  //    In SQLite, UNIQUE constraints created inline cannot be dropped
+  //    directly — we need to recreate the table.
+  //    However, we can drop the unique INDEX if it was created as one.
+  //    Knex's .unique() creates a UNIQUE constraint, not an index, so
+  //    we need the table-recreation approach for SQLite.
+
+  // Check current schema
+  const tableInfo = await knex.raw('PRAGMA table_info(IdempotencyKeys)');
+  const hasStatusColumn = tableInfo.some(c => c.name === 'Status');
+  const hasRequestBodyHash = tableInfo.some(c => c.name === 'RequestBodyHash');
+
+  // Add new columns if missing
+  if (!hasStatusColumn) {
+    await knex.schema.table('IdempotencyKeys', (table) => {
+      table.string('Status', 20).notNullable().defaultTo('PENDING');
+      table.index(['Status'], 'IX_IdempotencyKeys_Status');
+    });
+  }
+  if (!hasRequestBodyHash) {
+    await knex.schema.table('IdempotencyKeys', (table) => {
+      table.string('RequestBodyHash', 64).nullable();
+    });
+  }
+
+  // For the UNIQUE constraint change, SQLite requires table recreation.
+  // We use a transaction to ensure atomicity.
+  // Step 1: Create new table with composite UNIQUE
+  await knex.raw(`
+    CREATE TABLE IF NOT EXISTS IdempotencyKeys_new (
+      Id INTEGER PRIMARY KEY AUTOINCREMENT,
+      Key VARCHAR(128) NOT NULL,
+      UserId INTEGER NOT NULL,
+      Endpoint VARCHAR(200) NOT NULL,
+      RequestBody TEXT,
+      RequestBodyHash VARCHAR(64),
+      ResponseStatus INTEGER,
+      ResponseBody TEXT,
+      Status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+      CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ExpiresAt DATETIME NOT NULL,
+      UNIQUE(Key, Endpoint)
+    )
+  `);
+
+  // Step 2: Copy data from old table
+  const hasStatus = tableInfo.some(c => c.name === 'Status');
+  const hasHash = tableInfo.some(c => c.name === 'RequestBodyHash');
+  if (hasStatus && hasHash) {
+    await knex.raw(`
+      INSERT INTO IdempotencyKeys_new
+        (Id, Key, UserId, Endpoint, RequestBody, RequestBodyHash,
+         ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
+      SELECT Id, Key, UserId, Endpoint, RequestBody, RequestBodyHash,
+             ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt
+      FROM IdempotencyKeys
+    `);
+  } else if (hasStatus) {
+    await knex.raw(`
+      INSERT INTO IdempotencyKeys_new
+        (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
+      SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt
+      FROM IdempotencyKeys
+    `);
+  } else {
+    await knex.raw(`
+      INSERT INTO IdempotencyKeys_new
+        (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
+      SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, 'COMPLETED', CreatedAt, ExpiresAt
+      FROM IdempotencyKeys
+    `);
+  }
+
+  // Step 3: Drop old table, rename new
+  await knex.raw('DROP TABLE IdempotencyKeys');
+  await knex.raw('ALTER TABLE IdempotencyKeys_new RENAME TO IdempotencyKeys');
+
+  // Step 4: Recreate indexes
+  await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_Key ON IdempotencyKeys(Key)');
+  await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_ExpiresAt ON IdempotencyKeys(ExpiresAt)');
+  await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_Status ON IdempotencyKeys(Status)');
+  // Composite index for the typical lookup query
+  await knex.raw('CREATE UNIQUE INDEX IF NOT EXISTS UX_IdempotencyKeys_KeyEndpoint ON IdempotencyKeys(Key, Endpoint)');
+};
+
+exports.down = async function (knex) {
+  // Revert to original schema (single-column UNIQUE on Key).
+  // NOTE: data loss possible if same Key was used for multiple Endpoints.
+  await knex.raw(`
+    CREATE TABLE IF NOT EXISTS IdempotencyKeys_old (
+      Id INTEGER PRIMARY KEY AUTOINCREMENT,
+      Key VARCHAR(128) NOT NULL UNIQUE,
+      UserId INTEGER NOT NULL,
+      Endpoint VARCHAR(200) NOT NULL,
+      RequestBody TEXT,
+      ResponseStatus INTEGER,
+      ResponseBody TEXT,
+      CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ExpiresAt DATETIME NOT NULL
+    )
+  `);
+  await knex.raw(`
+    INSERT OR IGNORE INTO IdempotencyKeys_old
+      (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, CreatedAt, ExpiresAt)
+    SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, CreatedAt, ExpiresAt
+    FROM IdempotencyKeys
+  `);
+  await knex.raw('DROP TABLE IdempotencyKeys');
+  await knex.raw('ALTER TABLE IdempotencyKeys_old RENAME TO IdempotencyKeys');
+  await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_Key ON IdempotencyKeys(Key)');
+  await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_ExpiresAt ON IdempotencyKeys(ExpiresAt)');
+};

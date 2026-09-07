@@ -4,11 +4,17 @@
 # Usage:
 #   export JWT_SECRET=$(openssl rand -hex 32)
 #   export ADMIN_PIN=your-secure-pin
+#   export CORS_ORIGIN=https://pos.example.com   # REQUIRED in production
 #   docker compose up -d --build
 #   → http://localhost:3001
 #
 # First-time seed (run once after initial start):
 #   docker compose exec samba-pos npm run seed
+#
+# CORS_ORIGIN is REQUIRED when NODE_ENV=production. The server refuses
+# to start with CORS_ORIGIN='*' or unset in production (see server.js).
+# Set it to a comma-separated list of allowed origins, e.g.:
+#   CORS_ORIGIN=https://pos.example.com,https://admin.example.com
 # =====================================================================
 
 version: '3.8'
@@ -30,9 +36,12 @@ services:
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-8h}
       - ADMIN_PIN=${ADMIN_PIN:?ADMIN_PIN is required for seeding. Set it with: export ADMIN_PIN=your-pin}
       - SAMBA_DB_PATH=/app/data/samba.db
+      - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN is required in production. Set it with: export CORS_ORIGIN=https://pos.example.com}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      # Use /ready (not /health) — /ready checks DB + WebSocket.
+      # /health is a lightweight liveness probe that does NOT check DB.
+      test: ["CMD", "curl", "-f", "http://localhost:3001/ready"]
       interval: 30s
       timeout: 5s
       retries: 3

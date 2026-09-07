@@ -10,13 +10,13 @@
     "migrate:rollback": "knex migrate:rollback --knexfile src/infrastructure/db/knexfile.js",
     "seed": "knex seed:run --knexfile src/infrastructure/db/knexfile.js",
     "test": "node --test tests/api-integration.test.js",
-    "test:ticket": "node scripts/insert-ticket-demo.js",
-    "test:sprint2": "node scripts/sprint2-acceptance-test.js",
-    "test:e2e": "node scripts/sprint4-e2e-test.js",
+    "test:all": "bash scripts/run-all-tests.sh",
+    "test:unit": "node --test tests/api-integration.test.js tests/kds-verification.test.js tests/inventory-verification.test.js tests/concurrency-verification.test.js tests/idempotency-verification.test.js tests/domain-verification.test.js tests/security-verification.test.js tests/printing-verification.test.js tests/recipes-verification.test.js tests/idempotency-concurrency.test.js",
+    "test:e2e": "npx playwright test --reporter=line",
     "test:playwright": "npx playwright test --reporter=line",
-    "test:print": "node scripts/print-checksum-test.js",
     "backup": "node scripts/backup.js",
-    "restore": "node scripts/restore.js"
+    "restore": "node scripts/restore.js",
+    "screenshots": "npx playwright test tests/e2e/screenshots.spec.js --reporter=line"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

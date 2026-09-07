@@ -1,13 +1,29 @@
 // =====================================================================
 // knexfile.js — Knex configuration for SambaPos_LBA
 // =====================================================================
-// Per Architect's directive:
-//   * Use sqlite3 (async) driver in development (not better-sqlite3)
+// PRAGMAs activated (verified by Fase 12 audit):
 //   * PRAGMA foreign_keys = ON      (enforce FK constraints)
-//   * PRAGMA defer_foreign_keys = ON (allow out-of-order inserts in a txn)
-//   * PRAGMA busy_timeout = 5000     (wait 5s on lock contention)
+//   * PRAGMA busy_timeout = 5000    (wait 5s on lock contention)
 //   * PRAGMA journal_mode = WAL      (concurrent readers + 1 writer)
 //   * PRAGMA synchronous = NORMAL    (safe with WAL, faster than FULL)
+//   * PRAGMA temp_store = MEMORY     (temp tables in RAM, not disk)
+//
+// NOTE on defer_foreign_keys:
+//   The original comment claimed `PRAGMA defer_foreign_keys = ON` was
+//   active, but it was NOT in the exec() call below. This is a SQLite
+//   pragma that, when set inside a transaction, allows out-of-order
+//   inserts (children before parents) without FK violations. It is
+//   only meaningful inside a BEGIN...COMMIT block.
+//
+//   We do NOT enable it globally here because:
+//     1. It has no effect outside a transaction.
+//     2. Setting it in afterCreate (connection pool level) would
+//        apply it to the connection, but it's reset on COMMIT/ROLLBACK.
+//     3. Our code always inserts parent-then-child, so it's not needed.
+//
+//   If a future feature requires out-of-order inserts, the caller
+//   should run `db.raw('PRAGMA defer_foreign_keys = ON')` inside its
+//   transaction explicitly.
 // =====================================================================
 
 const path = require('path');
