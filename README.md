@@ -43,19 +43,19 @@ tolerancia a pérdida de red temporal.
 
 | Login | Dashboard |
 |:---:|:---:|
-| <img src="docs/screenshots/01-login-filled.png" alt="Login" width="400"> | <img src="docs/screenshots/02-dashboard.png" alt="Dashboard" width="400"> |
+| <img src="docs/screenshots/01-login.png" alt="Login" width="400"> | <img src="docs/screenshots/02-dashboard.png" alt="Dashboard" width="400"> |
 
-| POS — vista vacía | POS — con barra de comandos |
+| POS — vista vacía | POS — con productos |
 |:---:|:---:|
-| <img src="docs/screenshots/03-pos-empty.png" alt="POS vacío" width="400"> | <img src="docs/screenshots/04-pos-cmdbar.png" alt="POS con barra de comandos" width="400"> |
+| <img src="docs/screenshots/03-pos-empty.png" alt="POS vacío" width="400"> | <img src="docs/screenshots/04-pos-with-products.png" alt="POS con productos" width="400"> |
 
-| Modal de nota | Kitchen Display System (KDS) |
+| Ticket con órdenes | Kitchen Display System (KDS) |
 |:---:|:---:|
-| <img src="docs/screenshots/05-note-modal.png" alt="Nota" width="400"> | <img src="docs/screenshots/e2e-04-kitchen-view.png" alt="KDS" width="400"> |
+| <img src="docs/screenshots/05-ticket-with-orders.png" alt="Ticket con órdenes" width="400"> | <img src="docs/screenshots/10-kds.png" alt="KDS" width="400"> |
 
-| WebSocket conectado | Error de login |
+| WebSocket conectado | Pago |
 |:---:|:---:|
-| <img src="docs/screenshots/09-ws-connected.png" alt="WS" width="400"> | <img src="docs/screenshots/08-login-error.png" alt="Login error" width="400"> |
+| <img src="docs/screenshots/16-websocket-status.png" alt="WebSocket" width="400"> | <img src="docs/screenshots/08-payment.png" alt="Pago" width="400"> |
 
 ---
 
