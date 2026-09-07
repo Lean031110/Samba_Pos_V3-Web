@@ -4,13 +4,15 @@
 // Features:
 //   - Columns/cards per station (Cocina, Pizzería, Bebidas, Despacho)
 //   - Color by state (NEW=blue, ACCEPTED=yellow, PREPARING=orange, READY=green, SERVED=gray)
-//   - Timer since creation
-//   - Priority indicator
+//   - Timer since creation (turns red after 10 minutes — URGENT)
+//   - Priority indicator (badge + sorting)
 //   - Ticket number, table name, products, quantities, notes, modifications
 //   - BUMP / READY / SERVED / VOID / RECALL buttons
-//   - Filter by station
-//   - Sound notification (configurable)
-//   - Realtime updates via WebSocket
+//   - Filter by station AND by state
+//   - Sound notification (configurable, two-tone chime for new orders)
+//   - Vibration on Android (configurable)
+//   - Auto-refresh every 30s (in addition to WebSocket events)
+//   - Realtime updates via WebSocket + auto-resync on reconnect
 // =====================================================================
 
 const KitchenView = {
@@ -20,8 +22,13 @@ const KitchenView = {
     this._orders = [];
     this._stations = [];
     this._selectedStationId = null;
+    this._selectedStateFilter = 'active'; // 'all' | 'active' | 'ready' | 'served'
     this._soundEnabled = true;
+    this._vibrationEnabled = true;
     this._timerInterval = null;
+    this._autoRefreshInterval = null;
+    this._lastOrderCount = 0;
+    this._lastOrderIds = new Set();
   },
 
   async load() {
@@ -33,15 +40,22 @@ const KitchenView = {
       this._stations = [];
     }
     await this.refresh();
-    // Start timer refresh
+    // Start timer refresh (every 1s for live timer display)
     if (this._timerInterval) clearInterval(this._timerInterval);
     this._timerInterval = setInterval(() => this._refreshTimers(), 1000);
+    // Start auto-refresh (every 30s as a safety net beyond WebSocket)
+    if (this._autoRefreshInterval) clearInterval(this._autoRefreshInterval);
+    this._autoRefreshInterval = setInterval(() => this.refresh(), 30000);
   },
 
   unload() {
     if (this._timerInterval) {
       clearInterval(this._timerInterval);
       this._timerInterval = null;
+    }
+    if (this._autoRefreshInterval) {
+      clearInterval(this._autoRefreshInterval);
+      this._autoRefreshInterval = null;
     }
   },
 
@@ -52,11 +66,20 @@ const KitchenView = {
         : '/kitchen/orders';
       const res = await Api.request('GET', url);
       const newOrders = res.data || [];
-      // Check if we have new orders (for sound notification)
-      if (this._orders.length > 0 && newOrders.length > this._orders.length) {
+      // Check if we have NEW orders that we didn't know about → play sound + vibrate.
+      const newOrderIds = new Set(newOrders.map(o => o.Id));
+      const brandNewOrders = newOrders.filter(o =>
+        o.State === 'NEW' && !this._lastOrderIds.has(o.Id)
+      );
+      if (brandNewOrders.length > 0 && this._lastOrderIds.size > 0) {
+        // Don't trigger on first load.
         this._playSound();
+        this._vibrate();
+        this._showBrowserNotification(brandNewOrders);
       }
       this._orders = newOrders;
+      this._lastOrderIds = newOrderIds;
+      this._lastOrderCount = newOrders.length;
       this._render();
     } catch (err) {
       window.App.toast('Cannot load kitchen orders: ' + err.message, 'error');
@@ -66,21 +89,46 @@ const KitchenView = {
   _render() {
     if (!this.containerEl) return;
 
-    // Station filter bar
-    let html = '<div class="kds-stations-bar">';
-    html += `<button class="category-tab ${!this._selectedStationId ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterStation(null)">All Stations</button>`;
+    // Apply state filter
+    const filteredOrders = this._applyStateFilter(this._orders);
+
+    // Station filter bar + state filter
+    let html = '<div class="kds-toolbar">';
+    html += '<div class="kds-toolbar__stations">';
+    html += `<button class="kds-station-tab ${!this._selectedStationId ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterStation(null)">All</button>`;
     for (const s of this._stations) {
-      html += `<button class="category-tab ${this._selectedStationId === s.Id ? 'is-active' : ''}" style="${this._selectedStationId === s.Id ? `background: ${s.Color}; color: white;` : ''}" onclick="window.App.views.kitchen._filterStation(${s.Id})">${s.DisplayName}</button>`;
+      const count = this._orders.filter(o => o.StationId === s.Id && o.State !== 'SERVED' && o.State !== 'VOIDED').length;
+      const countBadge = count > 0 ? `<span class="kds-station-tab__count">${count}</span>` : '';
+      html += `<button class="kds-station-tab ${this._selectedStationId === s.Id ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterStation(${s.Id})" style="${this._selectedStationId === s.Id ? `background: ${s.Color || 'var(--lba-accent)'}; color: white;` : ''}">${this._escape(s.DisplayName)}${countBadge}</button>`;
     }
-    html += `<button class="category-tab" onclick="window.App.views.kitchen._toggleSound()">${this._soundEnabled ? '🔊 Sound On' : '🔇 Sound Off'}</button>`;
+    html += '</div>';
+    html += '<div class="kds-toolbar__filters">';
+    const stateFilters = [
+      { id: 'active', label: 'Active' },
+      { id: 'ready', label: 'Ready' },
+      { id: 'served', label: 'Served' },
+      { id: 'all', label: 'All' },
+    ];
+    for (const sf of stateFilters) {
+      const isActive = this._selectedStateFilter === sf.id;
+      html += `<button class="kds-state-filter ${isActive ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterState('${sf.id}')">${sf.label}</button>`;
+    }
+    html += `<button class="kds-sound-toggle" onclick="window.App.views.kitchen._toggleSound()" title="Toggle sound">${this._soundEnabled ? '🔊' : '🔇'}</button>`;
+    html += `<button class="kds-sound-toggle" onclick="window.App.views.kitchen._toggleVibration()" title="Toggle vibration">${this._vibrationEnabled ? '📳' : '📴'}</button>`;
+    html += '</div>';
     html += '</div>';
 
     // Orders grid
-    if (this._orders.length === 0) {
-      html += '<div style="padding: 40px; text-align: center; color: var(--samba-fg-muted); font-size: 24px;">No active orders 🎉</div>';
+    if (filteredOrders.length === 0) {
+      html += '<div class="kds-empty">No active orders 🎉</div>';
     } else {
+      // Sort by priority (desc) then by CreatedAt (asc)
+      const sorted = [...filteredOrders].sort((a, b) => {
+        if (b.Priority !== a.Priority) return (b.Priority || 0) - (a.Priority || 0);
+        return new Date(a.CreatedAt) - new Date(b.CreatedAt);
+      });
       html += '<div class="kds-orders-grid">';
-      for (const order of this._orders) {
+      for (const order of sorted) {
         html += this._renderOrderCard(order);
       }
       html += '</div>';
@@ -89,19 +137,34 @@ const KitchenView = {
     this.containerEl.innerHTML = html;
   },
 
+  _applyStateFilter(orders) {
+    switch (this._selectedStateFilter) {
+      case 'active':
+        return orders.filter(o => o.State !== 'SERVED' && o.State !== 'VOIDED');
+      case 'ready':
+        return orders.filter(o => o.State === 'READY');
+      case 'served':
+        return orders.filter(o => o.State === 'SERVED' || o.State === 'VOIDED');
+      case 'all':
+      default:
+        return orders;
+    }
+  },
+
   _renderOrderCard(order) {
-    const stateColors = {
-      NEW:       { bg: '#E3F2FD', border: '#2196F3', text: '#1565C0' },
-      ACCEPTED:  { bg: '#FFF8E1', border: '#FFC107', text: '#F57F17' },
-      PREPARING: { bg: '#FFF3E0', border: '#FF9800', text: '#E65100' },
-      READY:     { bg: '#E8F5E9', border: '#4CAF50', text: '#2E7D32' },
-      SERVED:    { bg: '#F5F5F5', border: '#9E9E9E', text: '#616161' },
-      VOIDED:    { bg: '#FFEBEE', border: '#F44336', text: '#C62828' },
+    const stateClasses = {
+      NEW:       'kds-card--new',
+      ACCEPTED:  'kds-card--accepted',
+      PREPARING: 'kds-card--preparing',
+      READY:     'kds-card--ready',
+      SERVED:    'kds-card--served',
+      VOIDED:    'kds-card--void',
     };
-    const colors = stateColors[order.State] || stateColors.NEW;
+    const stateClass = stateClasses[order.State] || stateClasses.NEW;
     const elapsed = this._formatElapsed(order.CreatedAt);
+    const isUrgent = this._isUrgent(order);
     const priorityBadge = order.Priority > 0
-      ? `<span style="background: #F44336; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;">PRIORITY</span>`
+      ? `<span class="kds-priority-badge">PRIORITY</span>`
       : '';
 
     let itemsHtml = '';
@@ -116,7 +179,7 @@ const KitchenView = {
 
     let buttonsHtml = '';
     if (order.State === 'NEW') {
-      buttonsHtml = `<button class="kds-btn" onclick="window.App.views.kitchen._updateState(${order.Id}, 'ACCEPTED')">Accept</button>`;
+      buttonsHtml = `<button class="kds-btn kds-btn--primary" onclick="window.App.views.kitchen._updateState(${order.Id}, 'ACCEPTED')">Accept</button>`;
     } else if (order.State === 'ACCEPTED') {
       buttonsHtml = `<button class="kds-btn kds-btn--preparing" onclick="window.App.views.kitchen._updateState(${order.Id}, 'PREPARING')">Start</button>`;
     } else if (order.State === 'PREPARING') {
@@ -128,24 +191,34 @@ const KitchenView = {
       buttonsHtml = `<button class="kds-btn kds-btn--recall" onclick="window.App.views.kitchen._recall(${order.Id})">Recall</button>`;
     }
 
-    return `<div class="kds-card" style="background: ${colors.bg}; border-color: ${colors.border};">
-      <div class="kds-card-header" style="border-bottom: 2px solid ${colors.border};">
+    return `<div class="kds-card ${stateClass} ${isUrgent ? 'kds-card--urgent' : ''}">
+      <div class="kds-card-header">
         <div class="kds-ticket-info">
           <span class="kds-ticket-num">#${order.TicketNumber || order.TicketId}</span>
           ${order.TableName ? `<span class="kds-table">📍 ${this._escape(order.TableName)}</span>` : ''}
           ${priorityBadge}
         </div>
-        <span class="kds-timer" data-created="${order.CreatedAt}">${elapsed}</span>
+        <span class="kds-timer ${isUrgent ? 'kds-timer--urgent' : ''}" data-created="${order.CreatedAt}">${elapsed}</span>
       </div>
       <div class="kds-card-body">
         ${itemsHtml}
       </div>
-      <div class="kds-card-footer" style="border-top: 1px solid ${colors.border};">
-        <span class="kds-state" style="color: ${colors.text};">${order.State}</span>
-        ${buttonsHtml}
-        ${order.State !== 'VOIDED' ? `<button class="kds-btn kds-btn--void" onclick="window.App.views.kitchen._void(${order.Id})">Void</button>` : ''}
+      <div class="kds-card-footer">
+        <span class="kds-state">${order.State}</span>
+        <div class="kds-card-actions">
+          ${buttonsHtml}
+          ${order.State !== 'VOIDED' && order.State !== 'SERVED' ? `<button class="kds-btn kds-btn--void" onclick="window.App.views.kitchen._void(${order.Id})">Void</button>` : ''}
+        </div>
       </div>
     </div>`;
+  },
+
+  _isUrgent(order) {
+    if (order.State === 'SERVED' || order.State === 'VOIDED') return false;
+    const elapsedSec = (Date.now() - new Date(order.CreatedAt).getTime()) / 1000;
+    // Urgent: > 10 minutes for non-priority, > 5 minutes for priority
+    const threshold = order.Priority > 0 ? 5 * 60 : 10 * 60;
+    return elapsedSec > threshold;
   },
 
   _formatElapsed(createdAt) {
@@ -162,7 +235,21 @@ const KitchenView = {
     const timers = document.querySelectorAll('.kds-timer');
     for (const t of timers) {
       const created = t.dataset.created;
-      if (created) t.textContent = this._formatElapsed(created);
+      if (created) {
+        t.textContent = this._formatElapsed(created);
+        // Toggle urgent class based on elapsed time + card context.
+        const card = t.closest('.kds-card');
+        if (card) {
+          const orderState = card.classList.contains('kds-card--served') || card.classList.contains('kds-card--void')
+            ? 'SERVED' : 'ACTIVE';
+          if (orderState === 'ACTIVE') {
+            const seconds = Math.floor((Date.now() - new Date(created).getTime()) / 1000);
+            const isUrgent = seconds > 600; // 10 min
+            t.classList.toggle('kds-timer--urgent', isUrgent);
+            card.classList.toggle('kds-card--urgent', isUrgent);
+          }
+        }
+      }
     }
   },
 
@@ -171,8 +258,18 @@ const KitchenView = {
     await this.refresh();
   },
 
+  _filterState(stateFilter) {
+    this._selectedStateFilter = stateFilter;
+    this._render();
+  },
+
   _toggleSound() {
     this._soundEnabled = !this._soundEnabled;
+    this._render();
+  },
+
+  _toggleVibration() {
+    this._vibrationEnabled = !this._vibrationEnabled;
     this._render();
   },
 
@@ -180,16 +277,59 @@ const KitchenView = {
     if (!this._soundEnabled) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 800;
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.5);
+      const now = ctx.currentTime;
+
+      // Two-tone chime: high beep + medium beep (more distinctive than single beep).
+      const playBeep = (freq, start, duration) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0, now + start);
+        gain.gain.linearRampToValueAtTime(0.25, now + start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + start + duration);
+        osc.start(now + start);
+        osc.stop(now + start + duration);
+      };
+      playBeep(880, 0, 0.15);   // A5 — bright, attention-grabbing
+      playBeep(660, 0.18, 0.2);  // E5 — softer follow-up
     } catch (e) { /* AudioContext not available */ }
+  },
+
+  _vibrate() {
+    if (!this._vibrationEnabled) return;
+    if ('vibrate' in navigator) {
+      // Pattern: 200ms vibration, 100ms pause, 200ms vibration
+      navigator.vibrate([200, 100, 200]);
+    }
+  },
+
+  _showBrowserNotification(orders) {
+    // Use Web Notifications if permission was granted; otherwise no-op.
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      const title = orders.length === 1
+        ? `Nuevo pedido: #${orders[0].TicketNumber || orders[0].TicketId}`
+        : `${orders.length} nuevos pedidos en cocina`;
+      const body = orders.length === 1
+        ? (orders[0].TableName ? `Mesa ${orders[0].TableName}` : 'Para llevar')
+        : `${orders.length} pedidos esperando preparación`;
+      const n = new Notification(title, {
+        body,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/favicon.png',
+        tag: 'kds-new-order',
+      });
+      n.onclick = () => {
+        window.focus();
+        n.close();
+      };
+      // Auto-close after 10s.
+      setTimeout(() => n.close(), 10000);
+    } catch (e) { /* Notification API may not be available */ }
   },
 
   async _updateState(orderId, state) {
@@ -236,6 +376,15 @@ const KitchenView = {
     } catch (err) {
       window.App.toast('Recall failed: ' + err.message, 'error');
     }
+  },
+
+  // Request notification permission (called from a user action, e.g., button tap).
+  async requestNotificationPermission() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    const result = await Notification.requestPermission();
+    return result === 'granted';
   },
 
   // Called by WebSocket client when a KitchenOrderAdded event arrives

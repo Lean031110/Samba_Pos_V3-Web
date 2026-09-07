@@ -59,7 +59,8 @@ test.describe('Suite B: UI (Isolated)', () => {
     await page.waitForSelector('#view-kitchen.is-active', { timeout: 5000 });
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SHOTS, 'ui-04-kitchen.png') });
-    await expect(page.locator('.kds-stations-bar')).toBeVisible();
+    // KDS toolbar (post-Fase-4 layout: .kds-toolbar replaces .kds-stations-bar).
+    await expect(page.locator('.kds-toolbar')).toBeVisible();
   });
 
   test('B4: Wrong PIN shows error', async ({ page }) => {
