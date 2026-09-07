@@ -461,7 +461,7 @@ class PrinterManager {
    */
   async routePrint(ticket, printJobName = 'Print Bill') {
     // Find the PrintJob by name
-    const printJob = await db('PrintJobs').where({ Name: printJobName }).first();
+    const printJob = await db('PrintJobsLegacy').where({ Name: printJobName }).first();
     if (!printJob) throw new NotFoundError(`Print job "${printJobName}" not found`);
 
     // Find PrinterMaps for this PrintJob

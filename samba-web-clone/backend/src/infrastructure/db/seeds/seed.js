@@ -273,11 +273,11 @@ async function seed(knex) {
     const [ticketTplId, kitchenTplId, receiptTplId] =
       await trx('PrinterTemplates').orderBy('Id').pluck('Id');
 
-    await trx('PrintJobs').insert([
+    await trx('PrintJobsLegacy').insert([
       { Name: 'Print Bill',                      WhatToPrint: 0, UseForPaidTickets: 0, ExcludeTax: 0 },
       { Name: 'Print Orders to Kitchen Printer', WhatToPrint: 0, UseForPaidTickets: 0, ExcludeTax: 0 },
     ]);
-    const [printBillJobId, kitchenJobId] = await trx('PrintJobs').orderBy('Id').pluck('Id');
+    const [printBillJobId, kitchenJobId] = await trx('PrintJobsLegacy').orderBy('Id').pluck('Id');
 
     await trx('PrinterMaps').insert([
       { PrintJobId: printBillJobId, MenuItemGroupCode: null, MenuItemId: 0,
