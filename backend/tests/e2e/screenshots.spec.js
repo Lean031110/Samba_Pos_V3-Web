@@ -270,8 +270,8 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await page.waitForSelector('#pos-products-grid flex-button', { timeout: 10000 });
     // Sanity-check the command bar is fully rendered before capturing.
     const labels = await page.locator('#pos-cmdbar flex-button').allTextContents();
-    expect(labels.some(t => t.includes('Pay'))).toBeTruthy();
-    expect(labels.some(t => t.includes('Note'))).toBeTruthy();
+    expect(labels.some(t => t.includes('Cobrar'))).toBeTruthy();
+    expect(labels.some(t => t.includes('Nota'))).toBeTruthy();
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(SHOTS, '06-command-bar.png'), fullPage: false });
   });
