@@ -48,7 +48,8 @@ test.describe('Suite B: UI (Isolated)', () => {
     await page.waitForSelector('#view-pos.is-active', { timeout: 5000 });
     await page.screenshot({ path: path.join(SHOTS, 'ui-03-pos.png') });
     const texts = await page.locator('#pos-cmdbar flex-button').allTextContents();
-    for (const btn of ['Gift', 'Void', 'Note', 'Tags', 'Discount', 'Print Bill', 'Pay']) {
+    // Button labels are now in Spanish (post-i18n translation).
+    for (const btn of ['Regalo', 'Anular', 'Nota', 'Etiquetas', 'Descuento', 'Imprimir cuenta', 'Cobrar']) {
       expect(texts.some(t => t.includes(btn))).toBeTruthy();
     }
   });
