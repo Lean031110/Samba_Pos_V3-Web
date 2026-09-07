@@ -61,16 +61,23 @@ jobs:
       - name: npm audit (must be 0 vulnerabilities)
         working-directory: backend
         run: |
+          set -e
           npm ci --ignore-scripts
+          # Run audit. With --audit-level=low, npm exits non-zero if any
+          # vulnerability at or above 'low' severity is found.
           npm audit --audit-level=low
-          # Fail the job if any vulnerabilities are found
-          if npm audit --json | grep -q '"vulnerabilities":{}'; then
-            echo "OK: 0 vulnerabilities"
-          else
-            echo "FAIL: vulnerabilities found"
+          # Belt-and-suspenders: parse the JSON report and fail if any
+          # vulnerabilities are present (npm audit --json prints them with
+          # a space after the colon, so we parse instead of grep).
+          npm audit --json > /tmp/audit.json
+          VULN_TOTAL=$(node -e "const r=require('/tmp/audit.json'); console.log((r.metadata&&r.metadata.vulnerabilities&&r.metadata.vulnerabilities.total)||0)")
+          echo "Total vulnerabilities: $VULN_TOTAL"
+          if [ "$VULN_TOTAL" -ne "0" ]; then
+            echo "FAIL: $VULN_TOTAL vulnerabilities found"
             npm audit
             exit 1
           fi
+          echo "OK: 0 vulnerabilities"
 
   test:
     name: Tests (unit + e2e)
@@ -132,6 +139,18 @@ jobs:
           node scripts/run-migrations.js
           node --test tests/concurrency-verification.test.js
 
+      - name: Idempotency verification tests (7)
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/idempotency-verification.test.js
+
+      - name: Domain verification tests (72)
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/domain-verification.test.js
+
       # -----------------------------------------------------------------
       # Playwright E2E
       # -----------------------------------------------------------------
@@ -181,13 +200,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t samba-pos-web-clone:ci .
+        run: docker build -t sambapos-lba:ci .
         env:
           JWT_SECRET: ci-test-secret-do-not-use-in-production-32chars
           ADMIN_PIN: '1234'
 
       - name: Verify image was created
-        run: docker images samba-pos-web-clone:ci
+        run: docker images sambapos-lba:ci
 
       - name: Smoke-test container (start + /health + stop)
         run: |
@@ -197,7 +216,7 @@ jobs:
             -e JWT_SECRET=ci-test-secret-do-not-use-in-production-32chars \
             -e ADMIN_PIN=1234 \
             -e NODE_ENV=production \
-            samba-pos-web-clone:ci
+            sambapos-lba:ci
           # Wait for /health to return 200
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3001/health > /dev/null; then
