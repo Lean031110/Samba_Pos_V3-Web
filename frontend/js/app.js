@@ -59,7 +59,7 @@ const App = {
   async login() {
     const { username, pin } = LoginView.getValues();
     if (!username || !pin) {
-      LoginView.showError('Username and PIN are required');
+      LoginView.showError('Usuario y PIN son obligatorios');
       return;
     }
     try {
@@ -69,9 +69,9 @@ const App = {
       LoginView.reset();
       document.getElementById('header-user').textContent = res.user.name;
       this.navigate('dashboard');
-      this.toast('Welcome, ' + res.user.name, 'success');
+      this.toast('Bienvenido, ' + res.user.name, 'success');
     } catch (err) {
-      LoginView.showError(err.message || 'Login failed');
+      LoginView.showError(err.message || 'Error al iniciar sesión');
     }
   },
 
@@ -80,7 +80,7 @@ const App = {
     window.store.setState({ currentUser: null, currentTicket: null }, 'logged-out');
     document.getElementById('header-user').textContent = '—';
     this.navigate('login');
-    this.toast('Logged out', 'info');
+    this.toast('Sesión cerrada', 'info');
   },
 
   /**

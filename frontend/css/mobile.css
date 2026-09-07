@@ -19,14 +19,14 @@
    ===================================================================== */
 
 /* =====================================================================
-   Login screen — responsive
+   Login screen — responsive with logo
    ===================================================================== */
 .view-login {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: var(--lba-shell-bg);
+  background: linear-gradient(135deg, #044392 0%, #0a4fb0 35%, #1976d2 70%, #2196f3 100%);
   min-height: 100vh;
   min-height: 100dvh;
 }
@@ -35,12 +35,23 @@
   background: var(--lba-bg-elevated);
   border-radius: var(--lba-radius-lg);
   box-shadow: var(--lba-shadow-modal);
-  padding: 24px 20px;
+  padding: 32px 28px 24px;
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+}
+
+.login-card__logo {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.login-card__logo img {
+  max-width: 280px;
+  width: 100%;
+  height: auto;
 }
 
 .login-card__title {
@@ -126,6 +137,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.app-header__logo {
+  height: 32px;
+  width: auto;
+  margin-right: 4px;
 }
 
 .app-header__clock {

@@ -47,7 +47,7 @@ const PaymentView = {
         Icon: this._iconForPaymentType(pt.Name),
       }));
     } catch (err) {
-      window.App.toast('Cannot load payment types: ' + err.message, 'error');
+      window.App.toast('No se pueden cargar los tipos de pago: ' + err.message, 'error');
       this._paymentTypes = [];
     }
     this._renderPaymentTypes();
@@ -64,7 +64,7 @@ const PaymentView = {
 
   _renderOrders() {
     if (!this._ticket?.Orders?.length) {
-      this.ordersEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">No orders</div>';
+      this.ordersEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">Sin pedidos</div>';
       return;
     }
     this.ordersEl.innerHTML = '';
@@ -130,7 +130,7 @@ const PaymentView = {
     }
     // Add Close button (back to POS)
     const closeBtn = document.createElement('flex-button');
-    closeBtn.setAttribute('label', 'Back');
+    closeBtn.setAttribute('label', 'Volver');
     closeBtn.setAttribute('icon', 'fa-arrow-left');
     closeBtn.setAttribute('variant', 'danger');
     closeBtn.style.minHeight = '70px';
@@ -147,7 +147,7 @@ const PaymentView = {
     const remaining = Number(this._ticket.RemainingAmount || 0);
     const amount = this._tendered > 0 ? Math.min(this._tendered, remaining) : remaining;
     if (amount <= 0) {
-      window.App.toast('Nothing to pay', 'warn');
+      window.App.toast('Nada que cobrar', 'warn');
       this._processing = false;
       this._setButtonsDisabled(false);
       return;
@@ -164,13 +164,13 @@ const PaymentView = {
       this._renderSummary();
       const newRemaining = Number(res.data.RemainingAmount || 0);
       if (newRemaining <= 0) {
-        window.App.toast('Payment complete! Closing ticket...', 'success');
+        window.App.toast('¡Pago completo! Cerrando ticket…', 'success');
         setTimeout(() => this._closeAndReturn(), 800);
       } else {
-        window.App.toast(`Partial payment: $${amount.toFixed(2)} (remaining: $${newRemaining.toFixed(2)})`, 'info');
+        window.App.toast(`Pago parcial: $${amount.toFixed(2)} (restante: $${newRemaining.toFixed(2)})`, 'info');
       }
     } catch (err) {
-      window.App.toast('Payment failed: ' + err.message, 'error');
+      window.App.toast('Pago fallido: ' + err.message, 'error');
     } finally {
       this._processing = false;
       this._setButtonsDisabled(false);
@@ -189,10 +189,10 @@ const PaymentView = {
     try {
       const res = await Api.closeTicket(this._ticket.Id);
       window.store.setState({ currentTicket: null }, 'ticket-closed');
-      window.App.toast('Ticket #' + res.data.TicketNumber + ' closed', 'success');
+      window.App.toast('Ticket #' + res.data.TicketNumber + ' cerrado', 'success');
       window.App.navigate('dashboard');
     } catch (err) {
-      window.App.toast('Cannot close ticket: ' + err.message, 'error');
+      window.App.toast('No se puede cerrar el ticket: ' + err.message, 'error');
     }
   },
 

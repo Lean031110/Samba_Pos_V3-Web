@@ -15,6 +15,17 @@
 //   - Realtime updates via WebSocket + auto-resync on reconnect
 // =====================================================================
 
+// Map of internal KDS state codes to user-facing Spanish labels.
+// Used wherever the raw `order.State` would be shown to the user.
+const STATE_LABELS = {
+  'NEW': 'Nuevo',
+  'ACCEPTED': 'Aceptado',
+  'PREPARING': 'Preparando',
+  'READY': 'Listo',
+  'SERVED': 'Servido',
+  'VOIDED': 'Anulado',
+};
+
 const KitchenView = {
   init() {
     this.containerEl = null;
@@ -36,7 +47,7 @@ const KitchenView = {
       const stationsRes = await Api.request('GET', '/kitchen/stations');
       this._stations = stationsRes.data || [];
     } catch (err) {
-      window.App.toast('Cannot load kitchen stations: ' + err.message, 'error');
+      window.App.toast('No se pueden cargar las estaciones de cocina: ' + err.message, 'error');
       this._stations = [];
     }
     await this.refresh();
@@ -82,7 +93,7 @@ const KitchenView = {
       this._lastOrderCount = newOrders.length;
       this._render();
     } catch (err) {
-      window.App.toast('Cannot load kitchen orders: ' + err.message, 'error');
+      window.App.toast('No se pueden cargar los pedidos de cocina: ' + err.message, 'error');
     }
   },
 
@@ -95,7 +106,7 @@ const KitchenView = {
     // Station filter bar + state filter
     let html = '<div class="kds-toolbar">';
     html += '<div class="kds-toolbar__stations">';
-    html += `<button class="kds-station-tab ${!this._selectedStationId ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterStation(null)">All</button>`;
+    html += `<button class="kds-station-tab ${!this._selectedStationId ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterStation(null)">Todas</button>`;
     for (const s of this._stations) {
       const count = this._orders.filter(o => o.StationId === s.Id && o.State !== 'SERVED' && o.State !== 'VOIDED').length;
       const countBadge = count > 0 ? `<span class="kds-station-tab__count">${count}</span>` : '';
@@ -104,23 +115,23 @@ const KitchenView = {
     html += '</div>';
     html += '<div class="kds-toolbar__filters">';
     const stateFilters = [
-      { id: 'active', label: 'Active' },
-      { id: 'ready', label: 'Ready' },
-      { id: 'served', label: 'Served' },
-      { id: 'all', label: 'All' },
+      { id: 'active', label: 'Activos' },
+      { id: 'ready', label: 'Listo' },
+      { id: 'served', label: 'Servido' },
+      { id: 'all', label: 'Todos' },
     ];
     for (const sf of stateFilters) {
       const isActive = this._selectedStateFilter === sf.id;
       html += `<button class="kds-state-filter ${isActive ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterState('${sf.id}')">${sf.label}</button>`;
     }
-    html += `<button class="kds-sound-toggle" onclick="window.App.views.kitchen._toggleSound()" title="Toggle sound">${this._soundEnabled ? '🔊' : '🔇'}</button>`;
-    html += `<button class="kds-sound-toggle" onclick="window.App.views.kitchen._toggleVibration()" title="Toggle vibration">${this._vibrationEnabled ? '📳' : '📴'}</button>`;
+    html += `<button class="kds-sound-toggle" onclick="window.App.views.kitchen._toggleSound()" title="Alternar sonido">${this._soundEnabled ? '🔊' : '🔇'}</button>`;
+    html += `<button class="kds-sound-toggle" onclick="window.App.views.kitchen._toggleVibration()" title="Alternar vibración">${this._vibrationEnabled ? '📳' : '📴'}</button>`;
     html += '</div>';
     html += '</div>';
 
     // Orders grid
     if (filteredOrders.length === 0) {
-      html += '<div class="kds-empty">No active orders 🎉</div>';
+      html += '<div class="kds-empty">Sin pedidos activos 🎉</div>';
     } else {
       // Sort by priority (desc) then by CreatedAt (asc)
       const sorted = [...filteredOrders].sort((a, b) => {
@@ -164,7 +175,7 @@ const KitchenView = {
     const elapsed = this._formatElapsed(order.CreatedAt);
     const isUrgent = this._isUrgent(order);
     const priorityBadge = order.Priority > 0
-      ? `<span class="kds-priority-badge">PRIORITY</span>`
+      ? `<span class="kds-priority-badge">PRIORIDAD</span>`
       : '';
 
     let itemsHtml = '';
@@ -179,16 +190,16 @@ const KitchenView = {
 
     let buttonsHtml = '';
     if (order.State === 'NEW') {
-      buttonsHtml = `<button class="kds-btn kds-btn--primary" onclick="window.App.views.kitchen._updateState(${order.Id}, 'ACCEPTED')">Accept</button>`;
+      buttonsHtml = `<button class="kds-btn kds-btn--primary" onclick="window.App.views.kitchen._updateState(${order.Id}, 'ACCEPTED')">Aceptar</button>`;
     } else if (order.State === 'ACCEPTED') {
-      buttonsHtml = `<button class="kds-btn kds-btn--preparing" onclick="window.App.views.kitchen._updateState(${order.Id}, 'PREPARING')">Start</button>`;
+      buttonsHtml = `<button class="kds-btn kds-btn--preparing" onclick="window.App.views.kitchen._updateState(${order.Id}, 'PREPARING')">Iniciar</button>`;
     } else if (order.State === 'PREPARING') {
-      buttonsHtml = `<button class="kds-btn kds-btn--ready" onclick="window.App.views.kitchen._bump(${order.Id})">BUMP (Ready)</button>`;
+      buttonsHtml = `<button class="kds-btn kds-btn--ready" onclick="window.App.views.kitchen._bump(${order.Id})">Listo</button>`;
     } else if (order.State === 'READY') {
-      buttonsHtml = `<button class="kds-btn kds-btn--served" onclick="window.App.views.kitchen._serve(${order.Id})">Served</button>
-                     <button class="kds-btn kds-btn--recall" onclick="window.App.views.kitchen._updateState(${order.Id}, 'PREPARING')">Recall</button>`;
+      buttonsHtml = `<button class="kds-btn kds-btn--served" onclick="window.App.views.kitchen._serve(${order.Id})">Servido</button>
+                     <button class="kds-btn kds-btn--recall" onclick="window.App.views.kitchen._updateState(${order.Id}, 'PREPARING')">Recuperar</button>`;
     } else if (order.State === 'SERVED') {
-      buttonsHtml = `<button class="kds-btn kds-btn--recall" onclick="window.App.views.kitchen._recall(${order.Id})">Recall</button>`;
+      buttonsHtml = `<button class="kds-btn kds-btn--recall" onclick="window.App.views.kitchen._recall(${order.Id})">Recuperar</button>`;
     }
 
     return `<div class="kds-card ${stateClass} ${isUrgent ? 'kds-card--urgent' : ''}">
@@ -204,10 +215,10 @@ const KitchenView = {
         ${itemsHtml}
       </div>
       <div class="kds-card-footer">
-        <span class="kds-state">${order.State}</span>
+        <span class="kds-state">${STATE_LABELS[order.State] || order.State}</span>
         <div class="kds-card-actions">
           ${buttonsHtml}
-          ${order.State !== 'VOIDED' && order.State !== 'SERVED' ? `<button class="kds-btn kds-btn--void" onclick="window.App.views.kitchen._void(${order.Id})">Void</button>` : ''}
+          ${order.State !== 'VOIDED' && order.State !== 'SERVED' ? `<button class="kds-btn kds-btn--void" onclick="window.App.views.kitchen._void(${order.Id})">Anular</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -337,7 +348,7 @@ const KitchenView = {
       await Api.request('POST', `/kitchen/orders/${orderId}/state`, { state });
       await this.refresh();
     } catch (err) {
-      window.App.toast('Cannot update order: ' + err.message, 'error');
+      window.App.toast('No se puede actualizar el pedido: ' + err.message, 'error');
     }
   },
 
@@ -345,9 +356,9 @@ const KitchenView = {
     try {
       await Api.request('POST', `/kitchen/orders/${orderId}/bump`);
       await this.refresh();
-      window.App.toast('Order marked as READY', 'success');
+      window.App.toast('Pedido marcado como Listo', 'success');
     } catch (err) {
-      window.App.toast('Bump failed: ' + err.message, 'error');
+      window.App.toast('Error al marcar como Listo: ' + err.message, 'error');
     }
   },
 
@@ -356,7 +367,7 @@ const KitchenView = {
       await Api.request('POST', `/kitchen/orders/${orderId}/serve`);
       await this.refresh();
     } catch (err) {
-      window.App.toast('Serve failed: ' + err.message, 'error');
+      window.App.toast('Error al servir: ' + err.message, 'error');
     }
   },
 
@@ -365,7 +376,7 @@ const KitchenView = {
       await Api.request('POST', `/kitchen/orders/${orderId}/void`);
       await this.refresh();
     } catch (err) {
-      window.App.toast('Void failed: ' + err.message, 'error');
+      window.App.toast('Error al anular: ' + err.message, 'error');
     }
   },
 
@@ -374,7 +385,7 @@ const KitchenView = {
       await Api.request('POST', `/kitchen/orders/${orderId}/recall`);
       await this.refresh();
     } catch (err) {
-      window.App.toast('Recall failed: ' + err.message, 'error');
+      window.App.toast('Error al recuperar: ' + err.message, 'error');
     }
   },
 

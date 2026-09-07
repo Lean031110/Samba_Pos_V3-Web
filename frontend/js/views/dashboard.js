@@ -28,7 +28,7 @@ const DashboardView = {
       const res = await Api.getTables();
       window.store.setState({ tables: res.data }, 'tables-loaded');
     } catch (err) {
-      window.App.toast('Failed to load tables: ' + err.message, 'error');
+      window.App.toast('Error al cargar mesas: ' + err.message, 'error');
     }
   },
 
@@ -42,7 +42,7 @@ const DashboardView = {
 
     this.gridEl.innerHTML = '';
     if (filtered.length === 0) {
-      this.gridEl.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--samba-fg-muted);">No tables found. Use the seed to create some, or click "New Table".</div>';
+      this.gridEl.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--samba-fg-muted);">Sin mesas. Cargá el seed para crear algunas o hacé clic en Nueva mesa.</div>';
       return;
     }
 
@@ -64,27 +64,27 @@ const DashboardView = {
    * Example: EntityStates = [{StateName:"Status", State:"Available"}]
    */
   _extractState(table) {
-    if (!table.EntityStates || !Array.isArray(table.EntityStates)) return 'Unknown';
+    if (!table.EntityStates || !Array.isArray(table.EntityStates)) return 'Desconocido';
     const status = table.EntityStates.find(s => s.StateName === 'Status');
-    return status?.State || 'Unknown';
+    return status?.State || 'Desconocido';
   },
 
   async _onTableClick(table) {
     const state = this._extractState(table);
-    window.App.toast(`Table ${table.Name} (${state}) clicked`, 'info');
+    window.App.toast(`Mesa ${table.Name} (${state}) tocada`, 'info');
 
     if (state === 'Available') {
       // Create a new ticket linked to this table
       try {
         const res = await Api.createTicket({ tableId: table.Id });
-        window.App.toast(`Ticket #${res.data.Id} created for table ${table.Name}`, 'success');
+        window.App.toast(`Ticket #${res.data.Id} creado para mesa ${table.Name}`, 'success');
         window.store.setState({
           currentTicket: res.data,
           openTickets: [...window.store.openTickets, res.data],
         }, 'ticket-created');
         window.App.navigate('pos');
       } catch (err) {
-        window.App.toast('Cannot create ticket: ' + err.message, 'error');
+        window.App.toast('No se puede crear ticket: ' + err.message, 'error');
       }
     } else {
       // Open existing ticket on this table
@@ -98,10 +98,10 @@ const DashboardView = {
           window.store.setState({ currentTicket: full.data }, 'ticket-loaded');
           window.App.navigate('pos');
         } else {
-          window.App.toast('Table is marked ' + state + ' but no open ticket found', 'warn');
+          window.App.toast('La mesa está marcada como ' + state + ' pero no se encontró ningún ticket abierto', 'warn');
         }
       } catch (err) {
-        window.App.toast('Cannot load ticket: ' + err.message, 'error');
+        window.App.toast('No se puede cargar el ticket: ' + err.message, 'error');
       }
     }
   },

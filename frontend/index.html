@@ -33,19 +33,20 @@
     <!-- =========================================================== -->
     <header class="app-header no-select">
       <div class="app-header__left">
-        <span id="header-department">Restaurant</span>
+        <img src="/assets/logo-header.png" alt="SambaPos_LBA" class="app-header__logo">
+        <span id="header-department">Restaurante</span>
         <span class="app-header__clock" id="header-clock">--:--:--</span>
       </div>
       <div class="app-header__right">
         <span class="conn-indicator" id="conn-indicator">
           <span class="conn-indicator__dot"></span>
-          <span id="conn-label">Connecting…</span>
+          <span id="conn-label">Conectando…</span>
         </span>
-        <span id="header-user">Administrator</span>
-        <flex-button variant="info" icon="fa-utensils" label="Kitchen"
+        <span id="header-user">Administrador</span>
+        <flex-button variant="info" icon="fa-utensils" label="Cocina"
                      style="min-height: 32px; padding: 0 10px; font-size: 12px;"
                      onclick="window.App.navigate('kitchen')"></flex-button>
-        <flex-button variant="danger" icon="fa-right-from-bracket" label="Logout"
+        <flex-button variant="danger" icon="fa-right-from-bracket" label="Cerrar sesión"
                      style="min-height: 32px; padding: 0 10px; font-size: 12px;"
                      onclick="window.App.logout()"></flex-button>
       </div>
@@ -58,17 +59,17 @@
       <!-- LoginView -->
       <section class="view view-login" id="view-login">
         <div class="login-card no-select">
-          <div class="login-card__title">
-            <i class="fa-solid fa-cash-register"></i> SambaPos_LBA
+          <div class="login-card__logo">
+            <img src="/assets/logo-login.png" alt="SambaPos_LBA">
           </div>
           <input type="text" class="login-card__input" id="login-username"
-                 placeholder="Username" value="Administrator" autocomplete="off">
+                 placeholder="Usuario" value="Administrador" autocomplete="off">
           <input type="password" class="login-card__input" id="login-pin"
                  placeholder="PIN" inputmode="numeric" autocomplete="off">
           <div class="login-keypad numpad" id="login-keypad">
             <!-- Keypad populated by JS -->
           </div>
-          <flex-button variant="success" icon="fa-right-to-bracket" label="Login"
+          <flex-button variant="success" icon="fa-right-to-bracket" label="Iniciar sesión"
                        style="min-height: 50px;"
                        onclick="window.App.login()"></flex-button>
           <div id="login-error" style="color: var(--samba-fg-error); font-size: 12px; min-height: 16px;"></div>
@@ -78,9 +79,9 @@
       <!-- EntityDashboardView (table map) -->
       <section class="view view-dashboard" id="view-dashboard">
         <div class="dashboard-search">
-          <input type="text" id="dashboard-search-input" placeholder="Search tables..."
+          <input type="text" id="dashboard-search-input" placeholder="Buscar mesas…"
                  oninput="window.App.views.dashboard.filter(this.value)">
-          <flex-button variant="danger" icon="fa-xmark" label="Clear"
+          <flex-button variant="danger" icon="fa-xmark" label="Limpiar"
                        style="min-height: 40px; padding: 0 10px;"
                        onclick="document.getElementById('dashboard-search-input').value=''; window.App.views.dashboard.filter('')"></flex-button>
         </div>
@@ -93,14 +94,14 @@
         <div class="pos-ticketinfo" id="pos-ticketinfo">
           <div class="pos-ticketinfo__field">
             <span class="pos-ticketinfo__label">Ticket:</span>
-            <span class="pos-ticketinfo__value" id="pos-ticket-number">(new)</span>
+            <span class="pos-ticketinfo__value" id="pos-ticket-number">(nuevo)</span>
           </div>
           <div class="pos-ticketinfo__field">
-            <span class="pos-ticketinfo__label">Table:</span>
-            <span class="pos-ticketinfo__value" id="pos-table">(none)</span>
+            <span class="pos-ticketinfo__label">Mesa:</span>
+            <span class="pos-ticketinfo__value" id="pos-table">(ninguna)</span>
           </div>
           <div class="pos-ticketinfo__field">
-            <span class="pos-ticketinfo__label">Date:</span>
+            <span class="pos-ticketinfo__label">Fecha:</span>
             <span class="pos-ticketinfo__value" id="pos-date">--</span>
           </div>
         </div>
@@ -110,7 +111,7 @@
           <div class="pos-opentickets__tile pos-opentickets__tile--new"
                onclick="window.App.views.pos.newTicket()">
             <i class="fa-solid fa-plus"></i>
-            <div>New Ticket</div>
+            <div>Nuevo ticket</div>
           </div>
         </div>
 
@@ -119,13 +120,13 @@
           <div class="pos-orders">
             <div class="pos-orders__list" id="pos-orders-list">
               <div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">
-                No orders yet. Tap a product button to start.
+                Sin pedidos. Tocá un producto para empezar.
               </div>
             </div>
             <div class="pos-orders__totals" id="pos-totals">
               <div class="pos-orders__total-row"><span>Subtotal</span><span>$0.00</span></div>
-              <div class="pos-orders__total-row"><span>Tax</span><span>$0.00</span></div>
-              <div class="pos-orders__total-row"><span>Discounts</span><span>$0.00</span></div>
+              <div class="pos-orders__total-row"><span>Impuesto</span><span>$0.00</span></div>
+              <div class="pos-orders__total-row"><span>Descuentos</span><span>$0.00</span></div>
               <div class="pos-orders__total-row pos-orders__total-row--grand">
                 <span>Total</span><span id="pos-grand-total">$0.00</span>
               </div>
@@ -141,19 +142,19 @@
 
         <!-- Command bar -->
         <div class="pos-cmdbar" id="pos-cmdbar">
-          <flex-button variant="discount" icon="fa-gift" label="Gift"
+          <flex-button variant="discount" icon="fa-gift" label="Regalo"
                        onclick="window.App.views.pos.gift()"></flex-button>
-          <flex-button variant="danger" icon="fa-ban" label="Void"
+          <flex-button variant="danger" icon="fa-ban" label="Anular"
                        onclick="window.App.views.pos.void()"></flex-button>
-          <flex-button variant="warning" icon="fa-note-sticky" label="Note"
+          <flex-button variant="warning" icon="fa-note-sticky" label="Nota"
                        onclick="window.App.views.pos.note()"></flex-button>
-          <flex-button variant="info" icon="fa-tags" label="Tags"
+          <flex-button variant="info" icon="fa-tags" label="Etiquetas"
                        onclick="window.App.views.pos.tags()"></flex-button>
-          <flex-button variant="discount" icon="fa-percent" label="Discount"
+          <flex-button variant="discount" icon="fa-percent" label="Descuento"
                        onclick="window.App.views.pos.discount()"></flex-button>
-          <flex-button icon="fa-print" label="Print Bill"
+          <flex-button icon="fa-print" label="Imprimir cuenta"
                        onclick="window.App.views.pos.printBill()"></flex-button>
-          <flex-button variant="action" icon="fa-money-bill-wave" label="Pay"
+          <flex-button variant="action" icon="fa-money-bill-wave" label="Cobrar"
                        onclick="window.App.views.pos.pay()"></flex-button>
         </div>
       </section>
@@ -162,7 +163,7 @@
       <section class="view view-payment" id="view-payment">
         <div class="payment-header">
           <span class="payment-header__title">
-            <i class="fa-solid fa-money-bill-wave"></i> Payment
+            <i class="fa-solid fa-money-bill-wave"></i> Pago
             <span id="payment-ticket-number" style="font-weight: normal; color: var(--samba-fg-muted);"></span>
           </span>
           <span class="payment-header__amount" id="payment-remaining">$0.00</span>
@@ -172,9 +173,9 @@
           <div class="payment-right">
             <div class="payment-numpad numpad" id="payment-numpad"></div>
             <div class="payment-summary">
-              <div class="payment-summary__row"><span>Tendered</span><span id="payment-tendered">$0.00</span></div>
-              <div class="payment-summary__row"><span>Remaining</span><span id="payment-remaining-2">$0.00</span></div>
-              <div class="payment-summary__row"><span>Change</span><span id="payment-change">$0.00</span></div>
+              <div class="payment-summary__row"><span>Recibido</span><span id="payment-tendered">$0.00</span></div>
+              <div class="payment-summary__row"><span>Restante</span><span id="payment-remaining-2">$0.00</span></div>
+              <div class="payment-summary__row"><span>Cambio</span><span id="payment-change">$0.00</span></div>
               <div class="payment-summary__row payment-summary__row--total">
                 <span>Total</span><span id="payment-total">$0.00</span>
               </div>
@@ -194,8 +195,8 @@
     <!-- Footer                                                       -->
     <!-- =========================================================== -->
     <footer class="app-footer no-select">
-      <span>SambaPos_LBA · Terminal: <strong>Server</strong></span>
-      <span id="footer-status">Ready</span>
+      <span>SambaPos_LBA · Terminal: <strong>Servidor</strong></span>
+      <span id="footer-status">Listo</span>
     </footer>
 
     <!-- =========================================================== -->

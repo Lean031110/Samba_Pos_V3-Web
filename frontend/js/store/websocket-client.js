@@ -99,16 +99,16 @@ function initWebSocket() {
     console.log('[ws] browser online — attempting reconnect');
     if (!socket.connected) socket.connect();
     setConnState(socket.connected ? 'connected' : 'reconnecting',
-                 socket.connected ? 'Connected' : 'Reconnecting…');
+                 socket.connected ? 'Conectado' : 'Reconectando…');
   });
   window.addEventListener('offline', () => {
     console.log('[ws] browser offline');
-    setConnState('offline', 'Offline');
+    setConnState('offline', 'Sin conexión');
   });
 
   // === Connection lifecycle ===
   socket.on('connect', () => {
-    setConnState('connected', 'Connected');
+    setConnState('connected', 'Conectado');
     console.log('[ws] connected');
     startHeartbeat();
 
@@ -129,12 +129,12 @@ function initWebSocket() {
   });
 
   socket.on('disconnect', () => {
-    setConnState('reconnecting', 'Reconnecting…');
+    setConnState('reconnecting', 'Reconectando…');
     console.warn('[ws] disconnected');
     stopHeartbeat();
   });
   socket.on('connect_error', (err) => {
-    setConnState('reconnecting', 'Auth error');
+    setConnState('reconnecting', 'Error de auth');
     console.error('[ws] connect_error', err.message);
     // If auth failed (401), the token might be expired — redirect to login
     if (err.message?.includes('Invalid or expired')) {
@@ -143,11 +143,11 @@ function initWebSocket() {
     }
   });
   socket.on('reconnect_attempt', (n) => {
-    setConnState('reconnecting', `Reconnect #${n}…`);
+    setConnState('reconnecting', `Reintento #${n}…`);
     console.log('[ws] reconnect attempt #' + n);
   });
   socket.on('reconnect', (n) => {
-    setConnState('connected', `Reconnected (#${n})`);
+    setConnState('connected', `Reconectado (#${n})`);
     console.log('[ws] reconnected after ' + n + ' attempts');
     // Re-join rooms after reconnect
     const user = window.store.state.currentUser;
@@ -190,7 +190,7 @@ function initWebSocket() {
       currentTicket: isCurrent ? null : window.store.currentTicket,
     }, 'TicketClosed');
     if (window.App?.toast) {
-      window.App.toast('Ticket #' + (payload?.Ticket?.TicketNumber || closedId) + ' closed', 'success');
+      window.App.toast('Ticket #' + (payload?.Ticket?.TicketNumber || closedId) + ' cerrado', 'success');
     }
   });
 
@@ -214,7 +214,7 @@ function initWebSocket() {
     // (the current terminal already shows its own toast via the HTTP response)
     if (payload?.fromTerminal !== window.store.state.terminalId) {
       if (window.App?.toast) {
-        window.App.toast('Payment processed: $' + (payload?.ProcessedAmount || 0).toFixed(2), 'info');
+        window.App.toast('Pago procesado: $' + (payload?.ProcessedAmount || 0).toFixed(2), 'info');
       }
     }
   });

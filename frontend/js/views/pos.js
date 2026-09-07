@@ -40,14 +40,14 @@ const PosView = {
       const res = await Api.getProducts();
       window.store.setState({ products: res.data }, 'products-loaded');
     } catch (err) {
-      window.App.toast('Failed to load products: ' + err.message, 'error');
+      window.App.toast('Error al cargar productos: ' + err.message, 'error');
     }
     // Also refresh open tickets
     try {
       const res = await Api.getTickets();
       window.store.setState({ openTickets: res.data }, 'open-tickets-loaded');
     } catch (err) {
-      window.App.toast('Failed to load open tickets: ' + err.message, 'error');
+      window.App.toast('Error al cargar tickets abiertos: ' + err.message, 'error');
     }
   },
 
@@ -75,7 +75,7 @@ const PosView = {
           const full = await Api.getTicket(ticket.Id);
           window.store.setState({ currentTicket: full.data }, 'ticket-loaded');
         } catch (err) {
-          window.App.toast('Cannot load ticket: ' + err.message, 'error');
+          window.App.toast('No se puede cargar el ticket: ' + err.message, 'error');
         }
       });
       this.openTicketsEl.insertBefore(tile, newTile);
@@ -89,20 +89,20 @@ const PosView = {
   _renderTicket() {
     const t = window.store.currentTicket;
     if (!t) {
-      this.ticketNumberEl.textContent = '(new)';
-      this.tableEl.textContent = '(none)';
+      this.ticketNumberEl.textContent = '(nuevo)';
+      this.tableEl.textContent = '(ninguna)';
       this.dateEl.textContent = '--';
-      this.ordersListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">No ticket selected. Tap a table or "New Ticket".</div>';
+      this.ordersListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">Sin ticket seleccionado. Tocá una mesa o "Nuevo ticket".</div>';
       this._renderTotals({ subtotal: 0, tax: 0, discount: 0, total: 0 });
       return;
     }
     this.ticketNumberEl.textContent = t.TicketNumber || ('#' + t.Id);
-    this.tableEl.textContent = t.TicketEntities?.[0]?.EntityName || '(none)';
+    this.tableEl.textContent = t.TicketEntities?.[0]?.EntityName || '(ninguna)';
     this.dateEl.textContent = new Date(t.Date).toLocaleString();
 
     // Render orders
     if (!t.Orders || t.Orders.length === 0) {
-      this.ordersListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">No orders yet. Tap a product button to start.</div>';
+      this.ordersListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">Sin pedidos. Tocá un producto para empezar.</div>';
     } else {
       this.ordersListEl.innerHTML = '';
       for (const order of t.Orders) {
@@ -156,7 +156,7 @@ const PosView = {
     const products = window.store.products;
     if (products.length === 0) {
       this.categoriesEl.innerHTML = '';
-      this.productsGridEl.innerHTML = '<div style="grid-column: 1 / -1; padding: 20px; text-align: center; color: var(--samba-fg-muted);">No products loaded. Use the seed to create some.</div>';
+      this.productsGridEl.innerHTML = '<div style="grid-column: 1 / -1; padding: 20px; text-align: center; color: var(--samba-fg-muted);">Sin productos cargados. Cargá el seed para crear algunos.</div>';
       return;
     }
 
@@ -164,7 +164,7 @@ const PosView = {
     const categories = window.store.getCategories();
     this.categoriesEl.innerHTML = '';
     if (categories.length === 0) {
-      this.categoriesEl.innerHTML = '<div style="padding: 10px; color: var(--samba-fg-muted);">No categories</div>';
+      this.categoriesEl.innerHTML = '<div style="padding: 10px; color: var(--samba-fg-muted);">Sin categorías</div>';
     } else {
       for (const cat of categories) {
         const tab = document.createElement('button');
@@ -215,7 +215,7 @@ const PosView = {
       const pageLabel = document.createElement('div');
       pageLabel.style.alignSelf = 'center';
       pageLabel.style.padding = '0 10px';
-      pageLabel.textContent = `Page ${this._currentPage} / ${totalPages}`;
+      pageLabel.textContent = `Página ${this._currentPage} / ${totalPages}`;
       this.pagingEl.appendChild(pageLabel);
 
       const next = document.createElement('flex-button');
@@ -237,7 +237,7 @@ const PosView = {
           openTickets: [...window.store.openTickets, res.data],
         }, 'ticket-auto-created');
       } catch (err) {
-        window.App.toast('Cannot create ticket: ' + err.message, 'error');
+        window.App.toast('No se puede crear ticket: ' + err.message, 'error');
         return;
       }
     }
@@ -246,7 +246,7 @@ const PosView = {
       const res = await Api.addOrder(ticketId, { menuItemId: menuItem.Id, quantity: 1 });
       window.store.setState({ currentTicket: res.data }, 'order-added');
     } catch (err) {
-      window.App.toast('Cannot add order: ' + err.message, 'error');
+      window.App.toast('No se puede agregar el pedido: ' + err.message, 'error');
     }
   },
 
@@ -261,17 +261,17 @@ const PosView = {
         currentTicket: res.data,
         openTickets: [...window.store.openTickets, res.data],
       }, 'ticket-created');
-      window.App.toast('New ticket #' + res.data.Id + ' created', 'success');
+      window.App.toast('Nuevo ticket #' + res.data.Id + ' creado', 'success');
     } catch (err) {
-      window.App.toast('Cannot create ticket: ' + err.message, 'error');
+      window.App.toast('No se puede crear ticket: ' + err.message, 'error');
     }
   },
 
   async gift() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
     const ticket = window.store.currentTicket;
     if (!ticket.Orders || ticket.Orders.length === 0) {
-      return window.App.toast('No orders to gift', 'warn');
+      return window.App.toast('Sin pedidos para regalar', 'warn');
     }
     // Build order selection modal
     const orderCheckboxes = ticket.Orders.map(o => {
@@ -283,14 +283,14 @@ const PosView = {
         <span>${label}</span>
       </label>`;
     }).join('');
-    window.App.showModal('Gift Orders', `
-      <p style="margin-bottom: 8px; color: var(--samba-fg-muted);">Select orders to mark as Gift (excluded from totals):</p>
+    window.App.showModal('Regalar pedidos', `
+      <p style="margin-bottom: 8px; color: var(--samba-fg-muted);">Seleccioná los pedidos a marcar como Regalo (excluidos del total):</p>
       <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--samba-border-light); border-radius: 4px; padding: 8px;">
         ${orderCheckboxes}
       </div>
       <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
-        <flex-button variant="discount" icon="fa-gift" label="Apply Gift" onclick="window.App.views.pos._applyGift()"></flex-button>
+        <flex-button label="Cancelar" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="discount" icon="fa-gift" label="Aplicar regalo" onclick="window.App.views.pos._applyGift()"></flex-button>
       </div>
     `);
   },
@@ -299,29 +299,29 @@ const PosView = {
     const cbs = document.querySelectorAll('.gift-order-cb:checked');
     const orderIds = Array.from(cbs).map(cb => parseInt(cb.dataset.orderId, 10));
     if (orderIds.length === 0) {
-      return window.App.toast('No orders selected', 'warn');
+      return window.App.toast('Sin pedidos seleccionados', 'warn');
     }
     try {
       const res = await Api.giftOrders(window.store.currentTicket.Id, orderIds);
       window.store.setState({ currentTicket: res.data }, 'gift-applied');
       window.App.closeModal();
-      window.App.toast(`${orderIds.length} order(s) gifted`, 'success');
+      window.App.toast(`${orderIds.length} pedido(s) regalado(s)`, 'success');
     } catch (err) {
-      window.App.toast('Cannot apply gift: ' + err.message, 'error');
+      window.App.toast('No se puede aplicar el regalo: ' + err.message, 'error');
     }
   },
 
   async void() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
     const ticket = window.store.currentTicket;
-    window.App.showModal('Void Ticket', `
-      <p style="margin-bottom: 12px;">Are you sure you want to void ticket #${ticket.TicketNumber || ticket.Id}?</p>
+    window.App.showModal('Anular ticket', `
+      <p style="margin-bottom: 12px;">¿Seguro que querés anular el ticket #${ticket.TicketNumber || ticket.Id}?</p>
       <p style="color: var(--samba-fg-error); margin-bottom: 12px;">
-        <i class="fa-solid fa-triangle-exclamation"></i> This will reverse all payments and mark the ticket as voided. This action cannot be undone.
+        <i class="fa-solid fa-triangle-exclamation"></i> Esto revertirá todos los pagos y marcará el ticket como anulado. Esta acción no se puede deshacer.
       </p>
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
-        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
-        <flex-button variant="danger" icon="fa-ban" label="Void Ticket" onclick="window.App.views.pos._confirmVoid()"></flex-button>
+        <flex-button label="Cancelar" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="danger" icon="fa-ban" label="Anular ticket" onclick="window.App.views.pos._confirmVoid()"></flex-button>
       </div>
     `);
   },
@@ -331,20 +331,20 @@ const PosView = {
       const res = await Api.voidTicket(window.store.currentTicket.Id);
       window.store.setState({ currentTicket: res.data }, 'void-confirmed');
       window.App.closeModal();
-      window.App.toast('Ticket voided', 'success');
+      window.App.toast('Ticket anulado', 'success');
     } catch (err) {
-      window.App.toast('Cannot void ticket: ' + err.message, 'error');
+      window.App.toast('No se puede anular el ticket: ' + err.message, 'error');
       window.App.closeModal();
     }
   },
 
   note() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
-    window.App.showModal('Ticket Note', `
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
+    window.App.showModal('Nota del ticket', `
       <textarea id="note-input" rows="4" style="width: 100%; padding: 8px; background: var(--samba-bg-note); border: 1px solid var(--samba-border-input); border-radius: 4px;">${this._escape(window.store.currentTicket.Note || '')}</textarea>
       <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
-        <flex-button variant="success" label="Save" onclick="window.App.views.pos._saveNote()"></flex-button>
+        <flex-button label="Cancelar" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="success" label="Guardar" onclick="window.App.views.pos._saveNote()"></flex-button>
       </div>
     `);
   },
@@ -355,30 +355,30 @@ const PosView = {
       const res = await Api.setNote(window.store.currentTicket.Id, note);
       window.store.setState({ currentTicket: res.data }, 'note-set');
       window.App.closeModal();
-      window.App.toast('Note saved', 'success');
+      window.App.toast('Nota guardada', 'success');
     } catch (err) {
-      window.App.toast('Cannot save note: ' + err.message, 'error');
+      window.App.toast('No se puede guardar la nota: ' + err.message, 'error');
     }
   },
 
   tags() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
     const existing = (() => {
       try { return JSON.parse(window.store.currentTicket.TicketTags || '[]'); }
       catch { return []; }
     })();
-    const existingHtml = existing.map(t => `<input type="text" class="tag-name" value="${this._escape(t.TagName || '')}" placeholder="Tag name" style="width: 45%; padding: 6px; margin: 2px;">
-      <input type="text" class="tag-value" value="${this._escape(t.TagValue || '')}" placeholder="Value" style="width: 45%; padding: 6px; margin: 2px;">`).join('');
-    window.App.showModal('Ticket Tags', `
-      <p style="margin-bottom: 8px; color: var(--samba-fg-muted);">Tag name / value pairs:</p>
+    const existingHtml = existing.map(t => `<input type="text" class="tag-name" value="${this._escape(t.TagName || '')}" placeholder="Nombre de etiqueta" style="width: 45%; padding: 6px; margin: 2px;">
+      <input type="text" class="tag-value" value="${this._escape(t.TagValue || '')}" placeholder="Valor" style="width: 45%; padding: 6px; margin: 2px;">`).join('');
+    window.App.showModal('Etiquetas del ticket', `
+      <p style="margin-bottom: 8px; color: var(--samba-fg-muted);">Pares nombre / valor de etiqueta:</p>
       <div id="tags-container" style="max-height: 250px; overflow-y: auto;">
         ${existingHtml}
       </div>
       <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: space-between;">
-        <flex-button icon="fa-plus" label="Add Tag" onclick="window.App.views.pos._addTagRow()"></flex-button>
+        <flex-button icon="fa-plus" label="Agregar etiqueta" onclick="window.App.views.pos._addTagRow()"></flex-button>
         <div style="display: flex; gap: 8px;">
-          <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
-          <flex-button variant="success" label="Save Tags" onclick="window.App.views.pos._saveTags()"></flex-button>
+          <flex-button label="Cancelar" onclick="window.App.closeModal()"></flex-button>
+          <flex-button variant="success" label="Guardar etiquetas" onclick="window.App.views.pos._saveTags()"></flex-button>
         </div>
       </div>
     `);
@@ -387,8 +387,8 @@ const PosView = {
   _addTagRow() {
     const container = document.getElementById('tags-container');
     const row = document.createElement('div');
-    row.innerHTML = `<input type="text" class="tag-name" placeholder="Tag name" style="width: 45%; padding: 6px; margin: 2px;">
-      <input type="text" class="tag-value" placeholder="Value" style="width: 45%; padding: 6px; margin: 2px;">`;
+    row.innerHTML = `<input type="text" class="tag-name" placeholder="Nombre de etiqueta" style="width: 45%; padding: 6px; margin: 2px;">
+      <input type="text" class="tag-value" placeholder="Valor" style="width: 45%; padding: 6px; margin: 2px;">`;
     container.appendChild(row);
   },
 
@@ -405,14 +405,14 @@ const PosView = {
       const res = await Api.setTags(window.store.currentTicket.Id, tags);
       window.store.setState({ currentTicket: res.data }, 'tags-set');
       window.App.closeModal();
-      window.App.toast(`${tags.length} tag(s) saved`, 'success');
+      window.App.toast(`${tags.length} etiqueta(s) guardada(s)`, 'success');
     } catch (err) {
-      window.App.toast('Cannot save tags: ' + err.message, 'error');
+      window.App.toast('No se pueden guardar las etiquetas: ' + err.message, 'error');
     }
   },
 
   async discount() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
     // Fetch calculation types from backend (no hardcoded IDs)
     let calcTypes = window.store.state.calculationTypes;
     if (!calcTypes || calcTypes.length === 0) {
@@ -421,13 +421,13 @@ const PosView = {
         calcTypes = res.data;
         window.store.setState({ calculationTypes: calcTypes }, 'calc-types-loaded');
       } catch (err) {
-        return window.App.toast('Cannot load calculation types: ' + err.message, 'error');
+        return window.App.toast('No se pueden cargar los tipos de cálculo: ' + err.message, 'error');
       }
     }
     // Build modal with available discount types
     const discountTypes = calcTypes.filter(c => c.DecreaseAmount);
     if (discountTypes.length === 0) {
-      return window.App.toast('No discount calculation types configured', 'warn');
+      return window.App.toast('No hay tipos de cálculo de descuento configurados', 'warn');
     }
     const optionsHtml = discountTypes.map(c => {
       const methodLabel = c.CalculationMethod === 0 ? '%' : c.CalculationMethod === 2 ? 'fixed' : 'round';
@@ -436,19 +436,19 @@ const PosView = {
         <span>${this._escape(c.Name)} (${methodLabel})</span>
       </label>`;
     }).join('');
-    window.App.showModal('Apply Discount', `
+    window.App.showModal('Aplicar descuento', `
       <div style="margin-bottom: 12px;">
-        <p style="margin-bottom: 6px; color: var(--samba-fg-muted);">Discount type:</p>
+        <p style="margin-bottom: 6px; color: var(--samba-fg-muted);">Tipo de descuento:</p>
         ${optionsHtml}
       </div>
       <div style="margin-bottom: 12px;">
-        <p style="margin-bottom: 6px; color: var(--samba-fg-muted);">Amount:</p>
+        <p style="margin-bottom: 6px; color: var(--samba-fg-muted);">Importe:</p>
         <input type="number" id="discount-amount" value="10" min="0" step="0.01"
                style="width: 100%; padding: 10px; font-size: 18px; border: 1px solid var(--samba-border-input); border-radius: 4px;">
       </div>
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
-        <flex-button label="Cancel" onclick="window.App.closeModal()"></flex-button>
-        <flex-button variant="discount" icon="fa-percent" label="Apply" onclick="window.App.views.pos._applyDiscount()"></flex-button>
+        <flex-button label="Cancelar" onclick="window.App.closeModal()"></flex-button>
+        <flex-button variant="discount" icon="fa-percent" label="Aplicar" onclick="window.App.views.pos._applyDiscount()"></flex-button>
       </div>
     `);
   },
@@ -456,36 +456,36 @@ const PosView = {
   async _applyDiscount() {
     const selectedType = document.querySelector('input[name="calc-type"]:checked');
     const amountInput = document.getElementById('discount-amount');
-    if (!selectedType) return window.App.toast('Select a discount type', 'warn');
+    if (!selectedType) return window.App.toast('Seleccioná un tipo de descuento', 'warn');
     const calculationTypeId = parseInt(selectedType.value, 10);
     const amount = parseFloat(amountInput.value);
-    if (isNaN(amount) || amount < 0) return window.App.toast('Invalid amount', 'error');
+    if (isNaN(amount) || amount < 0) return window.App.toast('Importe inválido', 'error');
     try {
       const res = await Api.addCalculation(window.store.currentTicket.Id, { calculationTypeId, amount });
       window.store.setState({ currentTicket: res.data }, 'discount-applied');
       window.App.closeModal();
-      window.App.toast('Discount applied', 'success');
+      window.App.toast('Descuento aplicado', 'success');
     } catch (err) {
-      window.App.toast('Cannot apply discount: ' + err.message, 'error');
+      window.App.toast('No se puede aplicar el descuento: ' + err.message, 'error');
     }
   },
 
   async printBill() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
     try {
       const res = await Api.printTicket(window.store.currentTicket.Id);
-      window.App.showModal('Print Preview — Ticket #' + (window.store.currentTicket.TicketNumber || window.store.currentTicket.Id), `
+      window.App.showModal('Vista previa de impresión — Ticket #' + (window.store.currentTicket.TicketNumber || window.store.currentTicket.Id), `
         <div class="print-preview">${this._escape(res.data.formatted)}</div>
         <div style="margin-top: 12px; font-size: 12px; color: var(--samba-fg-muted);">
-          ESC/POS bytes: ${res.data.escposBytesCount} (base64 length ${res.data.escposBase64.length})
+          Bytes ESC/POS: ${res.data.escposBytesCount} (longitud base64 ${res.data.escposBase64.length})
         </div>
         <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-          <flex-button label="Close" onclick="window.App.closeModal()"></flex-button>
-          <flex-button variant="action" icon="fa-print" label="Send to Printer" onclick="window.App.views.pos._doPrint('${res.data.escposBase64}')"></flex-button>
+          <flex-button label="Cerrar" onclick="window.App.closeModal()"></flex-button>
+          <flex-button variant="action" icon="fa-print" label="Enviar a impresora" onclick="window.App.views.pos._doPrint('${res.data.escposBase64}')"></flex-button>
         </div>
       `);
     } catch (err) {
-      window.App.toast('Cannot generate print: ' + err.message, 'error');
+      window.App.toast('No se puede generar la impresión: ' + err.message, 'error');
     }
   },
 
@@ -493,10 +493,10 @@ const PosView = {
     // Send the ESC/POS buffer to the backend printer endpoint
     try {
       await Api.printTicketSend(window.store.currentTicket.Id, { escposBase64: base64 });
-      window.App.toast('Print job sent to printer', 'success');
+      window.App.toast('Trabajo de impresión enviado a impresora', 'success');
       window.App.closeModal();
     } catch (err) {
-      window.App.toast('Print failed: ' + err.message + '. Falling back to browser print.', 'warn');
+      window.App.toast('Impresión fallida: ' + err.message + '. Usando impresión del navegador.', 'warn');
       // Fallback: open a new window with the formatted text and call window.print()
       try {
         const printRes = await Api.printTicket(window.store.currentTicket.Id);
@@ -506,16 +506,16 @@ const PosView = {
         w.focus();
         w.print();
       } catch (fallbackErr) {
-        window.App.toast('Print fallback also failed: ' + fallbackErr.message, 'error');
+        window.App.toast('Impresión de respaldo también fallida: ' + fallbackErr.message, 'error');
       }
       window.App.closeModal();
     }
   },
 
   async pay() {
-    if (!window.store.currentTicket) return window.App.toast('No ticket selected', 'warn');
+    if (!window.store.currentTicket) return window.App.toast('Sin ticket seleccionado', 'warn');
     if (Number(window.store.currentTicket.RemainingAmount || 0) <= 0) {
-      return window.App.toast('Ticket has no remaining balance', 'warn');
+      return window.App.toast('El ticket no tiene saldo pendiente', 'warn');
     }
     window.App.navigate('payment');
     if (window.App.views.payment) {
