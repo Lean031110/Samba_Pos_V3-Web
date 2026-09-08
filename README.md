@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/screenshots/01-login.png" alt="SambaPos_LBA" width="600">
+
 # SambaPos_LBA
 
 **Sistema POS web moderno, táctil, instalable y offline-capable para restaurantes**  
