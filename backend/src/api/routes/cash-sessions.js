@@ -127,7 +127,7 @@ router.post('/work-periods/:id/reopen',
   });
 
 router.get('/work-periods/current',
-  requirePermission('pos.login'),
+  requirePermission('cash.manage'),
   async (req, res, next) => {
     try {
       const wp = await cashSessionService.getCurrentWorkPeriod();
@@ -151,7 +151,7 @@ router.get('/work-periods',
 // =====================================================================
 
 router.post('/cash-sessions/open',
-  requirePermission('pos.login'),
+  requirePermission('cash.manage'),
   auditLog('cashsession.open', 'CashSession'),
   async (req, res, next) => {
     try {
@@ -216,7 +216,7 @@ router.post('/cash-sessions/:id/transfer',
   });
 
 router.get('/cash-sessions/current',
-  requirePermission('pos.login'),
+  requirePermission('cash.manage'),
   async (req, res, next) => {
     try {
       const terminalId = parseInt(req.query.terminalId, 10) || 0;

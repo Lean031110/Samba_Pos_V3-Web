@@ -25,7 +25,7 @@ const router = express.Router();
 const inventoryService = new InventoryService();
 
 // GET /api/inventory/ingredients (requires pos.login)
-router.get('/ingredients', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/ingredients', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const ingredients = await db('Ingredients')
       .join('IngredientUnits', 'Ingredients.BaseUnitId', 'IngredientUnits.Id')
@@ -36,7 +36,7 @@ router.get('/ingredients', requirePermission('pos.login'), async (req, res, next
 });
 
 // GET /api/inventory/ingredients/:id (requires pos.login)
-router.get('/ingredients/:id', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/ingredients/:id', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) throw new ValidationError('id must be a number');
@@ -64,7 +64,7 @@ router.post('/ingredients', requirePermission('manage.inventory'), auditLog('inv
 });
 
 // GET /api/inventory/units (requires pos.login)
-router.get('/units', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/units', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const units = await db('IngredientUnits').orderBy('SortOrder');
     res.json({ data: units, count: units.length });
@@ -72,7 +72,7 @@ router.get('/units', requirePermission('pos.login'), async (req, res, next) => {
 });
 
 // GET /api/inventory/recipes/:portionId (requires pos.login)
-router.get('/recipes/:portionId', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/recipes/:portionId', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const portionId = parseInt(req.params.portionId, 10);
     if (isNaN(portionId)) throw new ValidationError('portionId must be a number');
@@ -94,7 +94,7 @@ router.post('/recipes/:portionId', requirePermission('manage.inventory'), auditL
 });
 
 // GET /api/inventory/stock/:warehouseId (requires pos.login)
-router.get('/stock/:warehouseId', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/stock/:warehouseId', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const warehouseId = parseInt(req.params.warehouseId, 10);
     if (isNaN(warehouseId)) throw new ValidationError('warehouseId must be a number');
@@ -104,7 +104,7 @@ router.get('/stock/:warehouseId', requirePermission('pos.login'), async (req, re
 });
 
 // GET /api/inventory/stock/:warehouseId/low (requires pos.login)
-router.get('/stock/:warehouseId/low', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/stock/:warehouseId/low', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const warehouseId = parseInt(req.params.warehouseId, 10);
     if (isNaN(warehouseId)) throw new ValidationError('warehouseId must be a number');
@@ -114,7 +114,7 @@ router.get('/stock/:warehouseId/low', requirePermission('pos.login'), async (req
 });
 
 // GET /api/inventory/movements (requires pos.login)
-router.get('/movements', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/movements', requirePermission('inventory.view'), async (req, res, next) => {
   try {
     const ingredientId = req.query.ingredientId ? parseInt(req.query.ingredientId, 10) : null;
     const warehouseId = req.query.warehouseId ? parseInt(req.query.warehouseId, 10) : null;

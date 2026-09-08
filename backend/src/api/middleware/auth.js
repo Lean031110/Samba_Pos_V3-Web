@@ -13,6 +13,7 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { db } = require('../../infrastructure/db/db');
 const { UnauthorizedError, ValidationError } = require('./errorHandler');
+const sessionService = require('../services/sessionService');
 
 // JWT secret MUST be set via environment variable. No insecure defaults.
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -42,10 +43,11 @@ const loginLimiter = process.env.NODE_ENV === 'test'
     });
 
 /**
- * Generate a JWT for a user.
+ * Generate a JWT for a user with JTI (session tracking).
  */
 function signToken(user) {
-  return jwt.sign(
+  const jti = sessionService.generateJTI();
+  const token = jwt.sign(
     {
       userId: user.Id,
       username: user.Name,
@@ -53,8 +55,11 @@ function signToken(user) {
       isAdmin: !!(user.UserRole?.IsAdmin),
     },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
+    { expiresIn: JWT_EXPIRES_IN, jwtid: jti }
   );
+  // Register the session
+  sessionService.registerSession(user.Id, jti);
+  return token;
 }
 
 /**
@@ -86,11 +91,16 @@ async function authenticate(req, res, next) {
   const token = authHeader.substring(7);
   try {
     const payload = verifyToken(token);
+    // Check if token has been revoked (session tracking)
+    if (payload.jti && sessionService.isRevoked(payload.jti)) {
+      return next(new UnauthorizedError('Token revoked — session terminated'));
+    }
     req.user = {
       userId: payload.userId,
       username: payload.username,
       roleId: payload.roleId,
       isAdmin: payload.isAdmin,
+      jti: payload.jti, // expose JTI for logout
     };
     next();
   } catch (err) {
@@ -169,6 +179,40 @@ async function meHandler(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * POST /api/auth/logout — revoke current session
+ */
+async function logoutHandler(req, res, next) {
+  try {
+    if (req.user?.jti) {
+      sessionService.revokeSession(req.user.jti);
+    }
+    res.json({ success: true, message: 'Sesión cerrada' });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/auth/sessions — list active sessions for current user
+ */
+async function listSessionsHandler(req, res, next) {
+  try {
+    if (!req.user) throw new UnauthorizedError('Not authenticated');
+    const sessions = sessionService.listSessions(req.user.userId);
+    res.json({ data: sessions, count: sessions.length });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/auth/revoke-all — revoke all sessions for current user
+ */
+async function revokeAllHandler(req, res, next) {
+  try {
+    if (!req.user) throw new UnauthorizedError('Not authenticated');
+    const count = sessionService.revokeAllUserSessions(req.user.userId);
+    res.json({ success: true, revokedCount: count });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   JWT_SECRET,
   JWT_EXPIRES_IN,
@@ -177,5 +221,8 @@ module.exports = {
   authenticate,
   loginHandler,
   meHandler,
+  logoutHandler,
+  listSessionsHandler,
+  revokeAllHandler,
   loginLimiter,
 };

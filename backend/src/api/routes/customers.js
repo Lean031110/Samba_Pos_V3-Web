@@ -67,7 +67,7 @@ const deactivateSchema = z.object({
 }).strict();
 
 // GET /api/customers — list (requires pos.login)
-router.get('/', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/', requirePermission('customers.manage'), async (req, res, next) => {
   try {
     const parsed = parseOrThrow(listQuerySchema, req.query || {});
     const customers = await customerService.listCustomers({
@@ -81,7 +81,7 @@ router.get('/', requirePermission('pos.login'), async (req, res, next) => {
 });
 
 // GET /api/customers/:id — get by ID
-router.get('/:id', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/:id', requirePermission('customers.manage'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');

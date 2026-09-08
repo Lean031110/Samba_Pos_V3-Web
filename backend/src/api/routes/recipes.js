@@ -47,7 +47,7 @@ router.get('/cost-summary', requirePermission('manage.inventory'), async (req, r
 
 // POST /api/recipes/calc-margin — calculate margin given cost + price (requires pos.login)
 // Body: { cost: number, price: number }
-router.post('/calc-margin', requirePermission('pos.login'), async (req, res, next) => {
+router.post('/calc-margin', requirePermission('recipes.view'), async (req, res, next) => {
   try {
     const { cost, price } = req.body || {};
     if (typeof cost !== 'number') throw new ValidationError('cost must be a number');
@@ -59,7 +59,7 @@ router.post('/calc-margin', requirePermission('pos.login'), async (req, res, nex
 
 // POST /api/recipes/suggest-price — suggest price for a target margin (requires pos.login)
 // Body: { cost: number, targetMarginPct: number }
-router.post('/suggest-price', requirePermission('pos.login'), async (req, res, next) => {
+router.post('/suggest-price', requirePermission('recipes.view'), async (req, res, next) => {
   try {
     const { cost, targetMarginPct } = req.body || {};
     if (typeof cost !== 'number') throw new ValidationError('cost must be a number');
@@ -70,7 +70,7 @@ router.post('/suggest-price', requirePermission('pos.login'), async (req, res, n
 });
 
 // GET /api/recipes/by-portion/:portionId — get full recipe for a portion (requires pos.login)
-router.get('/by-portion/:portionId', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/by-portion/:portionId', requirePermission('recipes.view'), async (req, res, next) => {
   try {
     const portionId = parseInt(req.params.portionId, 10);
     if (isNaN(portionId)) throw new ValidationError('portionId must be a number');
@@ -93,7 +93,7 @@ router.get('/by-portion/:portionId', requirePermission('pos.login'), async (req,
 });
 
 // GET /api/recipes/by-menu-item/:menuItemId — get recipes for all portions of a menu item (requires pos.login)
-router.get('/by-menu-item/:menuItemId', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/by-menu-item/:menuItemId', requirePermission('recipes.view'), async (req, res, next) => {
   try {
     const menuItemId = parseInt(req.params.menuItemId, 10);
     if (isNaN(menuItemId)) throw new ValidationError('menuItemId must be a number');
@@ -119,7 +119,7 @@ router.post('/by-portion/:portionId',
   });
 
 // GET /api/recipes/:recipeId/cost — calculate cost for a specific recipe (requires pos.login)
-router.get('/:recipeId/cost', requirePermission('pos.login'), async (req, res, next) => {
+router.get('/:recipeId/cost', requirePermission('recipes.view'), async (req, res, next) => {
   try {
     const recipeId = parseInt(req.params.recipeId, 10);
     if (isNaN(recipeId)) throw new ValidationError('recipeId must be a number');
