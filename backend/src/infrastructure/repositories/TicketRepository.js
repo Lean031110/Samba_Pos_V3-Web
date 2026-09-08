@@ -215,6 +215,16 @@ class TicketRepository {
         ExchangeRate: ticket.ExchangeRate ?? 1,
         TaxIncluded: ticket.TaxIncluded ? 1 : 0,
         TransactionDocumentId: ticket.TransactionDocumentId || null,
+        // State flags (Fase 2 — void/refund tracking)
+        IsVoided: ticket.IsVoided ? 1 : 0,
+        IsRefunded: ticket.IsRefunded ? 1 : 0,
+        VoidReason: ticket.VoidReason || null,
+        VoidedAt: ticket.VoidedAt || null,
+        VoidedBy: ticket.VoidedBy || null,
+        // Customer + cash session (Fase 3)
+        CustomerId: ticket.CustomerId || null,
+        WorkPeriodId: ticket.WorkPeriodId || null,
+        CashSessionId: ticket.CashSessionId || null,
       };
 
       let ticketId;

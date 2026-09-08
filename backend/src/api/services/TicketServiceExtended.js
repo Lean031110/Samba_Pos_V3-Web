@@ -470,6 +470,222 @@ class TicketServiceExtended {
       };
     });
   }
+
+  // ===================================================================
+  // MOVE ORDERS — POST /api/tickets/:sourceId/move-orders
+  // Body: { orderIds: number[], targetTicketId: number }
+  //
+  // Referencia SambaPOS V3: TicketService.MoveOrders()
+  //   - Mueve órdenes de un ticket origen a un ticket destino existente.
+  //   - Ambos tickets deben estar abiertos (no cerrados).
+  //   - Recalcula ambos tickets (origen y destino).
+  //   - ATÓMICO: todo en una transacción.
+  //   - Si el ticket origen queda sin órdenes, no se cierra automáticamente
+  //     (el operador decide si cancelar o agregar más).
+  // ===================================================================
+  async moveOrders(sourceTicketId, orderIds, targetTicketId) {
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      throw new ValidationError('orderIds array is required');
+    }
+    if (!targetTicketId || typeof targetTicketId !== 'number') {
+      throw new ValidationError('targetTicketId is required');
+    }
+    if (sourceTicketId === targetTicketId) {
+      throw new ValidationError('Source and target tickets must be different');
+    }
+
+    return withTransaction(async (trx) => {
+      // Load source ticket
+      const sourceRow = await ticketRepo.getTicketById(sourceTicketId);
+      if (!sourceRow) throw new NotFoundError(`Source ticket ${sourceTicketId} not found`);
+      if (sourceRow.IsClosed) {
+        throw new ConflictError(`Source ticket ${sourceTicketId} is closed — cannot move orders`);
+      }
+
+      // Load target ticket
+      const targetRow = await ticketRepo.getTicketById(targetTicketId);
+      if (!targetRow) throw new NotFoundError(`Target ticket ${targetTicketId} not found`);
+      if (targetRow.IsClosed) {
+        throw new ConflictError(`Target ticket ${targetTicketId} is closed — cannot receive orders`);
+      }
+
+      // Validate department compatibility
+      if (sourceRow.DepartmentId !== targetRow.DepartmentId) {
+        throw new ValidationError(
+          `Tickets must share the same department (source=${sourceRow.DepartmentId}, target=${targetRow.DepartmentId})`
+        );
+      }
+
+      // Load source orders and validate they exist
+      const sourceOrders = await trx('Orders').where({ TicketId: sourceTicketId });
+      for (const orderId of orderIds) {
+        const found = sourceOrders.find(o => o.Id === orderId);
+        if (!found) {
+          throw new NotFoundError(`Order ${orderId} not found on source ticket ${sourceTicketId}`);
+        }
+        if (!found.CalculatePrice) {
+          throw new ValidationError(`Order ${orderId} is voided/gifted — cannot move`);
+        }
+      }
+
+      // Move orders to target ticket
+      for (const orderId of orderIds) {
+        await trx('Orders').where({ Id: orderId, TicketId: sourceTicketId })
+          .update({ TicketId: targetTicketId });
+      }
+
+      // Recalculate source ticket (fewer orders now)
+      const sourceReloaded = await trx('Tickets').where({ Id: sourceTicketId }).first();
+      const sourceOrdersRemaining = await trx('Orders').where({ TicketId: sourceTicketId });
+      sourceReloaded.Orders = sourceOrdersRemaining;
+      const sourceTicket = new Ticket(sourceReloaded);
+      recalculateTicket(sourceTicket);
+      await ticketRepo.saveTicket(sourceTicket, trx);
+
+      // Recalculate target ticket (more orders now)
+      const targetReloaded = await trx('Tickets').where({ Id: targetTicketId }).first();
+      const targetOrdersAll = await trx('Orders').where({ TicketId: targetTicketId });
+      targetReloaded.Orders = targetOrdersAll;
+      const targetTicket = new Ticket(targetReloaded);
+      recalculateTicket(targetTicket);
+      await ticketRepo.saveTicket(targetTicket, trx);
+
+      publish(EventTopicNames.TicketTotalChanged, { Ticket: sourceTicket, reason: 'move_orders_source' });
+      publish(EventTopicNames.TicketTotalChanged, { Ticket: targetTicket, reason: 'move_orders_target' });
+
+      return { sourceTicketId, targetTicketId, movedOrderIds: orderIds };
+    }).then(async ({ sourceTicketId, targetTicketId }) => {
+      return {
+        sourceTicket: await ticketRepo.getTicketById(sourceTicketId),
+        targetTicket: await ticketRepo.getTicketById(targetTicketId),
+      };
+    });
+  }
+
+  // ===================================================================
+  // REOPEN TICKET — POST /api/tickets/:id/reopen
+  // Body: { reason?: string }
+  //
+  // Referencia SambaPOS V3: TicketService.ReopenTicket()
+  //   - Reabre un ticket previamente cerrado.
+  //   - Requiere permiso 'pos.reopen_ticket'.
+  //   - No se puede reabrir si: IsVoided, IsRefunded, o ya está abierto.
+  //   - Revierte el estado a OPEN y registra auditoría.
+  //   - NO revierte inventario (el inventario se descuenta al cerrar,
+  //     y se revierte al hacer void/refund, no al reabrir).
+  //   - ATÓMICO: transacción con optimistic locking.
+  // ===================================================================
+  async reopenTicket(ticketId, reason = '') {
+    return withTransaction(async (trx) => {
+      const ticketRow = await ticketRepo.getTicketById(ticketId);
+      if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
+
+      if (!ticketRow.IsClosed) {
+        throw new ConflictError(`Ticket ${ticketId} is already open`);
+      }
+      if (ticketRow.IsVoided) {
+        throw new ConflictError(`Ticket ${ticketId} is voided — cannot reopen (void is terminal)`);
+      }
+      if (ticketRow.IsRefunded) {
+        throw new ConflictError(`Ticket ${ticketId} is refunded — cannot reopen (refund is terminal)`);
+      }
+
+      // Revert ticket state
+      const ticket = new Ticket(ticketRow);
+      ticket.IsClosed = false;
+      ticket.IsLocked = false;
+
+      // Update ticket states JSON
+      let ticketStates = [];
+      try { ticketStates = JSON.parse(ticket.TicketStates || '[]'); } catch {}
+      const tsIdx = ticketStates.findIndex(s => s.StateName === 'Status');
+      if (tsIdx >= 0) ticketStates[tsIdx].State = 'Reopened';
+      else ticketStates.push({ StateName: 'Status', State: 'Reopened', Quantity: 0 });
+      ticket.TicketStates = JSON.stringify(ticketStates);
+
+      // Add note about reopen
+      const reopenNote = `[Reopened: ${new Date().toISOString()} — ${reason || 'no reason given'}]`;
+      ticket.Note = (ticket.Note || '') + '\n' + reopenNote;
+
+      await ticketRepo.saveTicket(ticket, trx);
+
+      // Publish event
+      publish(EventTopicNames.TicketOpened, { Ticket: ticket, reason: 'reopened' });
+
+      return { ticketId };
+    }).then(async ({ ticketId }) => {
+      return ticketRepo.getTicketById(ticketId);
+    });
+  }
+
+  // ===================================================================
+  // ADD CHANGE PAYMENT — POST /api/tickets/:id/change-payments
+  // Body: { changePaymentTypeId: number, amount: number, idempotencyKey?: string }
+  //
+  // Referencia SambaPOS V3: TicketService.AddChangePayment()
+  //   - Registra el cambio entregado al cliente (vuelto).
+  //   - Se llama DESPUÉS de AddPayment cuando hay cambio > 0.
+  //   - El cambio se registra en la tabla ChangePayments.
+  //   - ATÓMICO: dentro de la misma transacción que el pago.
+  //   - Auditoría: registra quien entregó el cambio.
+  // ===================================================================
+  async addChangePayment(ticketId, data, user = { userId: 0, username: 'system' }) {
+    const { changePaymentTypeId, amount, idempotencyKey } = data;
+
+    if (!changePaymentTypeId) {
+      throw new ValidationError('changePaymentTypeId is required');
+    }
+    if (typeof amount !== 'number' || amount <= 0) {
+      throw new ValidationError('amount must be a positive number');
+    }
+
+    return withTransaction(async (trx) => {
+      const ticketRow = await ticketRepo.getTicketById(ticketId);
+      if (!ticketRow) throw new NotFoundError(`Ticket ${ticketId} not found`);
+      if (ticketRow.IsClosed) {
+        throw new ConflictError(`Ticket ${ticketId} is closed — cannot add change payment`);
+      }
+
+      // Validate change payment type exists
+      const changeType = await trx('ChangePaymentTypes')
+        .where({ Id: changePaymentTypeId })
+        .first();
+      if (!changeType) {
+        throw new NotFoundError(`ChangePaymentType ${changePaymentTypeId} not found`);
+      }
+
+      // Check idempotency at service level (defense-in-depth with middleware)
+      if (idempotencyKey) {
+        const existing = await trx('IdempotencyKeys')
+          .where({ Key: idempotencyKey, Endpoint: 'POST /api/tickets/:id/change-payments' })
+          .first();
+        if (existing && existing.Status === 'COMPLETED' && existing.ResponseBody) {
+          return JSON.parse(existing.ResponseBody);
+        }
+      }
+
+      // Create change payment record
+      const [changePaymentId] = await trx('ChangePayments').insert({
+        TicketId: ticketId,
+        ChangePaymentTypeId: changePaymentTypeId,
+        Amount: amount,
+        Date: new Date().toISOString(),
+        UserId: user.userId || 0,
+      });
+
+      // Publish event
+      publish(EventTopicNames.PaymentProcessed, {
+        Ticket: ticketRow,
+        PaymentTypeName: 'Change',
+        ProcessedAmount: -amount, // negative = money going out
+        Reason: 'change_payment',
+      });
+
+      return { ticketId, changePaymentId, amount };
+    }).then(async ({ ticketId }) => {
+      return ticketRepo.getTicketById(ticketId);
+    });
+  }
 }
 
 module.exports = { TicketServiceExtended };

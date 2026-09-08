@@ -206,4 +206,65 @@ router.post('/:id/refund',
   } catch (err) { next(err); }
 });
 
+// POST /api/tickets/:id/move-orders — move orders to another ticket
+// Body: { orderIds: number[], targetTicketId: number }
+// Referencia SambaPOS V3: TicketService.MoveOrders()
+router.post('/:id/move-orders',
+  requirePermission('pos.merge'),  // reuse merge permission (similar operation)
+  auditLog('ticket.move_orders', 'Ticket'),
+  async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { orderIds, targetTicketId } = req.body || {};
+    if (!Array.isArray(orderIds)) throw new ValidationError('orderIds must be an array');
+    if (!targetTicketId) throw new ValidationError('targetTicketId is required');
+    const result = await ticketServiceExt.moveOrders(
+      id,
+      orderIds.map(n => parseInt(n, 10)),
+      parseInt(targetTicketId, 10)
+    );
+    res.json({ data: result });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/reopen — reopen a closed ticket
+// Body: { reason?: string }
+// Referencia SambaPOS V3: TicketService.ReopenTicket()
+router.post('/:id/reopen',
+  requirePermission('pos.reopen_ticket'),
+  auditLog('ticket.reopen', 'Ticket'),
+  async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { reason } = req.body || {};
+    const result = await ticketServiceExt.reopenTicket(id, reason || '');
+    res.json({ data: result });
+  } catch (err) { next(err); }
+});
+
+// POST /api/tickets/:id/change-payments — register change payment (vuelto)
+// Body: { changePaymentTypeId: number, amount: number, idempotencyKey?: string }
+// Referencia SambaPOS V3: TicketService.AddChangePayment()
+router.post('/:id/change-payments',
+  requirePermission('pos.payment'),
+  idempotent('POST /api/tickets/:id/change-payments'),
+  auditLog('ticket.change_payment', 'Ticket'),
+  async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) throw new ValidationError('id must be a positive integer');
+    const { changePaymentTypeId, amount, idempotencyKey } = req.body || {};
+    if (!changePaymentTypeId) throw new ValidationError('changePaymentTypeId is required');
+    if (typeof amount !== 'number' || amount <= 0) throw new ValidationError('amount must be a positive number');
+    const result = await ticketServiceExt.addChangePayment(id, {
+      changePaymentTypeId: parseInt(changePaymentTypeId, 10),
+      amount,
+      idempotencyKey,
+    }, req.user);
+    res.status(201).json({ data: result });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
