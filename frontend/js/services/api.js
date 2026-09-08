@@ -3,9 +3,20 @@
 // =====================================================================
 // All HTTP calls go through this module. Returns parsed JSON or throws
 // an Error with the HTTP status code and body.
+//
+// FASE 11 integration:
+//   - Write operations (POST/PUT/PATCH/DELETE) that should survive
+//     offline are routed through OfflineQueue.enqueue() when the
+//     browser is offline.
+//   - Read operations (GET) always go directly to the server — if
+//     offline, they fail immediately (no stale cache from outbox).
+//   - Errors that are NOT retryable (400, 401, 403, 404, 409, 422)
+//     are thrown immediately — they should NOT be enqueued.
+//   - Errors that ARE retryable (network error, timeout, 502, 503, 504)
+//     are enqueued for later sync when offline.
 // =====================================================================
 
-const API_BASE = '/api';   // same-origin (Express serves /frontend as static)
+const API_BASE = '/api';
 
 /**
  * Get the JWT token from localStorage (set by login view).
@@ -22,7 +33,86 @@ function setToken(token) {
   else localStorage.removeItem('samba_jwt');
 }
 
+/**
+ * HTTP status codes that are NOT retryable.
+ * These indicate a permanent error with the request itself
+ * (bad data, auth failure, not found, conflict) — retrying
+ * would produce the same result.
+ */
+const NON_RETRYABLE_STATUS = new Set([400, 401, 403, 404, 409, 422]);
+
+/**
+ * Check if an error is retryable (transient).
+ * @param {number} status — HTTP status code (0 = network error)
+ * @returns {boolean}
+ */
+function isRetryable(status) {
+  if (status === 0) return true;  // network error
+  if (status >= 500) return true;  // 5xx server errors
+  return !NON_RETRYABLE_STATUS.has(status);
+}
+
+/**
+ * Operations that should be enqueued when offline.
+ * Only write operations that modify business data.
+ * GET requests are never enqueued.
+ */
+const OFFLINEABLE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Paths that should NOT be enqueued (auth, push, read-only).
+ */
+const NON_OFFLINEABLE_PATHS = [
+  '/auth/login',
+  '/auth/me',
+  '/push/',
+  '/reports/',
+];
+
+function isOfflineable(method, path) {
+  if (!OFFLINEABLE_METHODS.has(method)) return false;
+  for (const p of NON_OFFLINEABLE_PATHS) {
+    if (path.startsWith(p)) return false;
+  }
+  return true;
+}
+
+class ApiError extends Error {
+  constructor(status, message, body = null) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function request(method, path, body = null, skipAuth = false) {
+  // Check if we should use the offline queue
+  const useOfflineQueue = !skipAuth
+    && isOfflineable(method, path)
+    && window.OfflineQueue
+    && OfflineQueue._db
+    && !navigator.onLine;  // Only when actually offline
+
+  if (useOfflineQueue) {
+    // Try to enqueue in the offline outbox
+    const idempotencyKey = (body && body.idempotencyKey) || undefined;
+    const result = await OfflineQueue.enqueue(method, API_BASE + path, body, {
+      idempotencyKey,
+    });
+    if (!result.synced) {
+      // Operation was queued — return a synthetic response
+      // so the caller knows it was accepted (will sync later)
+      throw new ApiError(202, 'Operación encolada — se sincronizará cuando vuelva la conexión', {
+        offline: true,
+        uuid: result.uuid,
+      });
+    }
+    // If synced (online was available), return the data
+    if (result.data) return result.data;
+  }
+
+  // Normal online request
   const opts = {
     method,
     headers: {
@@ -36,6 +126,14 @@ async function request(method, path, body = null, skipAuth = false) {
   try {
     res = await fetch(API_BASE + path, opts);
   } catch (err) {
+    // Network error — check if we should enqueue
+    if (isOfflineable(method, path) && window.OfflineQueue && OfflineQueue._db) {
+      const idempotencyKey = (body && body.idempotencyKey) || undefined;
+      await OfflineQueue.enqueue(method, API_BASE + path, body, { idempotencyKey });
+      throw new ApiError(202, 'Operación encolada — se sincronizará cuando vuelva la conexión', {
+        offline: true,
+      });
+    }
     throw new ApiError(0, 'Error de red', err.message);
   }
 
@@ -58,71 +156,47 @@ async function request(method, path, body = null, skipAuth = false) {
   return json;
 }
 
-class ApiError extends Error {
-  constructor(status, message, details = null) {
-    super(message);
-    this.status = status;
-    this.details = details;
-    this.name = 'ApiError';
-  }
-}
-
+// === Convenience methods ===
 const Api = {
-  // === Auth ===
-  login: (username, pin) => request('POST', '/auth/login', { username, pin }, true),
-  me:    ()            => request('GET',  '/auth/me', null, false),
   setToken,
   getToken,
-
-  // === Tickets ===
-  getTickets:        ()  => request('GET',    '/tickets'),
-  getTicket:         (id)=> request('GET',    `/tickets/${id}`),
-  createTicket:      (b) => request('POST',   '/tickets', b),
-  addOrder:          (id, b) => request('POST', `/tickets/${id}/orders`, b),
-  addCalculation:    (id, b) => request('POST', `/tickets/${id}/calculations`, b),
-  addPayment:        (id, b) => request('POST', `/tickets/${id}/payments`, b),
-  closeTicket:       (id) => request('POST',   `/tickets/${id}/close`),
-  printTicket:       (id) => request('GET',    `/tickets/${id}/print`),
-
-  // === Products ===
-  getProducts:       ()  => request('GET',    '/products'),
-  getProduct:        (id)=> request('GET',    `/products/${id}`),
-  getProductsByGroup:(code)=>request('GET',   `/products/group/${code}`),
-
-  // === Tables ===
-  getTables:         ()  => request('GET',    '/tables'),
-  getTable:          (id)=> request('GET',    `/tables/${id}`),
-  updateTableState:  (id, b) => request('PATCH', `/tables/${id}/state`, b),
-
-  // === Sprint 5 — Extended ===
-  setNote:     (id, note)        => request('POST', `/tickets/${id}/note`,  { note }),
-  giftOrders:  (id, orderIds)    => request('POST', `/tickets/${id}/gift`,  { orderIds }),
-  voidTicket:  (id)              => request('POST', `/tickets/${id}/void`),
-  setTags:     (id, tags)        => request('POST', `/tickets/${id}/tags`,  { tags }),
-  splitTicket: (id, orderIds)    => request('POST', `/tickets/${id}/split`, { orderIds }),
-  refundTicket:(id, amount, reason) => request('POST', `/tickets/${id}/refund`, { amount, reason }),
-  mergeTickets:(sourceTicketIds) => request('POST', `/tickets/merge`, { sourceTicketIds }),
-  printTicketSend: (id, body)    => request('POST', `/tickets/${id}/print/send`, body),
-
-  // === Configuration (DB-driven, no hardcoded IDs) ===
-  getCalculationTypes: ()        => request('GET',  '/calculation-types'),
-  getPaymentTypes:     ()        => request('GET',  '/payment-types'),
-  getDepartments:      ()        => request('GET',  '/departments'),
-  getTicketTypes:      ()        => request('GET',  '/ticket-types'),
-  getTaxTemplates:     ()        => request('GET',  '/tax-templates'),
-
-  // === Kitchen (KDS) ===
-  getKitchenStations:  ()        => request('GET',  '/kitchen/stations'),
-  getKitchenOrders:    (stationId) => request('GET', `/kitchen/orders${stationId ? '?stationId=' + stationId : ''}`),
-  kitchenBump:         (id)      => request('POST', `/kitchen/orders/${id}/bump`),
-  kitchenServe:        (id)      => request('POST', `/kitchen/orders/${id}/serve`),
-  kitchenVoid:         (id)      => request('POST', `/kitchen/orders/${id}/void`),
-  kitchenRecall:       (id)      => request('POST', `/kitchen/orders/${id}/recall`),
-  kitchenUpdateState:  (id, state) => request('POST', `/kitchen/orders/${id}/state`, { state }),
-
-  // === Internal ===
-  request,  // exposed for one-off calls
+  request,
+  ApiError,
+  isRetryable,
+  // Auth
+  async login(username, pin) {
+    const res = await request('POST', '/auth/login', { username, pin }, true);
+    if (res.token) setToken(res.token);
+    return res;
+  },
+  // Products
+  async getProducts() { return request('GET', '/products'); },
+  async createProduct(data) { return request('POST', '/products', data); },
+  // Tables
+  async getTables() { return request('GET', '/tables'); },
+  // Tickets
+  async getOpenTickets() { return request('GET', '/tickets'); },
+  async getTicket(id) { return request('GET', `/tickets/${id}`); },
+  async createTicket(data) { return request('POST', '/tickets', data); },
+  async addOrder(ticketId, data) { return request('POST', `/tickets/${ticketId}/orders`, data); },
+  async addPayment(ticketId, data) { return request('POST', `/tickets/${ticketId}/payments`, data); },
+  async closeTicket(ticketId, data) { return request('POST', `/tickets/${ticketId}/close`, data); },
+  async voidTicket(ticketId, data) { return request('POST', `/tickets/${ticketId}/void`, data); },
+  async refundTicket(ticketId, data) { return request('POST', `/tickets/${ticketId}/refund`, data); },
+  // Kitchen
+  async getKitchenStations() { return request('GET', '/kitchen/stations'); },
+  async getKitchenOrders(stationId) {
+    const q = stationId ? `?stationId=${stationId}` : '';
+    return request('GET', `/kitchen/orders${q}`);
+  },
+  // Inventory
+  async getIngredients() { return request('GET', '/inventory/ingredients'); },
+  async getStockBalances(warehouseId) { return request('GET', `/inventory/stock/${warehouseId}`); },
+  // Reports
+  async getReport(type, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return request('GET', `/reports/${type}?${query}`);
+  },
 };
 
 window.Api = Api;
-window.ApiError = ApiError;

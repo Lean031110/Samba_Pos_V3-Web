@@ -1,20 +1,13 @@
 // =====================================================================
-// reportService.js — Sales and operational reports
+// reportService.js — Sales and operational reports (corrected)
 // =====================================================================
 // FASE 14 — Reportes.
 //
-// Provides data for:
-//   - Daily/monthly sales totals
-//   - Top-selling products
-//   - Sales by category
-//   - Sales by user (cashier)
-//   - Sales by terminal
-//   - Payment method breakdown
-//   - Tax summary
-//   - Discount summary
-//   - Void/refund summary
-//   - Inventory movement summary
-//   - Cash session summary
+// Fixes from audit:
+//   - getSalesSummary: does NOT filter IsVoided in the initial query
+//     so we can count voided tickets separately.
+//   - getVoidRefundSummary: uses Payments table for refund amounts
+//     (not Tickets.TotalAmount) to support partial refunds.
 // =====================================================================
 
 const { db } = require('../../infrastructure/db/db');
@@ -23,18 +16,16 @@ class ReportService {
 
   /**
    * Get sales summary for a date range.
-   * @param {string} startDate — ISO date (e.g., '2026-09-01')
-   * @param {string} endDate — ISO date (e.g., '2026-09-30')
-   * @returns {Promise<Object>} { totalSales, totalTickets, avgTicket, totalTax, totalDiscounts, totalVoids, totalRefunds }
+   * Fetches ALL tickets in range, then separates by status.
    */
   async getSalesSummary(startDate, endDate) {
-    const tickets = await db('Tickets')
-      .whereBetween('Date', [startDate + 'T00:00:00', endDate + 'T23:59:59'])
-      .where('IsVoided', 0);
+    // Fetch ALL tickets in range (including voided/refunded)
+    const allTickets = await db('Tickets')
+      .whereBetween('Date', [startDate + 'T00:00:00', endDate + 'T23:59:59']);
 
-    const closedTickets = tickets.filter(t => t.IsClosed && !t.IsRefunded);
-    const voidedTickets = tickets.filter(t => t.IsVoided);
-    const refundedTickets = tickets.filter(t => t.IsRefunded);
+    const closedTickets = allTickets.filter(t => t.IsClosed && !t.IsVoided && !t.IsRefunded);
+    const voidedTickets = allTickets.filter(t => t.IsVoided);
+    const refundedTickets = allTickets.filter(t => t.IsRefunded);
 
     const totalSales = closedTickets.reduce((sum, t) => sum + Number(t.TotalAmount || 0), 0);
     const totalTickets = closedTickets.length;
@@ -45,15 +36,14 @@ class ReportService {
       totalTickets,
       avgTicket: totalTickets > 0 ? Math.round((totalSales / totalTickets) * 100) / 100 : 0,
       totalVoided: voidedTickets.length,
+      voidedAmount: Math.round(voidedTickets.reduce((s, t) => s + Number(t.TotalAmount || 0), 0) * 100) / 100,
       totalRefunded: refundedTickets.length,
+      refundedAmount: Math.round(refundedTickets.reduce((s, t) => s + Number(t.TotalAmount || 0), 0) * 100) / 100,
     };
   }
 
   /**
    * Get top-selling products by quantity in a date range.
-   * @param {string} startDate
-   * @param {string} endDate
-   * @param {number} [limit=20]
    */
   async getTopProducts(startDate, endDate, limit = 20) {
     const rows = await db('Orders')
@@ -62,6 +52,7 @@ class ReportService {
       .where('Orders.CalculatePrice', 1)
       .whereBetween('Tickets.Date', [startDate + 'T00:00:00', endDate + 'T23:59:59'])
       .where('Tickets.IsVoided', 0)
+      .where('Tickets.IsRefunded', 0)
       .select(
         'MenuItems.Id as MenuItemId',
         'MenuItems.Name as MenuItemName',
@@ -92,6 +83,7 @@ class ReportService {
       .where('Orders.CalculatePrice', 1)
       .whereBetween('Tickets.Date', [startDate + 'T00:00:00', endDate + 'T23:59:59'])
       .where('Tickets.IsVoided', 0)
+      .where('Tickets.IsRefunded', 0)
       .select(
         'MenuItems.GroupCode as Category',
         db.raw('COUNT(*) as OrderCount'),
@@ -118,6 +110,7 @@ class ReportService {
       .whereBetween('Tickets.Date', [startDate + 'T00:00:00', endDate + 'T23:59:59'])
       .where('Tickets.IsClosed', 1)
       .where('Tickets.IsVoided', 0)
+      .where('Tickets.IsRefunded', 0)
       .select(
         'Users.Id as UserId',
         'Users.Name as UserName',
@@ -163,24 +156,37 @@ class ReportService {
 
   /**
    * Get void/refund summary.
+   * FIX: Uses Payments table for actual refund amounts (not Tickets.TotalAmount)
+   * to support partial refunds correctly.
    */
   async getVoidRefundSummary(startDate, endDate) {
-    const voided = await db('Tickets')
+    // Voided tickets (entire ticket cancelled)
+    const voidedTickets = await db('Tickets')
       .whereBetween('Date', [startDate + 'T00:00:00', endDate + 'T23:59:59'])
       .where('IsVoided', 1);
 
-    const refunded = await db('Tickets')
+    // Refunded tickets — get actual refund amount from negative payments
+    const refundedTickets = await db('Tickets')
       .whereBetween('Date', [startDate + 'T00:00:00', endDate + 'T23:59:59'])
       .where('IsRefunded', 1);
 
+    // Get actual refund amounts from Payments (negative amounts = refunds)
+    const refundPayments = refundedTickets.length > 0
+      ? await db('Payments')
+          .whereIn('TicketId', refundedTickets.map(t => t.Id))
+          .where('Amount', '<', 0)
+      : [];
+
+    const totalRefundAmount = refundPayments.reduce((sum, p) => sum + Math.abs(Number(p.Amount || 0)), 0);
+
     return {
       voids: {
-        count: voided.length,
-        totalAmount: voided.reduce((s, t) => s + Number(t.TotalAmount || 0), 0),
+        count: voidedTickets.length,
+        totalAmount: Math.round(voidedTickets.reduce((s, t) => s + Number(t.TotalAmount || 0), 0) * 100) / 100,
       },
       refunds: {
-        count: refunded.length,
-        totalAmount: refunded.reduce((s, t) => s + Number(t.TotalAmount || 0), 0),
+        count: refundedTickets.length,
+        totalAmount: Math.round(totalRefundAmount * 100) / 100, // actual refund amount from negative payments
       },
     };
   }

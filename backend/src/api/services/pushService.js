@@ -1,112 +1,81 @@
 // =====================================================================
-// pushService.js — Web Push notification service
+// pushService.js — Web Push notification service (REAL implementation)
 // =====================================================================
-// FASE 9 — Web Push notifications via Web Push API + VAPID.
+// FASE 9 — Web Push notifications via the 'web-push' npm package.
 //
-// This service handles:
-//   - VAPID key pair generation (on first run if not in DB)
-//   - Device subscription management (register/unregister push endpoints)
-//   - Sending push notifications to subscribed devices
-//   - Notification categorization (kitchen, printer, inventory, system)
+// This is a REAL Web Push implementation, not a polling fallback.
+// Uses the web-push library which handles:
+//   - VAPID JWT signing (RFC 8292)
+//   - AES128GCM payload encryption (RFC 8291)
+//   - HTTP POST to the push endpoint
+//   - 404/410 response handling (expired subscriptions)
 //
-// NOTE: This implementation uses the Web Push API directly (RFC 8030)
-// without the 'web-push' npm package, to avoid adding a dependency.
-// It generates VAPID keys using Node's crypto module and sends push
-// messages via fetch() to the subscription endpoint.
+// VAPID keys are generated on first run and stored in PushSettings table.
+// They can also be set via env vars: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY.
 //
-// For production with a real VAPID key pair, set these env vars:
-//   VAPID_PUBLIC_KEY=<base64url-encoded public key>
-//   VAPID_PRIVATE_KEY=<base64url-encoded private key>
-//   VAPID_SUBJECT=mailto:admin@example.com
+// Polling fallback (/api/push/pending) is kept for browsers without
+// Push API support (e.g., iOS Safari < 16.4), but push notifications
+// are sent for REAL via the web-push library.
 // =====================================================================
 
-const crypto = require('crypto');
+const webpush = require('web-push');
 const { db } = require('../../infrastructure/db/db');
 
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@sambapos-lba.local';
-
-// In-memory cache of VAPID keys (loaded from DB or env on first use)
-let vapidKeysCache = null;
+let vapidConfigured = false;
 
 /**
- * Generate a new VAPID key pair using P-256 elliptic curve.
- * Returns { publicKey, privateKey } as base64url strings.
+ * Configure web-push with VAPID keys.
+ * Called once on server startup.
  */
-function generateVAPIDKeys() {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', {
-    namedCurve: 'P-256',
-    publicKeyEncoding: { type: 'spki', format: 'der' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'der' },
-  });
-  return {
-    publicKey: publicKey.toString('base64url'),
-    privateKey: privateKey.toString('base64url'),
-  };
-}
+async function configureVAPID() {
+  if (vapidConfigured) return;
 
-/**
- * Get VAPID keys — from env, DB cache, or generate new pair.
- * On first call, generates keys and stores them in the Settings table.
- */
-async function getVAPIDKeys() {
-  if (vapidKeysCache) return vapidKeysCache;
+  let keys = null;
 
-  // Try env vars first
+  // 1. Try env vars
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    vapidKeysCache = {
+    keys = {
       publicKey: process.env.VAPID_PUBLIC_KEY,
       privateKey: process.env.VAPID_PRIVATE_KEY,
     };
-    return vapidKeysCache;
-  }
-
-  // Try DB (Settings table)
-  try {
-    // Check if Settings table exists
-    const tableExists = await db.schema.hasTable('PushSettings');
-    if (tableExists) {
-      const row = await db('PushSettings').where({ Key: 'vapid_keys' }).first();
-      if (row && row.Value) {
-        vapidKeysCache = JSON.parse(row.Value);
-        return vapidKeysCache;
-      }
+    console.log('[push] Using VAPID keys from environment');
+  } else {
+    // 2. Try DB
+    const row = await db('PushSettings').where({ Key: 'vapid_keys' }).first();
+    if (row && row.Value) {
+      keys = JSON.parse(row.Value);
+      console.log('[push] Using VAPID keys from database');
+    } else {
+      // 3. Generate new keys and store in DB
+      keys = webpush.generateVAPIDKeys();
+      await db('PushSettings').insert({
+        Key: 'vapid_keys',
+        Value: JSON.stringify(keys),
+      }).onConflict('Key').merge();
+      console.log('[push] Generated new VAPID keys and stored in database');
     }
-  } catch (e) {
-    // Settings table might not exist — fall through to generation
   }
 
-  // Generate new keys
-  vapidKeysCache = generateVAPIDKeys();
+  webpush.setVapidDetails(VAPID_SUBJECT, keys.publicKey, keys.privateKey);
+  vapidConfigured = true;
+}
 
-  // Store in DB for persistence across restarts
-  try {
-    const tableExists = await db.schema.hasTable('PushSettings');
-    if (!tableExists) {
-      await db.schema.createTable('PushSettings', (t) => {
-        t.string('Key', 100).primary();
-        t.text('Value');
-        t.timestamp('UpdatedAt').defaultTo(db.fn.now());
-      });
-    }
-    await db('PushSettings').insert({
-      Key: 'vapid_keys',
-      Value: JSON.stringify(vapidKeysCache),
-    }).onConflict('Key').merge();
-  } catch (e) {
-    console.warn('[push] Could not persist VAPID keys:', e.message);
+/**
+ * Get VAPID public key (for the browser to subscribe).
+ */
+async function getVAPIDPublicKey() {
+  await configureVAPID();
+  const row = await db('PushSettings').where({ Key: 'vapid_keys' }).first();
+  if (row) {
+    return JSON.parse(row.Value).publicKey;
   }
-
-  return vapidKeysCache;
+  // Fallback to env
+  return process.env.VAPID_PUBLIC_KEY || null;
 }
 
 /**
  * Subscribe a device to push notifications.
- * @param {Object} params
- * @param {number} params.userId
- * @param {string} params.endpoint — Push endpoint URL from the browser
- * @param {string} params.p256dh — P-256 public key (base64url)
- * @param {string} params.auth — Auth secret (base64url)
- * @param {string} [params.categories] — comma-separated: 'kitchen,printer,inventory,system'
  */
 async function subscribeDevice(params) {
   const { userId, endpoint, p256dh, auth, categories = 'system' } = params;
@@ -114,23 +83,6 @@ async function subscribeDevice(params) {
     throw new Error('userId, endpoint, p256dh, auth are required');
   }
 
-  // Check if PushSubscriptions table exists, create if not
-  const tableExists = await db.schema.hasTable('PushSubscriptions');
-  if (!tableExists) {
-    await db.schema.createTable('PushSubscriptions', (t) => {
-      t.increments('Id').primary();
-      t.integer('UserId').notNullable();
-      t.text('Endpoint').notNullable();
-      t.text('P256dhKey').notNullable();
-      t.text('AuthSecret').notNullable();
-      t.string('Categories', 200).defaultTo('system');
-      t.timestamp('CreatedAt').defaultTo(db.fn.now());
-      t.timestamp('UpdatedAt').defaultTo(db.fn.now());
-      t.unique(['UserId', 'Endpoint']);
-    });
-  }
-
-  // Upsert subscription
   const existing = await db('PushSubscriptions')
     .where({ UserId: userId, Endpoint: endpoint })
     .first();
@@ -140,6 +92,8 @@ async function subscribeDevice(params) {
       P256dhKey: p256dh,
       AuthSecret: auth,
       Categories: categories,
+      IsActive: 1,
+      ExpiredAt: null,
       UpdatedAt: new Date().toISOString(),
     });
     return { subscriptionId: existing.Id, updated: true };
@@ -151,46 +105,48 @@ async function subscribeDevice(params) {
     P256dhKey: p256dh,
     AuthSecret: auth,
     Categories: categories,
+    IsActive: 1,
   });
   return { subscriptionId: id, updated: false };
 }
 
 /**
  * Unsubscribe a device.
- * @param {number} userId
- * @param {string} endpoint
  */
 async function unsubscribeDevice(userId, endpoint) {
-  const deleted = await db('PushSubscriptions')
+  // Mark as inactive rather than deleting (for audit)
+  const updated = await db('PushSubscriptions')
     .where({ UserId: userId, Endpoint: endpoint })
-    .del();
-  return { deleted: deleted > 0 };
+    .update({ IsActive: 0, UpdatedAt: new Date().toISOString() });
+  return { unsubscribed: updated > 0 };
 }
 
 /**
- * Send a push notification to all subscribed devices matching the category.
- * Uses the Web Push API (RFC 8030) with JWT VAPID auth.
+ * Send a push notification to all active subscribers matching the category.
+ * Uses the web-push library to send REAL push messages via the Push API.
  *
  * @param {Object} params
- * @param {string} params.category — 'kitchen', 'printer', 'inventory', 'system'
+ * @param {string} params.category — 'kitchen', 'printer', 'inventory', 'system', 'all'
  * @param {string} params.title
  * @param {string} params.body
  * @param {string} [params.icon] — icon URL
  * @param {string} [params.url] — URL to open on click
  * @param {string} [params.tag] — notification tag (for collapse/replace)
+ * @returns {Promise<{sent: number, failed: number, expired: number}>}
  */
 async function sendPushNotification(params) {
+  await configureVAPID();
   const { category = 'system', title, body, icon = '/icons/icon-192.png', url = '/', tag } = params;
 
+  // Find active subscriptions matching the category
   const subs = await db('PushSubscriptions')
-    .where('Categories', 'like', `%${category}%`)
-    .orWhere('Categories', 'like', '%all%');
+    .where({ IsActive: 1 })
+    .andWhere(function () {
+      this.where('Categories', 'like', `%${category}%`)
+          .orWhere('Categories', 'like', '%all%');
+    });
 
-  if (subs.length === 0) return { sent: 0, failed: 0 };
-
-  const vapidKeys = await getVAPIDKeys();
-  let sent = 0;
-  let failed = 0;
+  if (subs.length === 0) return { sent: 0, failed: 0, expired: 0 };
 
   const payload = JSON.stringify({
     title,
@@ -202,52 +158,80 @@ async function sendPushNotification(params) {
     requireInteraction: category === 'kitchen' || category === 'printer',
   });
 
-  for (const sub of subs) {
-    try {
-      // Use Node's built-in fetch (Node 18+) to send the push message
-      // For compatibility, we use a simplified approach: just POST to
-      // the endpoint with the payload. Real Web Push requires JWT + AES128GCM
-      // encryption, which needs the 'web-push' npm package.
-      //
-      // For now, we store the notification in DB and let the SW poll for
-      // pending notifications via /api/push/pending. This is a fallback
-      // that works without the web-push library.
+  let sent = 0;
+  let failed = 0;
+  let expired = 0;
 
-      // Store notification in DB for SW to pick up
-      await db('PushNotifications').insert({
-        UserId: sub.UserId,
-        Category: category,
-        Title: title,
-        Body: body,
-        Icon: icon,
-        Url: url,
-        Tag: tag || category,
-        Status: 'PENDING',
-        CreatedAt: new Date().toISOString(),
-      }).catch(() => {
-        // Table might not exist yet — create it
+  for (const sub of subs) {
+    const pushSubscription = {
+      endpoint: sub.Endpoint,
+      keys: {
+        p256dh: sub.P256dhKey,
+        auth: sub.AuthSecret,
+      },
+    };
+
+    // Log the notification attempt
+    const [notifId] = await db('PushNotifications').insert({
+      UserId: sub.UserId,
+      SubscriptionId: sub.Id,
+      Category: category,
+      Title: title,
+      Body: body,
+      Icon: icon,
+      Url: url,
+      Tag: tag || category,
+      Status: 'PENDING',
+      Attempts: 1,
+    });
+
+    try {
+      const result = await webpush.sendNotification(pushSubscription, payload, {
+        TTL: 86400, // 24h — message lives at push service if device offline
+      });
+
+      // Success (201 Created from push service)
+      await db('PushNotifications').where({ Id: notifId }).update({
+        Status: 'SENT',
+        SentAt: new Date().toISOString(),
       });
       sent++;
     } catch (err) {
-      console.warn(`[push] Failed for sub ${sub.Id}:`, err.message);
-      failed++;
+      const statusCode = err.statusCode;
+
+      if (statusCode === 404 || statusCode === 410) {
+        // Endpoint expired or no longer valid — mark subscription as expired
+        await db('PushSubscriptions').where({ Id: sub.Id }).update({
+          IsActive: 0,
+          ExpiredAt: new Date().toISOString(),
+        });
+        await db('PushNotifications').where({ Id: notifId }).update({
+          Status: 'EXPIRED',
+          ErrorMessage: `Endpoint returned ${statusCode}`,
+        });
+        expired++;
+      } else {
+        // Other error (429 rate limit, 500 server error, etc.)
+        await db('PushNotifications').where({ Id: notifId }).update({
+          Status: 'FAILED',
+          ErrorMessage: `HTTP ${statusCode}: ${err.body || err.message}`.slice(0, 500),
+        });
+        failed++;
+      }
     }
   }
 
-  // Clean up expired subscriptions (returned 410 Gone)
-  // This would be done by a periodic cleanup task in production
-
-  return { sent, failed };
+  return { sent, failed, expired };
 }
 
 /**
- * Get pending push notifications for a user (for SW polling fallback).
- * @param {number} userId
- * @param {string} [category] — filter by category
+ * Get pending push notifications for a user (polling fallback).
+ * Used by browsers without Push API support.
  */
 async function getPendingNotifications(userId, category = null) {
   let query = db('PushNotifications')
-    .where({ UserId: userId, Status: 'PENDING' })
+    .where({ UserId: userId, Status: 'SENT' })
+    .whereNull('DeliveredAt')
     .orderBy('CreatedAt', 'desc')
     .limit(20);
 
@@ -255,40 +239,42 @@ async function getPendingNotifications(userId, category = null) {
     query = query.andWhere({ Category: category });
   }
 
-  const notifications = await query.catch(() => []);
+  const notifications = await query;
 
-  // Mark as delivered
+  // Mark as delivered (polling fallback delivery confirmation)
   if (notifications.length > 0) {
     const ids = notifications.map(n => n.Id);
     await db('PushNotifications')
       .whereIn('Id', ids)
-      .update({ Status: 'DELIVERED', DeliveredAt: new Date().toISOString() })
-      .catch(() => {});
+      .update({ Status: 'DELIVERED', DeliveredAt: new Date().toISOString() });
   }
 
   return notifications;
 }
 
 /**
- * Clean up expired push subscriptions and old notifications.
+ * Clean up old notifications and expired subscriptions.
  */
 async function cleanupExpired() {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
 
-  // Delete old delivered notifications
-  try {
-    await db('PushNotifications')
-      .where('CreatedAt', '<', cutoff.toISOString())
-      .whereNot('Status', 'PENDING')
-      .del();
-  } catch (e) { /* table might not exist */ }
+  const oldNotifs = await db('PushNotifications')
+    .where('CreatedAt', '<', cutoff.toISOString())
+    .whereNot('Status', 'PENDING')
+    .del();
 
-  return { cleaned: true };
+  const expiredSubs = await db('PushSubscriptions')
+    .where('IsActive', 0)
+    .whereNotNull('ExpiredAt')
+    .where('ExpiredAt', '<', cutoff.toISOString())
+    .del();
+
+  return { cleanedNotifications: oldNotifs, cleanedSubscriptions: expiredSubs };
 }
 
 module.exports = {
-  getVAPIDKeys,
-  generateVAPIDKeys,
+  configureVAPID,
+  getVAPIDPublicKey,
   subscribeDevice,
   unsubscribeDevice,
   sendPushNotification,

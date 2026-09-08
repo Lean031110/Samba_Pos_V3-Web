@@ -69,6 +69,7 @@ function errorLogger(err, req, res, next) {
   log(LEVELS.ERROR, `Unhandled error on ${req.method} ${req.originalUrl}`, {
     error: err.message,
     stack: err.stack,
+    requestId: req.requestId || null,
   });
   next(err);
 }

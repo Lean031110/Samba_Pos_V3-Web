@@ -114,13 +114,20 @@ function createApp() {
   });
 
   // === Metrics endpoint (Fase 18 — observability) ===
-  app.get('/metrics', (req, res) => {
+  // Protected by authentication — requires a valid JWT.
+  // In production, restrict further to admin network or localhost.
+  app.get('/metrics', authenticate, (req, res) => {
     const m = getMetrics();
     res.json({
       service: 'sambapos-lba',
       ...m,
       printWorker: printWorkerInstance ? { running: true } : { running: false },
       websocket: ioInstance ? { connected: true } : { connected: false },
+      memory: {
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024 * 100) / 100,
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100,
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024 * 100) / 100,
+      },
     });
   });
 

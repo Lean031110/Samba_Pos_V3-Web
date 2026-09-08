@@ -19,8 +19,11 @@ const router = express.Router();
 // GET /api/push/vapid-public-key — returns the VAPID public key for the browser
 router.get('/vapid-public-key', async (req, res, next) => {
   try {
-    const keys = await pushService.getVAPIDKeys();
-    res.json({ data: { publicKey: keys.publicKey } });
+    const publicKey = await pushService.getVAPIDPublicKey();
+    if (!publicKey) {
+      return res.status(503).json({ error: 'VAPID not configured' });
+    }
+    res.json({ data: { publicKey } });
   } catch (err) { next(err); }
 });
 
