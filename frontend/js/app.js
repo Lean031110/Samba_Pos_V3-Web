@@ -16,7 +16,8 @@ const App = {
     PosView.init();
     PaymentView.init();
     KitchenView.init();
-    this.views = { login: LoginView, dashboard: DashboardView, pos: PosView, payment: PaymentView, kitchen: KitchenView };
+    AdminView.init();
+    this.views = { login: LoginView, dashboard: DashboardView, pos: PosView, payment: PaymentView, kitchen: KitchenView, admin: AdminView };
 
     // Clock
     this._startClock();
@@ -45,6 +46,9 @@ const App = {
       if (viewName === 'kitchen') {
         KitchenView.containerEl = document.getElementById('kds-container');
         KitchenView.load();
+      }
+      if (viewName === 'admin') {
+        AdminView.load();
       }
       if (viewName !== 'kitchen' && KitchenView._timerInterval) {
         KitchenView.unload();

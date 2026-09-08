@@ -46,6 +46,9 @@
         <flex-button variant="info" icon="fa-utensils" label="Cocina"
                      style="min-height: 32px; padding: 0 10px; font-size: 12px;"
                      onclick="window.App.navigate('kitchen')"></flex-button>
+        <flex-button variant="info" icon="fa-gear" label="Admin"
+                     style="min-height: 32px; padding: 0 10px; font-size: 12px;"
+                     onclick="window.App.navigate('admin')"></flex-button>
         <flex-button variant="danger" icon="fa-right-from-bracket" label="Cerrar sesión"
                      style="min-height: 32px; padding: 0 10px; font-size: 12px;"
                      onclick="window.App.logout()"></flex-button>
@@ -189,6 +192,37 @@
       <section class="view view-kitchen" id="view-kitchen" style="flex-direction: column; overflow: hidden;">
         <div id="kds-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;"></div>
       </section>
+
+      <!-- AdminView -->
+      <section class="view view-admin" id="view-admin">
+        <div class="admin-layout">
+          <aside class="admin-sidebar" id="admin-sidebar">
+            <div class="admin-sidebar__header">
+              <i class="fa-solid fa-gear"></i> Administración
+            </div>
+            <nav class="admin-sidebar__nav">
+              <button class="admin-nav-item active" data-admin-tab="products" onclick="window.App.views.admin.showTab('products')">
+                <i class="fa-solid fa-box"></i> Productos
+              </button>
+              <button class="admin-nav-item" data-admin-tab="inventory" onclick="window.App.views.admin.showTab('inventory')">
+                <i class="fa-solid fa-warehouse"></i> Inventario
+              </button>
+              <button class="admin-nav-item" data-admin-tab="recipes" onclick="window.App.views.admin.showTab('recipes')">
+                <i class="fa-solid fa-book"></i> Recetas
+              </button>
+              <button class="admin-nav-item" data-admin-tab="printers" onclick="window.App.views.admin.showTab('printers')">
+                <i class="fa-solid fa-print"></i> Impresoras
+              </button>
+              <button class="admin-nav-item" data-admin-tab="config" onclick="window.App.views.admin.showTab('config')">
+                <i class="fa-solid fa-sliders"></i> Configuración
+              </button>
+            </nav>
+          </aside>
+          <div class="admin-content" id="admin-content">
+            <!-- Content populated by AdminView.showTab() -->
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- =========================================================== -->
@@ -226,6 +260,7 @@
   <script src="/js/views/pos.js"></script>
   <script src="/js/views/payment.js"></script>
   <script src="/js/views/kitchen.js"></script>
+  <script src="/js/views/admin.js"></script>
   <script src="/js/app.js"></script>
 
   <!-- PWA: register Service Worker (offline shell + installable) -->
