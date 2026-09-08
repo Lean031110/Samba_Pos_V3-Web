@@ -19,7 +19,7 @@
    ===================================================================== */
 
 /* =====================================================================
-   Login screen — responsive with logo
+   Login screen — premium professional design with logo
    ===================================================================== */
 .view-login {
   display: flex;
@@ -29,18 +29,32 @@
   background: linear-gradient(135deg, #044392 0%, #0a4fb0 35%, #1976d2 70%, #2196f3 100%);
   min-height: 100vh;
   min-height: 100dvh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle pattern overlay for depth */
+.view-login::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 20% 80%, rgba(255,255,255,0.04) 0%, transparent 50%),
+                     radial-gradient(circle at 80% 20%, rgba(255,255,255,0.03) 0%, transparent 50%);
+  pointer-events: none;
 }
 
 .login-card {
   background: var(--lba-bg-elevated);
   border-radius: var(--lba-radius-lg);
-  box-shadow: var(--lba-shadow-modal);
-  padding: 32px 28px 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.30), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  padding: 40px 32px 28px;
   width: 100%;
   max-width: 440px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 .login-card__logo {
@@ -49,9 +63,10 @@
 }
 
 .login-card__logo img {
-  max-width: 280px;
+  max-width: 300px;
   width: 100%;
   height: auto;
+  filter: drop-shadow(0 2px 8px rgba(4, 67, 146, 0.15));
 }
 
 .login-card__title {
@@ -64,19 +79,26 @@
 
 .login-card__input {
   font-size: 18px;
-  padding: 14px 16px;
+  padding: 14px 18px;
   border: 2px solid var(--lba-border-default);
   border-radius: var(--lba-radius-md);
   background: var(--lba-bg-panel);
   color: var(--lba-fg-default);
   min-height: var(--lba-touch-comfort);
-  transition: border-color var(--lba-anim-fast);
+  transition: border-color var(--lba-anim-fast), box-shadow var(--lba-anim-fast);
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .login-card__input:focus {
   outline: none;
   border-color: var(--lba-accent);
-  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.18);
+  box-shadow: 0 0 0 4px rgba(33, 150, 243, 0.15);
+}
+
+.login-card__input::placeholder {
+  color: var(--lba-fg-muted);
+  font-weight: 400;
 }
 
 /* Numeric keypad on login */
@@ -140,9 +162,10 @@
 }
 
 .app-header__logo {
-  height: 32px;
+  height: 36px;
   width: auto;
-  margin-right: 4px;
+  margin-right: 8px;
+  filter: brightness(0) invert(1);  /* Make logo white on blue header */
 }
 
 .app-header__clock {
@@ -750,6 +773,8 @@
   position: fixed;
   inset: 0;
   background: rgba(4, 67, 146, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: none;
   align-items: center;
   justify-content: center;
@@ -764,21 +789,30 @@
 .modal-card {
   background: var(--lba-bg-elevated);
   border-radius: var(--lba-radius-lg);
-  padding: 20px;
+  padding: 24px;
   width: 100%;
   max-width: 500px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: var(--lba-shadow-modal);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.30);
+  animation: modal-slide-up var(--lba-anim-normal);
+}
+
+@keyframes modal-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
 }
 
 .modal-card__title {
   font-size: 18px;
   font-weight: 700;
   color: var(--lba-blue-900);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
   border-bottom: 2px solid var(--lba-blue-100);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* =====================================================================

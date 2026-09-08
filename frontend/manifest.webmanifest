@@ -1,7 +1,7 @@
 {
   "name": "SambaPos_LBA — POS de Restaurante",
   "short_name": "SambaPos",
-  "description": "POS web moderno, táctil, instalable y offline-capable para restaurantes.",
+  "description": "POS web moderno, táctil, instalable y con capacidad offline para restaurantes.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -50,12 +50,12 @@
     {
       "name": "Cocina (KDS)",
       "short_name": "KDS",
-      "description": "Abrir el Kitchen Display System",
+      "description": "Abrir el sistema de display de cocina",
       "url": "/#kitchen",
       "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Dashboard",
+      "name": "Panel principal",
       "short_name": "Inicio",
       "description": "Abrir el dashboard principal",
       "url": "/#dashboard",

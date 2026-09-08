@@ -36,21 +36,21 @@ async function request(method, path, body = null, skipAuth = false) {
   try {
     res = await fetch(API_BASE + path, opts);
   } catch (err) {
-    throw new ApiError(0, 'Network error', err.message);
+    throw new ApiError(0, 'Error de red', err.message);
   }
 
   // Auto-logout on 401
   if (res.status === 401 && !skipAuth) {
     setToken(null);
     if (window.App) window.App.navigate('login');
-    throw new ApiError(401, 'Session expired. Please login again.', null);
+    throw new ApiError(401, 'Sesión expirada. Iniciá sesión nuevamente.', null);
   }
 
   let json = null;
   try { json = await res.json(); } catch { /* empty body */ }
 
   if (!res.ok) {
-    const message = json?.message || res.statusText || 'Unknown error';
+    const message = json?.message || res.statusText || 'Error desconocido';
     const error = new ApiError(res.status, message, json);
     error.body = json;
     throw error;

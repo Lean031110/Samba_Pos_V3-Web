@@ -430,7 +430,7 @@ const PosView = {
       return window.App.toast('No hay tipos de cálculo de descuento configurados', 'warn');
     }
     const optionsHtml = discountTypes.map(c => {
-      const methodLabel = c.CalculationMethod === 0 ? '%' : c.CalculationMethod === 2 ? 'fixed' : 'round';
+      const methodLabel = c.CalculationMethod === 0 ? '%' : c.CalculationMethod === 2 ? 'fijo' : 'redondeo';
       return `<label style="display: flex; align-items: center; gap: 8px; padding: 6px; cursor: pointer;">
         <input type="radio" name="calc-type" value="${c.Id}" ${c.Id === discountTypes[0].Id ? 'checked' : ''}>
         <span>${this._escape(c.Name)} (${methodLabel})</span>

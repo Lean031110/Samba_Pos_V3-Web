@@ -11,6 +11,16 @@
 // Tapping an Occupied table opens the existing ticket.
 // =====================================================================
 
+// Map backend table states (English, SambaPOS convention) to Spanish
+// display labels. The English values are kept for CSS class matching
+// (table-tile--available, etc.) and logic comparisons.
+const TABLE_STATE_LABELS = {
+  'Available':       'Disponible',
+  'New Orders':      'Nuevos pedidos',
+  'Bill Requested':  'Cuenta solicitada',
+  'Locked':          'Bloqueada',
+};
+
 const DashboardView = {
   init() {
     this.gridEl = document.getElementById('dashboard-grid');
@@ -48,11 +58,12 @@ const DashboardView = {
 
     for (const table of filtered) {
       const state = this._extractState(table);
+      const stateLabel = TABLE_STATE_LABELS[state] || state;
       const tile = document.createElement('div');
       tile.className = 'table-tile table-tile--' + state.toLowerCase().replace(/\s+/g, '-');
       tile.innerHTML = `
         <div class="table-tile__name">${this._escape(table.Name)}</div>
-        <div class="table-tile__state">${state}</div>
+        <div class="table-tile__state">${stateLabel}</div>
       `;
       tile.addEventListener('click', () => this._onTableClick(table));
       this.gridEl.appendChild(tile);
@@ -71,7 +82,8 @@ const DashboardView = {
 
   async _onTableClick(table) {
     const state = this._extractState(table);
-    window.App.toast(`Mesa ${table.Name} (${state}) tocada`, 'info');
+    const stateLabel = TABLE_STATE_LABELS[state] || state;
+    window.App.toast(`Mesa ${table.Name} (${stateLabel}) tocada`, 'info');
 
     if (state === 'Available') {
       // Create a new ticket linked to this table
@@ -98,7 +110,7 @@ const DashboardView = {
           window.store.setState({ currentTicket: full.data }, 'ticket-loaded');
           window.App.navigate('pos');
         } else {
-          window.App.toast('La mesa está marcada como ' + state + ' pero no se encontró ningún ticket abierto', 'warn');
+          window.App.toast('La mesa está marcada como ' + (TABLE_STATE_LABELS[state] || state) + ' pero no se encontró ningún ticket abierto', 'warn');
         }
       } catch (err) {
         window.App.toast('No se puede cargar el ticket: ' + err.message, 'error');

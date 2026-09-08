@@ -127,7 +127,7 @@ async function cacheFirst(request) {
     return fresh;
   } catch (err) {
     // Offline and not cached.
-    return new Response('', { status: 504, statusText: 'Offline' });
+    return new Response('', { status: 504, statusText: 'Sin conexion' });
   }
 }
 
