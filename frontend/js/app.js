@@ -25,6 +25,11 @@ const App = {
     // Initial navigation
     this.navigate('login');
 
+    // Initialize push notifications (after login will subscribe properly)
+    if (window.PushClient) {
+      PushClient.init();
+    }
+
     // Expose globally for inline onclick handlers
     window.App = this;
   },

@@ -20,7 +20,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { Server } = require('socket.io');
 
-const { requestLogger, errorLogger, log, LEVELS } = require('./middleware/logger');
+const { requestLogger, errorLogger, log, LEVELS, getMetrics } = require('./middleware/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { authenticate } = require('./middleware/auth');
 const { subscribe, EventTopicNames } = require('../application/eventBus');
@@ -113,10 +113,21 @@ function createApp() {
     });
   });
 
+  // === Metrics endpoint (Fase 18 — observability) ===
+  app.get('/metrics', (req, res) => {
+    const m = getMetrics();
+    res.json({
+      service: 'sambapos-lba',
+      ...m,
+      printWorker: printWorkerInstance ? { running: true } : { running: false },
+      websocket: ioInstance ? { connected: true } : { connected: false },
+    });
+  });
+
   // === Static frontend (single-page app) ===
   app.use(express.static(FRONTEND_DIR, { maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
   // SPA fallback: any non-/api route returns index.html
-  app.get(/^\/(?!api|health|ready|version).*/, (req, res, next) => {
+  app.get(/^\/(?!api|health|ready|version|metrics).*/, (req, res, next) => {
     if (req.method !== 'GET') return next();
     res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
   });
@@ -135,6 +146,8 @@ function createApp() {
   app.use('/api/printers', require('./routes/printers'));
   app.use('/api/print', require('./routes/printers'));  // alias for /api/print/tickets/:id/send
   app.use('/api/customers', require('./routes/customers'));           // FASE 3
+  app.use('/api/push', require('./routes/push'));                     // FASE 9
+  app.use('/api/reports', require('./routes/reports'));               // FASE 14
   app.use('/api', require('./routes/cash-sessions'));                 // FASE 3 (work-periods + cash-sessions)
   app.use('/api', require('./routes/config'));
 
