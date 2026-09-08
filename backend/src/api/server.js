@@ -150,6 +150,7 @@ function createApp() {
   app.use('/api/kitchen', require('./routes/kitchen'));
   app.use('/api/inventory', require('./routes/inventory'));
   app.use('/api/recipes', require('./routes/recipes'));              // FASE 5
+  app.use('/api/combos', require('./routes/combos'));                // BLOQUE D — Fase 4
   app.use('/api/printers', require('./routes/printers'));
   app.use('/api/print', require('./routes/printers'));  // alias for /api/print/tickets/:id/send
   app.use('/api/customers', require('./routes/customers'));           // FASE 3
