@@ -86,6 +86,15 @@ const EventTopicNames = {
   CloseTicketRequested:   'CloseTicketRequested',
   // Misc
   ScreenMenuItemDataSelected: 'ScreenMenuItemDataSelected',
+  // PrintWorker / Printer events (Batch 4)
+  PrintJobFailed:           'PrintJobFailed',
+  PrintJobRetrying:         'PrintJobRetrying',
+  PrintJobCompleted:        'PrintJobCompleted',
+  PrinterOnline:            'PrinterOnline',
+  PrinterOffline:           'PrinterOffline',
+  // Inventory events (Batch 4)
+  InventoryLow:             'InventoryLow',
+  InventoryUpdated:         'InventoryUpdated',
 };
 
 module.exports = {

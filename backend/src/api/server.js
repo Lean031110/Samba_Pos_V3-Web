@@ -10,6 +10,7 @@
 //   - Graceful shutdown (SIGTERM/SIGINT)
 //   - Runs migrations on startup (seed must be run explicitly)
 //   - Request size limits
+//   - PrintWorker auto-start/stop (background queue processor)
 // =====================================================================
 
 const express = require('express');
@@ -23,6 +24,7 @@ const { requestLogger, errorLogger, log, LEVELS } = require('./middleware/logger
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { authenticate } = require('./middleware/auth');
 const { subscribe, EventTopicNames } = require('../application/eventBus');
+const { PrintWorker } = require('./services/PrintWorker');
 const { db } = require('../infrastructure/db/db');
 
 const PORT = process.env.PORT || 3001;
@@ -42,6 +44,7 @@ const FRONTEND_DIR = path.join(__dirname, '..', '..', '..', 'frontend');
 
 let ioInstance = null;
 let isShuttingDown = false;
+let printWorkerInstance = null;
 
 /**
  * Create and configure the Express app.
@@ -192,6 +195,27 @@ function bridgeEventsToSocket(io) {
     io.to('role:pos').emit('KitchenOrderVoided', payload);
     log(LEVELS.DEBUG, `WebSocket broadcast: KitchenOrderVoided`, { orderId: payload?.orderId });
   });
+
+  // === Batch 4: Inventory events ===
+  // InventoryLow — sent to admin room for real-time alerts
+  subscribe('InventoryLow', (payload) => {
+    io.to('role:admin').emit('InventoryLow', payload);
+    io.to('role:pos').emit('InventoryLow', payload);
+    log(LEVELS.WARN, `WebSocket broadcast: InventoryLow`, {
+      ingredientId: payload?.ingredientId,
+      currentStock: payload?.currentStock,
+      minimumStock: payload?.minimumStock,
+    });
+  });
+
+  // InventoryUpdated — general stock change notification
+  subscribe('InventoryUpdated', (payload) => {
+    io.to('role:admin').emit('InventoryUpdated', payload);
+    log(LEVELS.DEBUG, `WebSocket broadcast: InventoryUpdated`, {
+      ticketId: payload?.ticketId,
+      action: payload?.action,
+    });
+  });
 }
 
 /**
@@ -215,6 +239,12 @@ function gracefulShutdown(signal) {
   return async () => {
     log(LEVELS.INFO, `Received ${signal}. Shutting down gracefully...`);
     isShuttingDown = true;
+
+    // Stop PrintWorker first (stop polling for new jobs)
+    if (printWorkerInstance) {
+      await printWorkerInstance.stop();
+      log(LEVELS.INFO, 'PrintWorker stopped.');
+    }
 
     // Stop accepting new connections
     if (ioInstance) {
@@ -449,6 +479,46 @@ async function startServer() {
 
   // Bridge eventBus → WebSocket
   bridgeEventsToSocket(ioInstance);
+
+  // Start PrintWorker — background poller that drains the print queue
+  // and sends ESC/POS bytes to printers via TCP. The worker emits
+  // 'job:claimed', 'job:printed', 'job:failed', 'job:retrying'
+  // events that we can bridge to WebSocket for real-time monitoring.
+  printWorkerInstance = new PrintWorker({
+    pollIntervalMs: 1000,
+    maxConcurrent: 1,
+  });
+
+  // Bridge PrintWorker events → WebSocket broadcast
+  printWorkerInstance.on('job:printed', (job) => {
+    if (ioInstance) {
+      ioInstance.to('role:admin').emit('PrintJobCompleted', {
+        jobId: job.Id, jobUuid: job.Uuid, status: job.Status,
+      });
+    }
+  });
+  printWorkerInstance.on('job:failed', (job, err) => {
+    log(LEVELS.WARN, `PrintJob ${job.Id} failed permanently: ${err.message}`);
+    if (ioInstance) {
+      ioInstance.to('role:admin').emit('PrintJobFailed', {
+        jobId: job.Id, jobUuid: job.Uuid, error: err.message,
+      });
+    }
+  });
+  printWorkerInstance.on('job:retrying', (job) => {
+    if (ioInstance) {
+      ioInstance.to('role:admin').emit('PrintJobRetrying', {
+        jobId: job.Id, jobUuid: job.Uuid, attempts: job.Attempts,
+        nextAttemptAt: job.NextAttemptAt,
+      });
+    }
+  });
+  printWorkerInstance.on('error', (err) => {
+    log(LEVELS.ERROR, 'PrintWorker error', { error: err.message });
+  });
+
+  printWorkerInstance.start();
+  log(LEVELS.INFO, 'PrintWorker started (poll interval: 1s)');
 
   server.listen(PORT, () => {
     log(LEVELS.INFO, `SambaPos_LBA — API server listening on port ${PORT}`);

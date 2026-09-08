@@ -238,7 +238,24 @@ class InventoryService {
       });
     }
 
-    return { movementId, newBalance: await this.getStockBalance(ingredientId, warehouseId, trx) };
+    // Check if stock fell below minimum after this movement
+    const updatedBalance = await this.getStockBalance(ingredientId, warehouseId, trx);
+    if (updatedBalance) {
+      const ingredient = await conn('Ingredients').where({ Id: ingredientId }).first();
+      if (ingredient && Number(updatedBalance.Quantity) <= Number(ingredient.MinimumStock) && ingredient.MinimumStock > 0) {
+        // Publish InventoryLow event — will be bridged to WebSocket for admin notifications
+        publish('InventoryLow', {
+          ingredientId,
+          ingredientName: ingredient.Name,
+          warehouseId,
+          currentStock: Number(updatedBalance.Quantity),
+          minimumStock: Number(ingredient.MinimumStock),
+          unitId: updatedBalance.UnitId,
+        });
+      }
+    }
+
+    return { movementId, newBalance: updatedBalance };
   }
 
   /**
