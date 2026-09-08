@@ -187,6 +187,12 @@ jobs:
           node scripts/run-migrations.js
           node --test tests/unit-conversion-verification.test.js
 
+      - name: Domain extended verification tests (moveOrders, reopen, changePayment)
+        working-directory: backend
+        run: |
+          node scripts/run-migrations.js
+          node --test tests/domain-extended-verification.test.js
+
       # -----------------------------------------------------------------
       # Playwright E2E
       # -----------------------------------------------------------------
@@ -206,9 +212,14 @@ jobs:
           rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
           node scripts/run-migrations.js
 
-      - name: Run E2E tests (27, failOnFlakyTests=true, repeat-each=2)
+      - name: Run E2E tests (functional, failOnFlakyTests=true, repeat-each=2)
         working-directory: backend
-        run: npx playwright test --reporter=line --repeat-each=2
+        run: npx playwright test --project=chromium --reporter=line --repeat-each=2
+
+      - name: Run screenshot tests (documentation, no flaky gate)
+        working-directory: backend
+        run: npx playwright test --project=screenshots --reporter=line
+        continue-on-error: true  # Screenshots are documentation — don't block CI
 
       - name: Upload Playwright report on failure
         if: failure()

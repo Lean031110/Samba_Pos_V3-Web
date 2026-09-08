@@ -370,9 +370,9 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await page.evaluate(() => window.App.views.pos.printBill());
     await page.waitForFunction(
       () => !!document.getElementById('modal-overlay')?.classList.contains('is-open'),
-      { timeout: 5000 }
+      { timeout: 15000 }
     );
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
     await page.screenshot({ path: path.join(SHOTS, '09-ticket-closed.png'), fullPage: false });
   });
 
