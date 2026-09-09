@@ -58,6 +58,7 @@ function createApp() {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],  // Need inline for our vanilla JS
+        scriptSrcAttr: ["'unsafe-inline'"],  // BLOQUE F — allow inline onclick handlers (flex-button + admin nav)
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'", 'ws:', 'wss:'],
@@ -583,4 +584,4 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = { createApp, startServer };
+module.exports = { createApp, startServer, getPrintWorkerInstance: () => printWorkerInstance };

@@ -195,6 +195,7 @@ const AdminView = {
       case 'inventory': await this._renderInventory(); break;
       case 'recipes':   await this._renderRecipes();   break;
       case 'printers':  await this._renderPrinters();   break;
+      case 'templates': await this._renderTemplates();  break;
       case 'config':    await this._renderConfig();    break;
       default:
         this._setContent('<p class="admin-empty">Pestaña no reconocida</p>');
@@ -1317,6 +1318,183 @@ const AdminView = {
       await this._renderPrinters();
     } catch (err) {
       this._error('No se puede cambiar el estado: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // Tab: PLANTILLAS (BLOQUE F — Fase 6: editor de templates)
+  // ===================================================================
+
+  async _renderTemplates() {
+    this._loading('Cargando plantillas de impresión...');
+    let templates = [];
+    try {
+      const res = await Api.request('GET', '/print/templates/list?includeInactive=true');
+      templates = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar las plantillas: ' + (err.message || err));
+      return;
+    }
+
+    const newBtn = this._btn('Nueva plantilla', 'kds-btn--primary', 'fa-plus', "window.AdminView._newTemplate()");
+
+    const typeLabels = {
+      RECEIPT: 'Recibo',
+      KITCHEN_ORDER: 'Comanda cocina',
+      TEST: 'Prueba',
+      CUSTOM: 'Personalizada',
+    };
+    const typeBadge = (t) => `<span class="admin-tag admin-tag--info">${this._escape(typeLabels[t] || t)}</span>`;
+
+    let html;
+    if (templates.length === 0) {
+      html = `<p class="admin-empty">No hay plantillas configuradas. Hacé clic en "Nueva plantilla" para crear una.</p>`;
+    } else {
+      const rows = templates.map(t => {
+        const isActive = t.IsActive === 1 || t.IsActive === true;
+        const statusTag = isActive
+          ? '<span class="admin-tag admin-tag--success">Activa</span>'
+          : '<span class="admin-tag admin-tag--danger">Inactiva</span>';
+        return `
+          <tr>
+            <td data-label="Nombre">${this._escape(t.Name)}</td>
+            <td data-label="Tipo">${typeBadge(t.TemplateType)}</td>
+            <td data-label="Descripción">${this._escape(t.Description || '—')}</td>
+            <td data-label="Estado">${statusTag}</td>
+            <td data-label="Acciones" class="admin-row-actions">
+              ${this._btn('Editar', 'kds-btn--primary', 'fa-edit', `window.AdminView._editTemplate(${t.Id})`)}
+              ${this._btn('Vista previa', '', 'fa-eye', `window.AdminView._previewTemplate(${t.Id})`)}
+              ${isActive
+                ? this._btn('Desactivar', 'kds-btn--void', 'fa-power-off', `window.AdminView._toggleTemplate(${t.Id}, false)`)
+                : this._btn('Activar', '', 'fa-power-off', `window.AdminView._toggleTemplate(${t.Id}, true)`)}
+            </td>
+          </tr>
+        `;
+      }).join('');
+      const tableHtml = this._table(['Nombre', 'Tipo', 'Descripción', 'Estado', 'Acciones'], rows);
+      html = `
+        <div class="admin-section">
+          <div class="admin-section__header">
+            <h2><i class="fa-solid fa-file-lines"></i> Plantillas de impresión</h2>
+            ${newBtn}
+          </div>
+          <p class="admin-help">
+            Las plantillas definen cómo se formatean los recibos y comandas de cocina antes de enviarse a la impresora.
+            Tipos: <strong>Recibo</strong> (ticket cliente), <strong>Comanda cocina</strong> (KDS), <strong>Prueba</strong> (test), <strong>Personalizada</strong>.
+          </p>
+          ${tableHtml}
+        </div>
+      `;
+    }
+    this._setContent(html);
+  },
+
+  _newTemplate() {
+    this._showTemplateModal(null);
+  },
+
+  async _editTemplate(id) {
+    try {
+      const res = await Api.request('GET', `/print/templates/${id}`);
+      this._showTemplateModal(res.data);
+    } catch (err) {
+      this._error('No se pudo cargar la plantilla: ' + (err.message || err));
+    }
+  },
+
+  _showTemplateModal(existing) {
+    const isEdit = !!existing;
+    const t = existing || { Name: '', TemplateType: 'RECEIPT', Description: '', Template: '', MergeLines: 0 };
+    const body = `
+      <div class="admin-form">
+        <label class="admin-field">
+          <span>Nombre</span>
+          <input type="text" id="tpl-name" value="${this._escape(t.Name)}" placeholder="Ej: Recibo con logo">
+        </label>
+        <label class="admin-field">
+          <span>Tipo</span>
+          <select id="tpl-type">
+            <option value="RECEIPT" ${t.TemplateType === 'RECEIPT' ? 'selected' : ''}>Recibo (cliente)</option>
+            <option value="KITCHEN_ORDER" ${t.TemplateType === 'KITCHEN_ORDER' ? 'selected' : ''}>Comanda de cocina</option>
+            <option value="TEST" ${t.TemplateType === 'TEST' ? 'selected' : ''}>Prueba de impresora</option>
+            <option value="CUSTOM" ${t.TemplateType === 'CUSTOM' ? 'selected' : ''}>Personalizada</option>
+          </select>
+        </label>
+        <label class="admin-field">
+          <span>Descripción</span>
+          <input type="text" id="tpl-desc" value="${this._escape(t.Description || '')}" placeholder="Notas internas">
+        </label>
+        <label class="admin-field">
+          <span>Plantilla (texto con marcadores)</span>
+          <textarea id="tpl-body" rows="10" style="font-family: monospace; font-size: 12px;" placeholder="Marcadores disponibles:&#10;{header} {ticket_number} {date} {separator}&#10;{orders} {items} {totals} {footer}">${this._escape(t.Template || '')}</textarea>
+        </label>
+        <div class="admin-form-actions">
+          <button class="kds-btn kds-btn--primary" onclick="window.AdminView._saveTemplate(${isEdit ? existing.Id : 'null'})">
+            <i class="fa-solid fa-save"></i> Guardar
+          </button>
+          <button class="kds-btn" onclick="window.AdminView._closeModal()">Cancelar</button>
+        </div>
+      </div>
+    `;
+    this._showModal(isEdit ? 'Editar plantilla' : 'Nueva plantilla', body);
+  },
+
+  async _saveTemplate(id) {
+    const name = document.getElementById('tpl-name').value.trim();
+    const templateType = document.getElementById('tpl-type').value;
+    const description = document.getElementById('tpl-desc').value.trim();
+    const template = document.getElementById('tpl-body').value;
+    if (!name) {
+      this._error('El nombre es obligatorio');
+      return;
+    }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/print/templates/${id}`, { name, templateType, description, template });
+        this.toast('Plantilla actualizada', 'success');
+      } else {
+        await Api.request('POST', '/print/templates', { name, templateType, description, template });
+        this.toast('Plantilla creada', 'success');
+      }
+      this._closeModal();
+      await this._renderTemplates();
+    } catch (err) {
+      this._error('No se pudo guardar: ' + (err.message || err));
+    }
+  },
+
+  async _previewTemplate(id) {
+    try {
+      const res = await Api.request('POST', `/print/templates/${id}/preview`);
+      const data = res.data;
+      const hex = data.bytesHex || '';
+      const previewHex = hex.slice(0, 400);
+      const body = `
+        <div class="admin-form">
+          <p><strong>Tipo:</strong> ${this._escape(data.templateType)}</p>
+          <p><strong>Bytes generados:</strong> ${data.bytesLength}</p>
+          <p><strong>Datos de muestra:</strong></p>
+          <pre style="background: var(--lba-bg-hover); padding: 8px; border-radius: 4px; font-size: 11px; overflow-x: auto;">${this._escape(JSON.stringify(data.sampleData, null, 2))}</pre>
+          <p><strong>ESC/POS (hex, primeros 200 bytes):</strong></p>
+          <pre style="background: var(--lba-bg-hover); padding: 8px; border-radius: 4px; font-size: 11px; overflow-x: auto; word-break: break-all;">${this._escape(previewHex)}${hex.length > 400 ? '...' : ''}</pre>
+          <div class="admin-form-actions">
+            <button class="kds-btn" onclick="window.AdminView._closeModal()">Cerrar</button>
+          </div>
+        </div>
+      `;
+      this._showModal('Vista previa de plantilla', body);
+    } catch (err) {
+      this._error('No se pudo generar la vista previa: ' + (err.message || err));
+    }
+  },
+
+  async _toggleTemplate(id, makeActive) {
+    try {
+      await Api.request('PATCH', `/print/templates/${id}`, { isActive: makeActive });
+      this.toast(makeActive ? 'Plantilla activada' : 'Plantilla desactivada', 'success');
+      await this._renderTemplates();
+    } catch (err) {
+      this._error('No se pudo cambiar el estado: ' + (err.message || err));
     }
   },
 
