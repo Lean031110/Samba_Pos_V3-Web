@@ -30,6 +30,18 @@ class ReportService {
     const totalSales = closedTickets.reduce((sum, t) => sum + Number(t.TotalAmount || 0), 0);
     const totalTickets = closedTickets.length;
 
+    // P0 FIX — refundedAmount must be the ACTUAL amount refunded (from Payments table),
+    // NOT the ticket's TotalAmount. A partial refund of $20 on a $100 ticket
+    // should report refundedAmount=$20, not $100.
+    let refundedAmount = 0;
+    if (refundedTickets.length > 0) {
+      const refundedTicketIds = refundedTickets.map(t => t.Id);
+      const refundPayments = await db('Payments')
+        .whereIn('TicketId', refundedTicketIds)
+        .where('Amount', '<', 0);  // refund payments are negative
+      refundedAmount = refundPayments.reduce((sum, p) => sum + Math.abs(Number(p.Amount || 0)), 0);
+    }
+
     return {
       period: { startDate, endDate },
       totalSales: Math.round(totalSales * 100) / 100,
@@ -38,7 +50,7 @@ class ReportService {
       totalVoided: voidedTickets.length,
       voidedAmount: Math.round(voidedTickets.reduce((s, t) => s + Number(t.TotalAmount || 0), 0) * 100) / 100,
       totalRefunded: refundedTickets.length,
-      refundedAmount: Math.round(refundedTickets.reduce((s, t) => s + Number(t.TotalAmount || 0), 0) * 100) / 100,
+      refundedAmount: Math.round(refundedAmount * 100) / 100,
     };
   }
 

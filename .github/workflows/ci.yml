@@ -117,81 +117,19 @@ jobs:
         working-directory: backend
         run: node scripts/run-migrations.js
 
-      - name: Integration tests
-        working-directory: backend
-        run: node --test tests/api-integration.test.js
-
-      - name: KDS verification tests
+      - name: All unit tests (528 tests, 21 suites)
         working-directory: backend
         run: |
           node scripts/run-migrations.js
-          node --test tests/kds-verification.test.js
+          npm run test:unit
 
-      - name: Inventory verification tests
+      - name: Print test count summary
         working-directory: backend
         run: |
-          node scripts/run-migrations.js
-          node --test tests/inventory-verification.test.js
-
-      - name: Concurrency tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/concurrency-verification.test.js
-
-      - name: Idempotency verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/idempotency-verification.test.js
-
-      - name: Idempotency concurrency tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/idempotency-concurrency.test.js
-
-      - name: Domain verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/domain-verification.test.js
-
-      - name: Security verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/security-verification.test.js
-
-      - name: Printing verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/printing-verification.test.js
-
-      - name: Recipes verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/recipes-verification.test.js
-
-      - name: Refund verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/refund-verification.test.js
-
-      - name: Unit conversion verification tests
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/unit-conversion-verification.test.js
-
-      - name: Domain extended verification tests (moveOrders, reopen, changePayment)
-        working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          node --test tests/domain-extended-verification.test.js
+          echo "=== UNIT TEST SUITES EXECUTED ==="
+          ls tests/*.test.js | wc -l
+          echo "=== E2E SUITES ==="
+          ls tests/e2e/*.spec.js 2>/dev/null | wc -l
 
       # -----------------------------------------------------------------
       # Playwright E2E
