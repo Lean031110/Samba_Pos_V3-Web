@@ -26,6 +26,7 @@
 
 const OfflineQueue = {
   _db: null,
+  _syncPaused: false,  // BLOQUE I — paused when JWT expires during sync
   _DB_NAME: 'sambapos_offline',
   _DB_VERSION: 1,
   _STORE_NAME: 'outbox',
@@ -109,17 +110,46 @@ const OfflineQueue = {
 
   /**
    * Sync all pending operations. Called when connection is restored.
+   *
+   * BLOQUE I — Fase 9: P0 gap "Ordenar outbox: ticket→orders→payment→close"
+   * Operations are sorted by:
+   *   1. Priority class (ticket create > order add > payment > close > other)
+   *   2. createdAt (earlier first — preserves user intent)
+   *
+   * BLOQUE I — P0 gap "JWT expirado: detectar 401 durante sync, pausar, notificar"
+   * If any operation returns 401, the sync loop is PAUSED immediately.
+   * No further operations are attempted (they would all fail with 401).
+   * The user is notified via a custom event 'offline:auth-expired'.
    */
   async syncAll() {
     if (!this._db) return;
     if (!navigator.onLine) return;
+    if (this._syncPaused) {
+      console.log('[offline] Sync paused (JWT expired) — skipping');
+      return { synced: 0, failed: 0, conflicts: 0, total: 0, paused: true };
+    }
 
     const operations = await this._getAllByStatus('PENDING');
+
+    // BLOQUE I — Sort by priority + createdAt to ensure correct execution order
+    operations.sort((a, b) => {
+      const pa = this._getPriority(a);
+      const pb = this._getPriority(b);
+      if (pa !== pb) return pa - pb;
+      return new Date(a.createdAt) - new Date(b.createdAt);
+    });
+
     let synced = 0;
     let failed = 0;
     let conflicts = 0;
 
     for (const op of operations) {
+      // BLOQUE I — Check if sync was paused (JWT expired) mid-loop
+      if (this._syncPaused) {
+        console.log('[offline] Sync paused mid-loop — stopping');
+        break;
+      }
+
       try {
         op.status = 'SYNCING';
         await this._update(op);
@@ -136,6 +166,20 @@ const OfflineQueue = {
           detail: { uuid: op.uuid, method: op.method, path: op.path, data: result },
         }));
       } catch (err) {
+        // BLOQUE I — Detect 401 (JWT expired) and pause sync
+        if (err.status === 401) {
+          console.warn('[offline] JWT expired during sync — pausing');
+          this._syncPaused = true;
+          op.status = 'PENDING';  // Leave as PENDING for next sync after re-login
+          op.lastError = 'JWT expired — re-login required';
+          await this._update(op);
+
+          window.dispatchEvent(new CustomEvent('offline:auth-expired', {
+            detail: { uuid: op.uuid, message: 'Tu sesión ha expirado. Iniciá sesión nuevamente para sincronizar.' },
+          }));
+          break;  // Stop processing further operations
+        }
+
         op.retryCount++;
         op.lastError = err.message;
 
@@ -169,7 +213,48 @@ const OfflineQueue = {
       }));
     }
 
-    return { synced, failed, conflicts, total: operations.length };
+    return { synced, failed, conflicts, total: operations.length, paused: this._syncPaused };
+  },
+
+  /**
+   * BLOQUE I — Get the priority of an operation for sync ordering.
+   * Lower number = higher priority (synced first).
+   *
+   * Priority classes (ensures ticket→orders→payment→close ordering):
+   *   1 = Ticket creation (POST /api/tickets)
+   *   2 = Order addition (POST /api/tickets/:id/orders)
+   *   3 = Payment (POST /api/tickets/:id/payments)
+   *   4 = Ticket close (POST /api/tickets/:id/close)
+   *   5 = Void/Refund (POST /api/tickets/:id/void|refund)
+   *   9 = Other operations (default)
+   */
+  _getPriority(op) {
+    const path = op.path || '';
+    // Extract the API path without the base URL
+    const apiPath = path.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '');
+
+    // Ticket creation
+    if (op.method === 'POST' && apiPath === '/tickets') return 1;
+    // Order addition
+    if (op.method === 'POST' && apiPath.match(/^\/tickets\/\d+\/orders/)) return 2;
+    // Payment
+    if (op.method === 'POST' && apiPath.match(/^\/tickets\/\d+\/payments/)) return 3;
+    // Ticket close
+    if (op.method === 'POST' && apiPath.match(/^\/tickets\/\d+\/close/)) return 4;
+    // Void / Refund
+    if (op.method === 'POST' && apiPath.match(/^\/tickets\/\d+\/(void|refund)/)) return 5;
+    // Other
+    return 9;
+  },
+
+  /**
+   * BLOQUE I — Resume sync after user re-authenticates.
+   * Called when the user logs in again after a JWT expiration.
+   */
+  resumeSync() {
+    this._syncPaused = false;
+    console.log('[offline] Sync resumed — re-attempting pending operations');
+    return this.syncAll();
   },
 
   /**
