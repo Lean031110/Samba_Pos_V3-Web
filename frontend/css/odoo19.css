@@ -2000,3 +2000,12 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .topbar__conn.conn-indicator--online .conn-indicator__dot { background: var(--lba-success); }
 .topbar__conn.conn-indicator--offline { background: #fdecea; }
 .topbar__conn.conn-indicator--offline .conn-indicator__dot { background: var(--lba-danger); }
+
+/* FIX UI: el contenedor de toasts no debe interceptar clicks cuando está
+   vacío o mientras un toast se desvanece (bloqueaba el user-menu) */
+.toast-container { pointer-events: none; }
+.toast { pointer-events: auto; }
+
+/* DEFENSA: ninguna vista inactiva puede interceptar el puntero
+   (protege contra estilos inyectados que fuerzan display) */
+.view:not(.is-active) { display: none !important; }

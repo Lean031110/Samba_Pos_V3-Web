@@ -28,11 +28,15 @@ const App = {
   views: {},
 
   async init() {
-    // BLOQUE Android — server config (skip en DEMO_MODE / GitHub Pages)
-    if (window.ServerConfig && !window.DEMO_MODE) {
+    // BLOQUE Android — server config SOLO dentro del shell nativo de
+    // Capacitor (APK). Cuando la web la sirve el propio backend (LAN) o
+    // GitHub Pages (DEMO_MODE), la configuración no es necesaria: no
+    // forzar la pantalla de bienvenida/config en el navegador.
+    const isNativeApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    if (window.ServerConfig && isNativeApp && !window.DEMO_MODE) {
       ServerConfig.init();
       if (!ServerConfig.isConfigured()) {
-        console.log('[app] Server not configured — showing welcome/config screen');
+        console.log('[app] Native shell without server — showing welcome/config screen');
         return;
       }
     }
