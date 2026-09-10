@@ -10,6 +10,16 @@ const App = {
   views: {},   // populated below
 
   async init() {
+    // BLOQUE Android — Initialize server config (for Android POS tablets)
+    if (window.ServerConfig) {
+      ServerConfig.init();
+      // If not configured, the config screen is shown — wait for user
+      if (!ServerConfig.isConfigured() && !window.DEMO_MODE) {
+        console.log('[app] Server not configured — showing config screen');
+        return; // Don't continue init until configured
+      }
+    }
+
     // Initialize views
     LoginView.init();
     DashboardView.init();
@@ -22,8 +32,13 @@ const App = {
     // Clock
     this._startClock();
 
-    // Initial navigation
-    this.navigate('login');
+    // Initial navigation — respect device mode (POS vs Kitchen)
+    const deviceMode = window.ServerConfig ? ServerConfig.getMode() : 'pos';
+    if (deviceMode === 'kitchen') {
+      this.navigate('kitchen');
+    } else {
+      this.navigate('login');
+    }
 
     // Initialize push notifications (after login will subscribe properly)
     if (window.PushClient) {

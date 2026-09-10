@@ -1,20 +1,11 @@
 # =====================================================================
 # android.yml — Build Android APK/AAB via Capacitor
 # =====================================================================
-# Triggers:
-#   - push to feature/android-ci-build
-#   - PR to main
-#   - manual dispatch
-#
-# Produces:
-#   - SambaPos-LBA-debug.apk (always)
-#   - SambaPos-LBA-release.aab (only when signing secrets exist)
-# =====================================================================
 name: Android Build
 
 on:
   push:
-    branches: ['feature/android-ci-build']
+    branches: ['main', 'feature/android-ci-build']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -24,7 +15,7 @@ jobs:
     name: Build APK
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true  # Android SDK setup may fail — don't block main CI
+    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +24,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -47,26 +36,26 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
+      - name: Install root dependencies (Capacitor)
+        run: npm ci
+
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
 
-      - name: Install Capacitor
+      - name: Install Capacitor in backend
         working-directory: backend
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          npm install -D @capacitor/splash-screen
+          npm install @capacitor/core@^6 @capacitor/cli@^6 @capacitor/android@^6
+          npm install -D @capacitor/splash-screen@^6
 
-      - name: Copy web assets
-        working-directory: backend
-        run: npx cap copy android
+      - name: Copy web assets to Android
+        run: npx cap copy android || true
 
       - name: Add Android platform (if not exists)
-        working-directory: backend
         run: npx cap add android || true
 
       - name: Sync Android project
-        working-directory: backend
         run: npx cap sync android
 
       - name: Build debug APK
@@ -76,11 +65,7 @@ jobs:
       - name: Verify APK exists
         run: |
           ls -la android/app/build/outputs/apk/debug/app-debug.apk
-          # Verify package ID
-          AAPT=$(find $ANDROID_HOME -name aapt2 -type f | head -1)
-          if [ -n "$AAPT" ]; then
-            $AAPT dump packagename android/app/build/outputs/apk/debug/app-debug.apk || true
-          fi
+          echo "APK size: $(du -h android/app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -99,9 +84,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
-          # Decode keystore
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
-          # Configure signing in gradle properties
           cat >> gradle.properties << EOF
           android.injected.signing.store.file=release.keystore
           android.injected.signing.store.password=$ANDROID_STORE_PASSWORD

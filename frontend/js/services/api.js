@@ -16,7 +16,11 @@
 //     are enqueued for later sync when offline.
 // =====================================================================
 
-const API_BASE = '/api';
+// API_BASE: if ServerConfig is set (Android), use the configured server URL.
+// Otherwise use relative '/api' (same-origin in browser/Pages).
+const API_BASE = (window.ServerConfig && ServerConfig.isConfigured())
+  ? ServerConfig.getServerUrl() + '/api'
+  : '/api';
 
 /**
  * Get the JWT token from localStorage (set by login view).

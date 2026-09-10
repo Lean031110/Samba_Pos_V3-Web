@@ -1,13 +1,14 @@
 {
   "appId": "com.sambapos.lba",
   "appName": "SambaPos LBA",
-  "webDir": "../frontend",
+  "webDir": "frontend",
   "bundledWebRuntime": false,
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "cleartext": true
   },
   "android": {
-    "allowMixedContent": false
+    "allowMixedContent": true
   },
   "plugins": {
     "SplashScreen": {
