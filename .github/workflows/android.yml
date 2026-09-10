@@ -1,11 +1,26 @@
 # =====================================================================
-# android.yml — Build Android APK via Capacitor
+# android.yml — Build Android APK via Capacitor (MANDATORY GATE)
+# =====================================================================
+# PR #9 hardening:
+#   - NO continue-on-error: if assembleDebug fails, the workflow fails.
+#     "APK failed but workflow success" is no longer possible.
+#   - The Android project (android/) is VERSIONED in git — it is never
+#     generated ad-hoc with `npx cap add android || true` (which hid
+#     errors). `cap add` is now a documented bootstrap-only script
+#     (npm run cap:add) that fails loudly if it fails.
+#   - All branding (LBApos app name, splash, launcher + adaptive icons,
+#     portrait) is committed under android/app/src/main/res — no CI-time
+#     identity injection, no sed.
+#   - Hard post-build gates: APK exists, is not empty, package ID =
+#     com.sambapos.lba, application label = LBApos, valid versionName.
+#   - Release AAB only when signing secrets are configured. Keystores and
+#     passwords are NEVER stored in git (GitHub Secrets/Vars only).
 # =====================================================================
 name: Android Build
 
 on:
   push:
-    branches: ['main']
+    branches: ['main', 'feature/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -14,8 +29,8 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    continue-on-error: true
+    timeout-minutes: 30
+    # ─── GATE: NO continue-on-error. Android MUST pass. ───
 
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +39,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -36,51 +53,140 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
-      - name: Install Capacitor (root)
-        run: npm install
+      - name: Install Capacitor (root, npm ci — reproducible)
+        run: npm ci
 
-      - name: Verify Capacitor config
+      # ─── GATE 1: Capacitor config + versioned Android project ───
+      - name: Verify Capacitor config + versioned Android project
         run: |
+          set -e
           echo "=== capacitor.config.json ==="
           cat capacitor.config.json
-          echo "=== frontend exists? ==="
-          ls -la frontend/index.html | head -3
+          node scripts/check-android-config.js
 
-      - name: Add Android platform
-        run: npx cap add android || true
+      - name: Verify web assets exist (webDir = frontend)
+        run: |
+          set -e
+          test -f frontend/index.html
+          test -f frontend/js/config.js
+          test -f frontend/js/app.js
+          test -d frontend/css
+          echo "OK: frontend/ webDir complete"
 
-      - name: Copy web assets
-        run: npx cap copy android
-
-      - name: Sync Android project
+      # ─── GATE 2: sync web assets into the versioned project ───
+      - name: Capacitor sync (copy web assets + plugins)
         run: npx cap sync android
 
-      - name: List Android project structure
+      - name: Verify sync result
         run: |
-          echo "=== android/ exists? ==="
-          ls -la android/ | head -10
-          echo "=== app/build.gradle exists? ==="
-          ls -la android/app/build.gradle 2>/dev/null || echo "NOT FOUND"
+          set -e
+          test -d android/app/src/main/assets/public
+          test -f android/app/src/main/assets/public/index.html
+          test -f android/app/src/main/assets/public/js/config.js
+          echo "OK: web assets copied into the APK"
+          # cap sync must not have removed the versioned branding:
+          node scripts/check-android-config.js
 
-      - name: Build debug APK
+      # ─── GATE 3: Gradle wrapper ───
+      - name: Verify Gradle wrapper
+        run: |
+          set -e
+          test -f android/gradlew
+          test -f android/gradle/wrapper/gradle-wrapper.jar
+          test -f android/gradle/wrapper/gradle-wrapper.properties
+          # gradlew must be committed with the executable bit
+          test -x android/gradlew
+          echo "OK: Gradle wrapper present and executable"
+
+      # ─── GATE 4: THE BUILD — if this fails, the workflow fails ───
+      - name: Build debug APK (assembleDebug)
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Verify APK exists
+      # ─── GATE 5: APK existence, size and identity ───
+      - name: Verify APK (exists, not empty, identity = LBApos)
         run: |
-          ls -la android/app/build/outputs/apk/debug/app-debug.apk
-          echo "APK size: $(du -h android/app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
+          set -e
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          echo "=== APK file ==="
+          ls -la "$APK"
+          test -f "$APK" || { echo "FAIL: APK not found"; exit 1; }
+
+          SIZE=$(stat -c%s "$APK")
+          echo "APK size: ${SIZE} bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "FAIL: APK is smaller than 1 MB ($SIZE bytes) — empty or broken build"
+            exit 1
+          fi
+
+          AAPT2="${ANDROID_HOME}/build-tools/34.0.0/aapt2"
+          echo "=== aapt2 dump badging ==="
+          "$AAPT2" dump badging "$APK" | head -5
+
+          BADGING=$("$AAPT2" dump badging "$APK")
+          echo "$BADGING" | grep -q "package: name='com.sambapos.lba'" \
+            || { echo "FAIL: package ID is not com.sambapos.lba"; exit 1; }
+          echo "$BADGING" | grep -q "application-label:'LBApos'" \
+            || { echo "FAIL: application label is not LBApos"; exit 1; }
+          # versionCode sits between name and versionName in badging output —
+          # match the versionName field independently of field order.
+          echo "$BADGING" | grep -qE "versionName='[0-9]+\.[0-9]+\.[0-9]+'" \
+            || { echo "FAIL: versionName missing or not semver"; exit 1; }
+
+          VERSION=$(echo "$BADGING" | grep -oE "versionName='[^']+'" | head -1)
+          echo "OK: APK identity verified — com.sambapos.lba / LBApos / ${VERSION}"
+
+      - name: Rename APK artifact
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk LBApos-debug.apk
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SambaPos-LBA-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: LBApos-debug.apk
+          path: LBApos-debug.apk
           retention-days: 30
+          if-no-files-found: error
 
-      # Release AAB — only when signing secrets exist
-      - name: Build release AAB (if signing configured)
-        if: ${{ vars.ANDROID_KEYSTORE_BASE64 != '' }}
+  # ─────────────────────────────────────────────────────────────────────
+  # Release AAB — ONLY when signing is configured via GitHub Variables +
+  # Secrets. Keystores/passwords are never committed to the repository.
+  #   vars:   ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS
+  #   secrets: ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD
+  # ─────────────────────────────────────────────────────────────────────
+  release:
+    name: Release AAB (if signing configured)
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 30
+    if: ${{ vars.ANDROID_KEYSTORE_BASE64 != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - name: Install Capacitor + sync
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Build signed release AAB (bundleRelease)
         working-directory: android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ vars.ANDROID_KEYSTORE_BASE64 }}
@@ -88,6 +194,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
+          set -e
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
           cat >> gradle.properties << EOF
           android.injected.signing.store.file=release.keystore
@@ -95,12 +202,77 @@ jobs:
           android.injected.signing.key.alias=$ANDROID_KEY_ALIAS
           android.injected.signing.key.password=$ANDROID_KEY_PASSWORD
           EOF
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease --no-daemon --stacktrace
+
+      - name: Verify AAB
+        run: |
+          set -e
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          test -f "$AAB" || { echo "FAIL: AAB not found"; exit 1; }
+          SIZE=$(stat -c%s "$AAB")
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "FAIL: AAB is smaller than 1 MB"
+            exit 1
+          fi
+          echo "OK: AAB ${SIZE} bytes"
+
+      - name: Rename AAB artifact
+        run: cp android/app/build/outputs/bundle/release/app-release.aab LBApos-release.aab
 
       - name: Upload release AAB
-        if: ${{ vars.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: SambaPos-LBA-release.aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          name: LBApos-release.aab
+          path: LBApos-release.aab
           retention-days: 30
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Emulator smoke test — BEST EFFORT (EXPERIMENTAL, non-blocking).
+  # Proves the APK installs and launches on a real Android system:
+  # install → launch → package present → activity resumed → process
+  # alive → screenshot evidence. Emulator boot on shared runners can be
+  # flaky, so this job is explicitly continue-on-error BY DESIGN and
+  # labeled EXPERIMENTAL (the build gate above stays mandatory).
+  # ─────────────────────────────────────────────────────────────────────
+  smoke:
+    name: Android emulator smoke (EXPERIMENTAL)
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 25
+    continue-on-error: true  # emulator boot may be flaky — build gate above is the mandatory one
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: LBApos-debug.apk
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Run emulator smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          # The runner executes each script LINE as a separate `sh -c`,
+          # so all multi-line logic lives in the committed script file.
+          script: bash "$GITHUB_WORKSPACE/scripts/android-smoke.sh" "$GITHUB_WORKSPACE/LBApos-debug.apk"
+
+      - name: Upload emulator screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-launch-screenshot
+          path: emulator-launch.png
+          retention-days: 14
+          if-no-files-found: ignore

@@ -19,9 +19,14 @@
 #   1. install    — npm ci (cached)
 #   2. lint       — syntax + style check
 #   3. migrations — run via programmatic script (knex CLI breaks on env-based config)
-#   4. unit tests — integration + KDS + inventory + concurrency + security
-#   5. e2e tests  — Playwright (failOnFlakyTests=true, --repeat-each=2)
-#   6. docker build — multi-stage image sanity check
+#   4. unit tests — 22 suites, REAL counts parsed from execution (PR #9
+#                   hardening: a suite failure now FAILS the job — the old
+#                   `|| true` runner could not fail)
+#   5. e2e tests  — Playwright, MANDATORY gate (PR #9: no continue-on-error)
+#                   + screenshot suite (visual baseline, also a gate)
+#   6. postgres   — EXPERIMENTAL, non-blocking (known migration issue,
+#                   documented in README — do not treat as a pass)
+#   7. docker build — multi-stage image sanity check + production smoke test
 # =====================================================================
 
 name: CI
@@ -135,27 +140,53 @@ jobs:
         working-directory: backend
         run: node scripts/run-migrations.js
 
-      - name: All unit tests (reset DB per suite — 533 tests, 22 suites)
+      - name: All unit tests (reset DB per suite — real counts from execution)
         working-directory: backend
         env:
           SKIP_E2E: '1'
-        run: bash scripts/run-all-tests.sh
+        run: |
+          set -o pipefail
+          bash scripts/run-all-tests.sh | tee /tmp/unit-tests.log
 
-      - name: Print test count summary
+      - name: Fail CI on any unit test failure
         working-directory: backend
         run: |
-          echo "=== UNIT TEST SUITES EXECUTED ==="
-          ls tests/*.test.js | wc -l
-          echo "=== E2E SUITES ==="
-          ls tests/e2e/*.spec.js 2>/dev/null | wc -l
+          set -e
+          # run-all-tests.sh exits non-zero on failure — `tee` above would
+          # swallow the exit code under `set -o pipefail` absence, so check
+          # the machine-readable line too (belt and suspenders).
+          grep -E '^UNIT_TEST_RESULTS: ' /tmp/unit-tests.log | tail -1
+          LINE=$(grep -E '^UNIT_TEST_RESULTS: ' /tmp/unit-tests.log | tail -1)
+          echo "$LINE" | grep -q 'fail=0 ' || exit 1
+          # A total of 0 means nothing actually ran — that is NOT a pass.
+          echo "$LINE" | grep -qE 'total=[0-9]+' || { echo "FAIL: no unit tests executed"; exit 1; }
+          TOTAL=$(echo "$LINE" | grep -oE 'total=[0-9]+' | cut -d= -f2)
+          if [ "${TOTAL:-0}" -lt 500 ]; then
+            echo "FAIL: only $TOTAL unit tests executed (expected ~533) — suites are being skipped"
+            exit 1
+          fi
+
+      - name: Write real test counts to job summary
+        working-directory: backend
+        run: |
+          {
+            echo "## Test counts (from CI execution — never hand-written)"
+            echo '```'
+            grep -E '^UNIT_TEST_RESULTS: ' /tmp/unit-tests.log | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # -----------------------------------------------------------------
-      # PostgreSQL integration test — verifies migrations + seed + login
-      # work on a REAL PostgreSQL instance (not just SQLite).
+      # PostgreSQL integration — EXPERIMENTAL (non-blocking, honest label).
+      # PR #9 hardening note: on the current codebase the PG migration
+      # "create_schema" fails with "constraint ... already exists"
+      # (SQLite is the supported DB; PG support is PENDIENTE — see README).
+      # It is kept non-blocking ON PURPOSE and labeled: a failing
+      # experimental path must not silently look like a pass anywhere else.
       # -----------------------------------------------------------------
-      - name: PostgreSQL integration test
+      - name: PostgreSQL integration test (EXPERIMENTAL — known migration issue, see README)
         working-directory: backend
-        continue-on-error: true  # PG migrations may have constraint issues — don't block
+        continue-on-error: true  # EXPERIMENTAL: PG migrations fail (constraint already exists) — documented, not a gate
         env:
           DATABASE_URL: postgres://samba:samba@localhost:5432/sambapos_test
         run: |
@@ -171,7 +202,8 @@ jobs:
           PGPASSWORD=samba psql -h localhost -U samba -d sambapos_test -c "SELECT COUNT(*) FROM Users;"
 
       # -----------------------------------------------------------------
-      # Playwright E2E
+      # Playwright E2E — MANDATORY GATE (PR #9 hardening: no
+      # continue-on-error; "61 passed" must come from real execution).
       # -----------------------------------------------------------------
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -189,15 +221,82 @@ jobs:
           rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
           node scripts/run-migrations.js
 
-      - name: Run E2E tests (functional)
+      - name: Run E2E tests (functional — GATE)
         working-directory: backend
-        continue-on-error: true  # E2E can be flaky in CI — unit tests are the real gate
-        run: npx playwright test --project=chromium --reporter=line
+        # NOTE: `set -o pipefail` is MANDATORY here — without it, `| tee`
+        # swallows playwright's exit code and a FAILING suite shows a
+        # green step (exactly the bug PR #9 exists to kill).
+        run: |
+          set -o pipefail
+          npx playwright test --project=chromium --reporter=line 2>&1 | tee /tmp/e2e-tests.log
 
-      - name: Run screenshot tests (documentation, no flaky gate)
+      - name: Run screenshot tests (documentation + visual baseline — GATE)
         working-directory: backend
-        run: npx playwright test --project=screenshots --reporter=line
-        continue-on-error: true  # Screenshots are documentation — don't block CI
+        run: |
+          set -o pipefail
+          npx playwright test --project=screenshots --reporter=line 2>&1 | tee /tmp/e2e-screenshots.log
+
+      # -----------------------------------------------------------------
+      # Visual regression (PR #9): pixel baseline for login, dashboard,
+      # POS, payment and KDS. A visual change can no longer break these
+      # screens SILENTLY. Runs on a FRESH DB so the rendered state is
+      # deterministic. Baselines live in
+      # backend/tests/e2e/visual-regression.spec.js-snapshots/ and are
+      # committed; update them intentionally via the visual-baseline
+      # workflow (or npm run test:visual:update locally).
+      # -----------------------------------------------------------------
+      - name: Reset DB for visual regression
+        working-directory: backend
+        run: |
+          rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
+          node scripts/run-migrations.js
+
+      - name: Run visual regression tests (GATE)
+        working-directory: backend
+        run: |
+          set -o pipefail
+          npx playwright test --project=visual --reporter=line 2>&1 | tee /tmp/e2e-visual.log
+
+      - name: Upload visual diff report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-diff
+          path: |
+            backend/tests/e2e/visual-regression.spec.js-snapshots/*-diff.png
+            backend/tests/e2e/visual-regression.spec.js-snapshots/*-actual.png
+            backend/tests/e2e/visual-regression.spec.js-snapshots/*-expected.png
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Write E2E counts to job summary
+        working-directory: backend
+        run: |
+          {
+            echo "## E2E counts (from CI execution)"
+            echo '```'
+            echo "functional: $(grep -oE '[0-9]+ passed \([0-9.]+m?\)' /tmp/e2e-tests.log | tail -1)"
+            echo "screenshots: $(grep -oE '[0-9]+ passed \([0-9.]+m?\)' /tmp/e2e-screenshots.log | tail -1)"
+            echo "visual: $(grep -oE '[0-9]+ passed \([0-9.]+m?\)' /tmp/e2e-visual.log | tail -1)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload UI redesign screenshots (BLOQUE N artifacts)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-redesign-screenshots
+          path: docs/screenshots/redesign/
+          retention-days: 30
+
+      - name: Upload legacy screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-screenshots
+          path: docs/screenshots/*.png
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload Playwright report on failure
         if: failure()

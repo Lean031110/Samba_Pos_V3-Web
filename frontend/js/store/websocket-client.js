@@ -15,7 +15,8 @@
 (function loadSocketIo(cb) {
   if (window.io) { cb(); return; }
   const s = document.createElement('script');
-  s.src = '/vendor/js/socket.io.min.js';
+  // APP_BASE_PATH: vendor resuelto desde el base path del documento
+  s.src = (window.LBA_BASE || '/') + 'vendor/js/socket.io.min.js';
   s.onload = cb;
   s.onerror = () => console.error('[ws] Failed to load socket.io client from local vendor');
   document.head.appendChild(s);

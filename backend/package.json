@@ -14,6 +14,8 @@
     "test:unit": "node --test tests/api-integration.test.js tests/kds-verification.test.js tests/inventory-verification.test.js tests/concurrency-verification.test.js tests/idempotency-verification.test.js tests/idempotency-concurrency.test.js tests/domain-verification.test.js tests/security-verification.test.js tests/printing-verification.test.js tests/recipes-verification.test.js tests/refund-verification.test.js tests/unit-conversion-verification.test.js tests/domain-extended-verification.test.js tests/bloque-d-verification.test.js tests/bloque-e-kds-verification.test.js tests/bloque-f-printer-verification.test.js tests/bloque-g-pwa-verification.test.js tests/bloque-h-push-verification.test.js tests/bloque-i-offline-verification.test.js tests/bloque-j-production-verification.test.js tests/bloque-klm-verification.test.js tests/bloque-refund-report-verification.test.js",
     "test:e2e": "npx playwright test --reporter=line",
     "test:playwright": "npx playwright test --reporter=line",
+    "test:visual": "npx playwright test --project=visual",
+    "test:visual:update": "npx playwright test --project=visual -u changed",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
     "screenshots": "npx playwright test tests/e2e/screenshots.spec.js --reporter=line"

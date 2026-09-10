@@ -1,22 +1,36 @@
 # =====================================================================
 # pages.yml — Deploy GitHub Pages demo (static, mock data, no backend)
 # =====================================================================
+# PR #9 hardening:
+#   - NO sed patching. The app resolves its base path at RUNTIME
+#     (APP_BASE_PATH auto-detection in js/config.js) and every asset
+#     reference in index.html is relative, so the SAME artifact works
+#     at '/' (production) and '/Samba_Pos_V3-Web/' (Pages).
+#   - The only deployment-time change is ONE explicit file overlay:
+#     frontend/config.demo.js → _site/js/config.js (DEMO_MODE=true).
+#     Production builds ship DEMO_MODE=false and can NEVER use the
+#     mock API — demo and production are fully separated.
+#   - Content gates BEFORE publishing: index.html, app.js, manifest,
+#     service worker, logo, icons must exist in the artifact.
+#   - Playwright smoke test against a local preview of the artifact
+#     served under the real sub-path: login demo → areas → POS → KDS →
+#     Admin. Never touches a production backend.
 # Triggers:
-#   - push to main (frontend/ changes only)
+#   - push to main (frontend/ or workflow changes)
 #   - manual dispatch
-#
 # Produces:
-#   - Static demo at https://lean031110.github.io/Samba_Pos_V3-Web/
-#   - Uses DEMO_MODE=true with mock API + mock data
-#   - Base path: /Samba_Pos_V3-Web/
+#   - https://lean031110.github.io/Samba_Pos_V3-Web/
 # =====================================================================
 name: GitHub Pages Demo
 
 on:
   push:
     branches: [main]
-    paths: ['frontend/**', '.github/workflows/pages.yml']
+    paths: ['frontend/**', 'scripts/build-pages-demo.js', 'scripts/serve-pages.js', 'backend/playwright.pages.config.js', 'backend/tests/pages-smoke/**', '.github/workflows/pages.yml']
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths: ['frontend/**', 'scripts/build-pages-demo.js', 'scripts/serve-pages.js', 'backend/playwright.pages.config.js', 'backend/tests/pages-smoke/**', '.github/workflows/pages.yml']
 
 permissions:
   contents: read
@@ -29,54 +43,93 @@ concurrency:
 
 jobs:
   build:
-    name: Build Pages demo
+    name: Build + smoke test Pages demo
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Build demo frontend
+      # ─── Build the demo artifact (config overlay, NO sed) ───
+      - name: Build demo artifact
+        run: node scripts/build-pages-demo.js
+
+      # ─── Content gates: everything Pages serves must exist ───
+      - name: Verify generated content (before publishing)
         run: |
-          mkdir -p _site
-          cp -r frontend/* _site/
+          set -e
+          for f in \
+            index.html \
+            js/config.js \
+            js/app.js \
+            js/services/api.js \
+            manifest.webmanifest \
+            sw.js \
+            offline.html \
+            css/odoo19.css \
+            vendor/css/fontawesome.min.css \
+            icons/icon-192.png \
+            icons/favicon.png \
+            assets/logo-login.png; do
+            test -f "_site/$f" || { echo "FAIL: _site/$f missing"; exit 1; }
+            echo "  ✓ _site/$f"
+          done
 
-          # Inject DEMO_MODE=true at the very top of app.js
-          # This makes the frontend use mock API instead of real backend
-          echo 'window.DEMO_MODE = true;' > /tmp/demo_prefix.js
-          cat /tmp/demo_prefix.js _site/js/app.js > _site/js/app.js.tmp
-          mv _site/js/app.js.tmp _site/js/app.js
+          # The demo overlay MUST be active (and must NOT be the production config)
+          grep -q 'DEMO_MODE: true' _site/js/config.js \
+            || { echo "FAIL: demo overlay (config.demo.js) was not applied"; exit 1; }
+          echo "  ✓ DEMO overlay active (config.demo.js → js/config.js)"
 
-          # Also inject at top of api.js for good measure
-          cat /tmp/demo_prefix.js _site/js/services/api.js > _site/js/services/api.js.tmp
-          mv _site/js/services/api.js.tmp _site/js/services/api.js
+          # No absolute-path references — they break under the sub-path
+          if grep -qE '(href|src)="/' _site/index.html; then
+            echo "FAIL: absolute paths found in index.html (must be relative for APP_BASE_PATH)"
+            grep -nE '(href|src)="/' _site/index.html
+            exit 1
+          fi
+          echo "  ✓ index.html uses relative paths (APP_BASE_PATH compatible)"
 
-          # Fix base path for GitHub Pages project pages
-          # manifest.webmanifest: start_url and scope
-          sed -i 's|"/"|"/Samba_Pos_V3-Web/"|g' _site/manifest.webmanifest
-          sed -i 's|"start_url": "/"|"start_url": "/Samba_Pos_V3-Web/"|g' _site/manifest.webmanifest
+          # Service worker + manifest must resolve from the sub-path
+          grep -q 'BASE' _site/sw.js || { echo "FAIL: sw.js is not base-path aware"; exit 1; }
+          echo "  ✓ sw.js is base-path aware"
 
-          # Fix service worker paths for sub-path
-          sed -i "s|'/index.html'|'/Samba_Pos_V3-Web/index.html'|g" _site/sw.js 2>/dev/null || true
-          sed -i "s|'/manifest.webmanifest'|'/Samba_Pos_V3-Web/manifest.webmanifest'|g" _site/sw.js 2>/dev/null || true
-          sed -i "s|'/css/|'/Samba_Pos_V3-Web/css/|g" _site/sw.js 2>/dev/null || true
-          sed -i "s|'/js/|'/Samba_Pos_V3-Web/js/|g" _site/sw.js 2>/dev/null || true
-          sed -i "s|'/vendor/|'/Samba_Pos_V3-Web/vendor/|g" _site/sw.js 2>/dev/null || true
-          sed -i "s|'/offline.html'|'/Samba_Pos_V3-Web/offline.html'|g" _site/sw.js 2>/dev/null || true
+      # ─── Playwright smoke: real browser against the real sub-path ───
+      - name: Install backend test dependencies (Playwright)
+        working-directory: backend
+        run: npm ci
 
-          # Fix index.html script/css paths for sub-path
-          sed -i 's|href="/css/|href="/Samba_Pos_V3-Web/css/|g' _site/index.html
-          sed -i 's|src="/js/|src="/Samba_Pos_V3-Web/js/|g' _site/index.html
-          sed -i 's|href="/vendor/|href="/Samba_Pos_V3-Web/vendor/|g' _site/index.html
-          sed -i 's|href="/manifest.webmanifest"|href="/Samba_Pos_V3-Web/manifest.webmanifest"|g' _site/index.html
-          sed -i 's|href="/icons/|href="/Samba_Pos_V3-Web/icons/|g' _site/index.html
-          sed -i 's|src="/assets/|src="/Samba_Pos_V3-Web/assets/|g' _site/index.html
+      - name: Install Playwright browser
+        working-directory: backend
+        run: npx playwright install --with-deps chromium
 
-          # Create a .nojekyll file to bypass Jekyll processing
-          touch _site/.nojekyll
+      - name: Serve artifact under the Pages sub-path
+        run: |
+          node scripts/serve-pages.js _site /Samba_Pos_V3-Web/ 8080 &
+          sleep 2
+          curl -sf http://localhost:8080/Samba_Pos_V3-Web/ > /dev/null
+          echo "OK: preview serving under /Samba_Pos_V3-Web/"
+
+      - name: Playwright smoke test (demo login → areas → POS → KDS → Admin)
+        working-directory: backend
+        env:
+          PAGES_BASE_URL: http://localhost:8080/Samba_Pos_V3-Web/
+        run: npx playwright test -c playwright.pages.config.js
+
+      - name: Upload smoke traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-smoke-traces
+          path: backend/tests/pages-smoke/.results
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -87,6 +140,8 @@ jobs:
     name: Deploy to Pages
     needs: build
     runs-on: ubuntu-latest
+    # Deploy only from main (PRs run the build+smoke gates but don't publish)
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

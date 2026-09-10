@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="docs/screenshots/01-login.png" alt="SambaPos_LBA" width="600">
+<img src="docs/screenshots/redesign/03-area-selector.png" alt="LBApos — selector de áreas" width="600">
 
-# 🍽️ SambaPos_LBA
+# 🍽️ LBApos — SambaPos_LBA
 
-### Sistema POS web moderno, táctil, instalable y offline-capable para restaurantes
+### POS de restaurante moderno, táctil, instalable y offline-capable — UI estilo Odoo 19
 
-Construido con **Node.js · Express · Knex · Socket.io · Vanilla JS**
+Construido con **Node.js · Express · Knex · Socket.io · Vanilla JS** · Interfaz **Odoo 19** (marca LBA `#044392`)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Lean031110/Samba_Pos_V3-Web/ci.yml?branch=main&label=CI&style=for-the-badge)](https://github.com/Lean031110/Samba_Pos_V3-Web/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-528%2F528-brightgreen?style=for-the-badge)](#-pruebas)
+[![Tests](https://img.shields.io/badge/tests-533%2F533-brightgreen?style=for-the-badge)](#-pruebas)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-20%2B-green?style=for-the-badge)](https://nodejs.org/)
 [![PWA](https://img.shields.io/badge/PWA-installable-blue?style=for-the-badge)](#-pwa--android)
@@ -37,17 +37,69 @@ Construido con **Node.js · Express · Knex · Socket.io · Vanilla JS**
 | 📊 **Reportes** | Ventas, productos top, tickets cerrados/anulados/reembolsados, selector por fechas |
 | 🏗️ **PWA instalable** | manifest.webmanifest, service worker, offline shell, install prompt visible |
 | 📋 **Templates editables** | CRUD completo de plantillas de recibo/cocina con preview ESC/POS |
-| 🗄️ **PostgreSQL ready** | Soporte dual SQLite/PostgreSQL en migraciones (information_schema fallback) |
-| 📱 **Android (Capacitor)** | capacitor.config.json + guía APK/AAB para Play Store |
+| 🗄️ **PostgreSQL (EXPERIMENTAL)** | Migraciones duales SQLite/PG — despliegue PG real PENDIENTE (ver sección PostgreSQL) |
+| 📱 **Android (Capacitor)** | Proyecto `android/` versionado, APK reproducible, gate obligatorio en CI |
+
+---
+
+## 📊 Estado real del proyecto (auditable en CI)
+
+Etiquetas: **IMPLEMENTADO** (funciona y está verificado) · **CONFIGURADO**
+(existe la configuración, sin verificación end-to-end) · **PROBADO**
+(verificado parcialmente) · **EXPERIMENTAL** (con problemas conocidos) ·
+**PENDIENTE** (no hecho).
+
+| Componente | Estado | Evidencia |
+|------------|--------|-----------|
+| API REST + lógica de negocio | ✅ IMPLEMENTADO | 533 unit + 61 E2E en CI (gates obligatorios) |
+| UI Odoo 19 (POS/KDS/Admin/login) | ✅ IMPLEMENTADO | E2E + screenshots + visual regression (5 pantallas base) |
+| SQLite (producción) | ✅ IMPLEMENTADO | migrations + seed + backup/restore drill en CI |
+| Docker | ✅ PROBADO | build multi-stage + smoke `/ready` + CORS en CI |
+| PWA (manifest/SW/offline) | ✅ IMPLEMENTADO | suite bloque-g (31) + E2E + SW base-path aware |
+| GitHub Pages demo | ✅ IMPLEMENTADO | build reproducible + smoke Playwright en CI (sub-path real) |
+| Demo vs producción aislados | ✅ IMPLEMENTADO | `DEMO_MODE` config explícita; producción nunca usa Mock API |
+| Android APK (debug) | ✅ IMPLEMENTADO | CI obligatorio: gradle + aapt2 identity gates + artifact |
+| Android branding (LBApos) | ✅ IMPLEMENTADO | recursos versionados, verificados por `test:android:config` |
+| Android firma/Play Store | ⚙️ CONFIGURADO | job release listo vía Secrets; **sin keystore real** → no publicado |
+| Android emulator smoke | 🧪 EXPERIMENTAL | job best-effort (boot de emulator puede ser flaky) |
+| Impresión ESC/POS (transporte) | ✅ PROBADO | MockTcpServer + pipeline en CI; **impresora física** solo manual |
+| Push notifications (Web Push) | ✅ PROBADO | VAPID + suite 33; entrega real depende de servicio + permisos |
+| PostgreSQL | 🧪 EXPERIMENTAL | migración PG falla en CI (constraint duplicado) — PENDIENTE |
+| Base path APP_BASE_PATH | ✅ IMPLEMENTADO | misma build en `/` y `/Samba_Pos_V3-Web/` (sin parches sed) |
 
 ---
 
 ## 📸 Capturas de pantalla
 
+### Interfaz Odoo 19 (BLOQUE N — rediseño)
+
+<table>
+<tr>
+<td align="center"><b>Selector de áreas</b></td>
+<td align="center"><b>POS (pedido + productos)</b></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/redesign/03-area-selector.png" alt="Áreas" width="400"></td>
+<td><img src="docs/screenshots/redesign/05-pos.png" alt="POS" width="400"></td>
+</tr>
+<tr>
+<td align="center"><b>Payment (numpad + cambio)</b></td>
+<td align="center"><b>KDS (Preparation Display)</b></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/redesign/07-payment.png" alt="Pago" width="400"></td>
+<td><img src="docs/screenshots/redesign/08-kds.png" alt="KDS" width="400"></td>
+</tr>
+</table>
+
+Ver las 13 capturas del rediseño en `docs/screenshots/redesign/` (también publicadas como artifact del CI).
+
+### Capturas del flujo completo
+
 <table>
 <tr>
 <td align="center"><b>Login</b></td>
-<td align="center"><b>Dashboard (mapa de mesas)</b></td>
+<td align="center"><b>Dashboard (KPIs)</b></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/01-login.png" alt="Login" width="400"></td>
@@ -221,7 +273,18 @@ npm start
 
 ## 📜 Scripts disponibles
 
-Ejecutar desde `backend/`:
+**Desde la raíz (Capacitor/Android + Pages demo):**
+
+| Script | Descripción |
+|--------|-------------|
+| `npm run cap:sync` / `cap:copy` / `cap:open` | Capacitor desde la raíz (config en raíz) |
+| `npm run cap:add` | Bootstrap de `android/` (solo si no existe) |
+| `npm run test:android:config` | Gate de pre-vuelo Android (identidad, branding, wrapper) |
+| `npm run build:android:debug` | Gate + sync + `assembleDebug` |
+| `npm run build:android:release` | Gate + sync + `bundleRelease` |
+| `npm run pages:demo` / `pages:preview` / `pages:smoke` | Build + preview + smoke de la demo de Pages |
+
+**Desde `backend/`:**
 
 | Script | Descripción |
 |--------|-------------|
@@ -230,9 +293,11 @@ Ejecutar desde `backend/`:
 | `npm run migrate` | Aplica migraciones Knex pendientes |
 | `npm run seed` | Seed transaccional (admin + datos demo) |
 | `npm test` | Tests de integración API |
-| `npm run test:unit` | Todos los tests unitarios (528 tests) |
+| `npm run test:unit` | Todos los tests unitarios (533 tests, 22 suites) |
 | `npm run test:all` | Suite completa: unit + E2E (via `run-all-tests.sh`) |
 | `npm run test:e2e` | E2E con Playwright + Chromium |
+| `npm run test:visual` | Visual regression (baseline de 5 pantallas) |
+| `npm run test:visual:update` | Actualizar baseline visual INTENCIONALMENTE |
 | `npm run backup` | Crea snapshot de BD con integrity check + rotation |
 | `npm run restore` | Restaura desde backup (`--file=<path> --confirm`) |
 | `node scripts/restore-drill.js` | Drill completo: backup → destroy → restore → verify |
@@ -293,9 +358,11 @@ Samba_Pos_V3-Web/
 
 ## 🧪 Pruebas
 
-El proyecto mantiene **528 tests unitarios + E2E** distribuidos en 20 suites:
+**Conteos reales, medidos en la última ejecución de CI** (PR #9: los
+números provienen de la ejecución — nunca escritos a mano; CI parsea y
+publica los conteos en el job summary):
 
-| Suite | Tests | Categoría |
+| Suite | Tests (ejecución local verificada) | Categoría |
 |-------|------:|-----------|
 | `api-integration` | 47 | API REST + tickets + pagos + cierre + void |
 | `kds-verification` | 49 | KDS states, routing, bump, serve, recall |
@@ -318,8 +385,19 @@ El proyecto mantiene **528 tests unitarios + E2E** distribuidos en 20 suites:
 | `bloque-i-offline` | 25 | Idempotency, operation order, JWT expiration, frontend analysis |
 | `bloque-j-production` | 34 | PostgreSQL driver, migraciones compatibles, backup rotation, restore drill |
 | `bloque-klm` | 33 | Capacitor config, UI caja/reportes, load test, failure injection |
-| **Total unit** | **528** | **100% pass** |
-| E2E (Playwright) | 27+ | Login→POS→Kitchen→WebSocket + Bloque E/F/G/H E2E |
+| `bloque-refund-report` | 5 | Reportes de refunds |
+| **Total unit (22 suites)** | **533** | **verificado en ejecución** |
+| E2E Playwright (funcionales) | 61 | login→áreas→POS→pago→KDS→Admin + suites A–M (C WebSocket incl.) |
+| E2E screenshots (documentación) | 18 | 13 del rediseño + 5 legado |
+| Visual regression (baseline) | 5 | login · dashboard · POS · payment · KDS |
+| Pages demo smoke | 4 | sub-path `/Samba_Pos_V3-Web/` + demo login + navegación |
+
+PR #9 hardening del runner: antes, `scripts/run-all-tests.sh` usaba
+`|| true` y parseaba solo el formato Node 22 — en CI (Node 20) imprimía
+`TOTAL: 0` y **una suite fallida no podía romper el build**. Ahora el
+exit code + ambos formatos son la fuente de verdad, y E2E + screenshots
++ visual regression son **gates obligatorios** (sin
+`continue-on-error`).
 
 ```bash
 # Correr toda la suite
@@ -330,6 +408,13 @@ npm run test:unit
 
 # Solo E2E
 npm run test:e2e
+
+# Visual regression (baseline en tests/e2e/visual-regression.spec.js-snapshots/)
+npm run test:visual
+npm run test:visual:update   # actualizar baseline INTENCIONALMENTE
+
+# Pages demo (build + preview + smoke)
+npm run pages:smoke
 ```
 
 ---
@@ -355,9 +440,31 @@ Postura de seguridad **fail-secure**:
 
 ---
 
+## 🎨 Interfaz Odoo 19 (BLOQUE N — rediseño UI)
+
+La interfaz fue rediseñada desde cero inspirada en **Odoo 19** (Point of Sale, Preparation Display y Webclient), adaptada al uso real de un restaurante cubano y manteniendo la identidad azul LBA `#044392`:
+
+| Área | Pantallas |
+|------|-----------|
+| **Selector de áreas** | Pantalla principal post-login: Administración, POS, Cocina, Caja, Inventario, Reportes, Configuración (visibles según rol) |
+| **Flujo por rol** | Admin → Dashboard · Mesero → POS (mesas) · Cocina → KDS · Cajero → Caja |
+| **POS** | Order panel 40% + productos 60%, categorías con scroll horizontal, líneas con ±/nota/eliminar, PAGAR prominente |
+| **Mesas** | Grid con estados libre/ocupada/cuenta — color + icono + texto |
+| **Payment** | TOTAL grande, numpad táctil (EXACTO), entregado/restante/cambio, métodos grandes |
+| **KDS** | Pantalla completa oscura: stages con contadores, sidebar de estaciones, cards con timer SLA (URGENTE discreto) |
+| **Dashboard admin** | KPIs (ventas, tickets, promedio, caja, cocina, stock bajo), top productos, actividad, alertas, accesos rápidos |
+| **Caja / Reportes / Inventario** | Vistas dedicadas con tabs Odoo-style |
+| **Android (LBApos)** | Welcome screen + configuración de servidor con QR + modo POS/KDS, splash azul con logo, appName LBApos |
+
+Documentación: [docs/UI_REDESIGN_BASELINE.md](docs/UI_REDESIGN_BASELINE.md) (auditoría previa) · [docs/UI_REDESIGN_FINAL.md](docs/UI_REDESIGN_FINAL.md) (entrega).
+
+> ⚠️ El rediseño es **100% UI**: no se modificó la lógica de negocio, APIs, DB, pagos, KDS, inventario, impresión ni sincronización.
+
+---
+
 ## 📱 PWA / Android
 
-SambaPos_LBA es una **PWA instalable** con soporte Android nativo via Capacitor:
+LBApos (SambaPos_LBA) es una **PWA instalable** con soporte Android nativo via Capacitor:
 
 ### PWA (instalación desde navegador)
 
@@ -367,16 +474,47 @@ SambaPos_LBA es una **PWA instalable** con soporte Android nativo via Capacitor:
 - **Botón "Instalar app" visible** en Admin → Configuración → Aplicación (PWA)
 - Detección de modo standalone (ya instalada)
 
-### Android nativo (Capacitor)
+### Android nativo (Capacitor — LBApos)
+
+> PR #9: el proyecto `android/` está **versionado en git** (no se genera
+> ad-hoc), los scripts viven en el `package.json` de la RAÍZ y el build
+> es un **gate obligatorio** de CI.
 
 ```bash
-# Configurado con capacitor.config.json
-# Ver docs/ANDROID.md para guía completa de build APK/AAB
-cd backend
-npm install @capacitor/core @capacitor/cli @capacitor/android
-npx cap add android
-npx cap copy
-npx cap open android  # Abre Android Studio
+# Desde la raíz del repo (después de git clone):
+npm ci                      # Capacitor deps (root package.json)
+npm run test:android:config  # gate de pre-vuelo (identidad, branding, wrapper)
+npm run cap:sync             # copia frontend/ + plugins
+npm run build:android:debug  # assembleDebug → app-debug.apk (CI: LBApos-debug.apk)
+
+# Bootstrap del proyecto Android (solo si no existe — nunca en CI):
+npm run cap:add
+```
+
+Branding versionado: splash a pantalla completa por orientación/densidad
+(fondo `#044392` + logo centrado **sin deformar**), íconos launcher +
+adaptive icon, `app_name = LBApos`, `applicationId com.sambapos.lba`.
+Guía completa (incl. rationale de cleartext/HTTPS y firma para Play
+Store): [docs/ANDROID.md](docs/ANDROID.md)
+
+---
+
+## 🌐 Demo de GitHub Pages (DEMO_MODE aislado)
+
+Demo pública: **https://lean031110.github.io/Samba_Pos_V3-Web/**
+
+| Aspecto | Cómo funciona |
+|---------|---------------|
+| **Base path (APP_BASE_PATH)** | La app detecta su base en runtime (desde la URL del documento): `/` en producción y `/Samba_Pos_V3-Web/` en Pages. Assets, manifest, service worker, iconos y navegación usan rutas relativas/resueltas — **la misma build funciona en ambos** sin parches `sed` (PR #9). |
+| **Aislamiento demo/producción** | `frontend/js/config.js` es la única fuente de verdad (`DEMO_MODE: false` por defecto). El deploy de Pages aplica UN solo overlay: `cp frontend/config.demo.js _site/js/config.js`. El Mock API solo se activa con `LBA_CONFIG.DEMO_MODE === true` explícito — **una build de producción nunca puede usar datos ficticios**. |
+| **Badge DEMO** | El topbar muestra un badge naranja `DEMO` cuando la build es demo, más un banner en consola. |
+| **Smoke en CI** | `pages.yml` construye el artifact, verifica el contenido (index/app/manifest/sw/logo/iconos), lo sirve bajo el sub-path real con `scripts/serve-pages.js` y ejecuta Playwright: login demo → áreas → POS → KDS → Admin (sin tocar backend de producción). |
+| **Datos** | Multi-usuario demo: `Administrador` / `Mesero` / `Cocinero` / `Cajero` — PIN `1234`. |
+
+```bash
+# Reproducir el deploy de Pages localmente:
+npm run pages:preview   # build + servidor en http://localhost:8080/Samba_Pos_V3-Web/
+npm run pages:smoke     # + suite Playwright contra el sub-path real
 ```
 
 ---
@@ -404,9 +542,20 @@ El volumen `samba-data` persiste `/app/data/samba.db` entre reinicios.
 
 ---
 
-## 🗄️ PostgreSQL (Production)
+## 🗄️ PostgreSQL — EXPERIMENTAL (no production-ready)
 
-Para despliegue multi-terminal con PostgreSQL:
+> **Estado honesto (PR #9)**: SQLite es la base de datos soportada y
+> probada. El soporte PostgreSQL está **EXPERIMENTAL**: en CI, la
+> migración `create_schema` sobre PostgreSQL 16 falla con
+> `constraint ... already exists` (el paso está etiquetado
+> EXPERIMENTAL y no bloquea). Las suites unitarias de compatibilidad
+> (`bloque-j-production`) sí pasan contra mock/escenarios de driver,
+> pero **un despliegue PostgreSQL real está PENDIENTE** de:
+> 1. corregir la migración duplicada sobre PG;
+> 2. re-ejecutar migraciones + seed + login sobre PG real;
+> 3. validación de carga.
+
+Para experimentar (sabiendo lo anterior):
 
 ```bash
 # 1. Crear base de datos
@@ -418,7 +567,7 @@ echo 'DATABASE_URL=postgres://user:pass@localhost:5432/sambapos_lba' >> .env
 # 3. Instalar driver
 npm install pg
 
-# 4. Migrar + seed
+# 4. Migrar + seed (⚠️ falla actualmente — ver arriba)
 npm run migrate
 npm run seed
 ```

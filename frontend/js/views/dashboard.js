@@ -1,125 +1,171 @@
 // =====================================================================
-// views/dashboard.js — EntityDashboardView (table map)
+// views/dashboard.js — DashboardView (admin KPIs, estilo Odoo Webclient)
 // =====================================================================
-// Displays tables in a 7-column grid. Tile colors reflect state:
-//   - Available  → LightGreen (#90EE90)  — text black
-//   - New Orders → DarkBlue (#00008B)    — text white
-//   - Bill Requested → Orange (#FFA500)  — text black
-//   - Locked     → Gray (#808080)        — text white
-//
-// Tapping an Available table opens a new ticket for that table.
-// Tapping an Occupied table opens the existing ticket.
+// Spec §19-20: cards blancas sobre gris con KPIs (ventas, tickets,
+// ticket promedio, caja, pedidos cocina, stock bajo), gráfico simple
+// de barras por categoría, actividad reciente, alertas y accesos rápidos.
+// Datos vía /api/reports/sales, /api/kitchen/orders, /api/inventory/stock,
+// /api/cash-sessions (endpoints existentes — sin cambios de lógica).
 // =====================================================================
-
-// Map backend table states (English, SambaPOS convention) to Spanish
-// display labels. The English values are kept for CSS class matching
-// (table-tile--available, etc.) and logic comparisons.
-const TABLE_STATE_LABELS = {
-  'Available':       'Disponible',
-  'New Orders':      'Nuevos pedidos',
-  'Bill Requested':  'Cuenta solicitada',
-  'Locked':          'Bloqueada',
-};
 
 const DashboardView = {
   init() {
-    this.gridEl = document.getElementById('dashboard-grid');
-    this._render();
-    // Subscribe to store changes
-    window.store.subscribe((state, prev, reason) => {
-      if (reason === 'tables-loaded' || reason === 'EntityUpdated') {
-        this._render();
-      }
-    });
+    this.contentEl = document.getElementById('dash-content');
   },
 
   async refresh() {
-    try {
-      const res = await Api.getTables();
-      window.store.setState({ tables: res.data }, 'tables-loaded');
-    } catch (err) {
-      window.App.toast('Error al cargar mesas: ' + err.message, 'error');
-    }
+    if (!this.contentEl) return;
+    this._loadData();
   },
 
-  _render() {
-    const tables = window.store.tables;
-    const filterText = (document.getElementById('dashboard-search-input')?.value || '').toLowerCase();
+  async _loadData() {
+    const [salesRes, kitchenRes, stockRes, cashRes, topRes] = await Promise.allSettled([
+      Api.getReport('sales'),
+      Api.request('GET', '/kitchen/orders'),
+      Api.request('GET', '/inventory/stock/1'),
+      Api.request('GET', '/cash-sessions/current'),
+      Api.getReport('top-products'),
+    ]);
 
-    const filtered = filterText
-      ? tables.filter(t => (t.Name || '').toLowerCase().includes(filterText))
-      : tables;
+    const sales = salesRes.status === 'fulfilled' ? (salesRes.value?.data || {}) : {};
+    const kitchenOrders = kitchenRes.status === 'fulfilled' ? (kitchenRes.value?.data || []) : [];
+    const stock = stockRes.status === 'fulfilled' ? (stockRes.value?.data || []) : [];
+    const cash = cashRes.status === 'fulfilled' ? (cashRes.value?.data || null) : null;
+    const top = topRes.status === 'fulfilled' ? (topRes.value?.data || []) : [];
 
-    this.gridEl.innerHTML = '';
-    if (filtered.length === 0) {
-      this.gridEl.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--samba-fg-muted);">Sin mesas. Cargá el seed para crear algunas o hacé clic en Nueva mesa.</div>';
-      return;
-    }
+    const lowStock = (stock || []).filter(s => Number(s.Quantity) <= Number(s.MinimumStock || 0));
+    const activeKitchen = (kitchenOrders || []).filter(o => o.State !== 'SERVED' && o.State !== 'VOIDED');
+    const cashOpen = cash && cash.Status === 'OPEN';
+    const totalSales = Number(sales.totalSales || 0);
+    const totalTickets = Number(sales.totalTickets || 0);
+    const avgTicket = totalTickets > 0 ? totalSales / totalTickets : 0;
 
-    for (const table of filtered) {
-      const state = this._extractState(table);
-      const stateLabel = TABLE_STATE_LABELS[state] || state;
-      const tile = document.createElement('div');
-      tile.className = 'table-tile table-tile--' + state.toLowerCase().replace(/\s+/g, '-');
-      tile.innerHTML = `
-        <div class="table-tile__name">${this._escape(table.Name)}</div>
-        <div class="table-tile__state">${stateLabel}</div>
-      `;
-      tile.addEventListener('click', () => this._onTableClick(table));
-      this.gridEl.appendChild(tile);
-    }
+    const now = new Date();
+    this.contentEl.innerHTML = `
+      <h1 class="dash__title">Panel de administración</h1>
+      <p class="dash__subtitle">${now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <span class="kpi-card__label"><i class="fa-solid fa-sack-dollar"></i> Ventas hoy</span>
+          <span class="kpi-card__value">$${totalSales.toFixed(2)}</span>
+          <span class="kpi-card__hint">${totalTickets} tickets emitidos</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-card__label"><i class="fa-solid fa-receipt"></i> Tickets</span>
+          <span class="kpi-card__value">${totalTickets}</span>
+          <span class="kpi-card__hint">cuenta y anulado: ${Number(sales.totalVoided || 0) + Number(sales.totalRefunded || 0)}</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-card__label"><i class="fa-solid fa-chart-simple"></i> Ticket promedio</span>
+          <span class="kpi-card__value">$${avgTicket.toFixed(2)}</span>
+        </div>
+        <div class="kpi-card ${cashOpen ? 'kpi-card--ok' : 'kpi-card--warn'}">
+          <span class="kpi-card__label"><i class="fa-solid fa-cash-register"></i> Caja</span>
+          <span class="kpi-card__value">${cashOpen ? 'ABIERTA' : 'CERRADA'}</span>
+          <span class="kpi-card__hint">${cashOpen ? 'desde ' + this._fmtTime(cash.OpenedAt) : 'sin sesión activa'}</span>
+        </div>
+        <div class="kpi-card ${activeKitchen.length > 0 ? 'kpi-card--warn' : ''}">
+          <span class="kpi-card__label"><i class="fa-solid fa-fire-burner"></i> Pedidos cocina</span>
+          <span class="kpi-card__value">${activeKitchen.length}</span>
+          <span class="kpi-card__hint">en preparación</span>
+        </div>
+        <div class="kpi-card ${lowStock.length > 0 ? 'kpi-card--danger' : 'kpi-card--ok'}">
+          <span class="kpi-card__label"><i class="fa-solid fa-triangle-exclamation"></i> Stock bajo</span>
+          <span class="kpi-card__value">${lowStock.length}</span>
+          <span class="kpi-card__hint">ingredientes por reponer</span>
+        </div>
+      </div>
+
+      <div class="dash-cards">
+        <div class="panel-card">
+          <div class="panel-card__header"><i class="fa-solid fa-ranking-star"></i> Ventas por producto</div>
+          <div class="panel-card__body">
+            ${this._renderTopBars(top)}
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card__header"><i class="fa-solid fa-bolt"></i> Actividad reciente</div>
+          <div class="panel-card__body">
+            ${this._renderActivity(kitchenOrders, sales)}
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card__header"><i class="fa-solid fa-table-cells-large"></i> Accesos rápidos</div>
+          <div class="panel-card__body">
+            <div class="quick-grid">
+              <button class="quick-btn" onclick="window.App.navigate('pos')"><i class="fa-solid fa-cart-shopping"></i> POS</button>
+              <button class="quick-btn" onclick="window.App.navigate('kitchen')"><i class="fa-solid fa-utensils"></i> Cocina</button>
+              <button class="quick-btn" onclick="window.App.navigate('cash')"><i class="fa-solid fa-cash-register"></i> Caja</button>
+              <button class="quick-btn" onclick="window.App.navigate('inventory')"><i class="fa-solid fa-warehouse"></i> Inventario</button>
+              <button class="quick-btn" onclick="window.App.navigate('reports')"><i class="fa-solid fa-chart-bar"></i> Reportes</button>
+              <button class="quick-btn" onclick="window.App.navigate('admin')"><i class="fa-solid fa-gear"></i> Configuración</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card__header"><i class="fa-solid fa-bell"></i> Alertas</div>
+          <div class="panel-card__body">
+            ${this._renderAlerts(lowStock, activeKitchen, cashOpen, sales)}
+          </div>
+        </div>
+      </div>
+    `;
   },
 
-  /**
-   * Extract the human-readable state name from the table's EntityStates JSON.
-   * Example: EntityStates = [{StateName:"Status", State:"Available"}]
-   */
-  _extractState(table) {
-    if (!table.EntityStates || !Array.isArray(table.EntityStates)) return 'Desconocido';
-    const status = table.EntityStates.find(s => s.StateName === 'Status');
-    return status?.State || 'Desconocido';
-  },
-
-  async _onTableClick(table) {
-    const state = this._extractState(table);
-    const stateLabel = TABLE_STATE_LABELS[state] || state;
-    window.App.toast(`Mesa ${table.Name} (${stateLabel}) tocada`, 'info');
-
-    if (state === 'Available') {
-      // Create a new ticket linked to this table
-      try {
-        const res = await Api.createTicket({ tableId: table.Id });
-        window.App.toast(`Ticket #${res.data.Id} creado para mesa ${table.Name}`, 'success');
-        window.store.setState({
-          currentTicket: res.data,
-          openTickets: [...window.store.openTickets, res.data],
-        }, 'ticket-created');
-        window.App.navigate('pos');
-      } catch (err) {
-        window.App.toast('No se puede crear ticket: ' + err.message, 'error');
-      }
-    } else {
-      // Open existing ticket on this table
-      try {
-        const ticketsRes = await Api.getTickets();
-        const open = ticketsRes.data.find(t =>
-          t.TicketEntities?.some(te => te.EntityId === table.Id)
-        );
-        if (open) {
-          const full = await Api.getTicket(open.Id);
-          window.store.setState({ currentTicket: full.data }, 'ticket-loaded');
-          window.App.navigate('pos');
-        } else {
-          window.App.toast('La mesa está marcada como ' + (TABLE_STATE_LABELS[state] || state) + ' pero no se encontró ningún ticket abierto', 'warn');
-        }
-      } catch (err) {
-        window.App.toast('No se puede cargar el ticket: ' + err.message, 'error');
-      }
+  _renderTopBars(top) {
+    if (!top || top.length === 0) {
+      return '<div style="color: var(--lba-fg-muted); padding: 12px 0;">Sin datos de ventas.</div>';
     }
+    const max = Math.max(...top.map(t => Number(t.total || 0)), 1);
+    return top.slice(0, 7).map(t => `
+      <div class="bar-row">
+        <span class="bar-row__label" title="${this._escape(t.name)}">${this._escape(t.name)}</span>
+        <span class="bar-row__track"><span class="bar-row__fill" style="width: ${Math.round((Number(t.total || 0) / max) * 100)}%"></span></span>
+        <span class="bar-row__value">${Number(t.quantity || 0)} · $${Number(t.total || 0).toFixed(0)}</span>
+      </div>
+    `).join('');
   },
 
-  filter(text) {
-    this._render();
+  _renderActivity(kitchenOrders, sales) {
+    const rows = [];
+    const active = (kitchenOrders || []).filter(o => o.State !== 'SERVED' && o.State !== 'VOIDED');
+    for (const o of active.slice(0, 3)) {
+      rows.push(`<div class="activity-row"><span class="activity-row__time">${this._fmtTime(o.CreatedAt)}</span><span class="activity-row__text">Pedido #${o.TicketNumber || o.TicketId} en cocina (${o.TableName || 'llevar'})</span></div>`);
+    }
+    if (Number(sales.totalVoided || 0) > 0) {
+      rows.push(`<div class="activity-row"><span class="activity-row__time">—</span><span class="activity-row__text">${sales.totalVoided} ticket(s) anulados hoy</span></div>`);
+    }
+    if (Number(sales.totalRefunded || 0) > 0) {
+      rows.push(`<div class="activity-row"><span class="activity-row__time">—</span><span class="activity-row__text">${sales.totalRefunded} reembolso(s) registrados</span></div>`);
+    }
+    if (rows.length === 0) rows.push('<div style="color: var(--lba-fg-muted); padding: 10px 0;">Sin actividad reciente.</div>');
+    return rows.join('');
+  },
+
+  _renderAlerts(lowStock, activeKitchen, cashOpen, sales) {
+    const items = [];
+    for (const s of (lowStock || []).slice(0, 4)) {
+      items.push(`<div style="display:flex; gap:8px; align-items:center; padding: 7px 0; border-bottom: 1px dashed var(--lba-border-light);">
+        <span class="badge badge--danger"><i class="fa-solid fa-triangle-exclamation"></i> Bajo</span>
+        <span style="flex:1;">${this._escape(s.IngredientName)}</span>
+        <span style="font-weight:700; font-variant-numeric: tabular-nums;">${Number(s.Quantity).toFixed(1)} ${this._escape(s.UnitCode || '')}</span>
+      </div>`);
+    }
+    if (!cashOpen) {
+      items.push('<div style="display:flex; gap:8px; align-items:center; padding: 7px 0;"><span class="badge badge--warn"><i class="fa-solid fa-cash-register"></i> Caja</span><span style="flex:1;">No hay sesión de caja abierta</span></div>');
+    }
+    if (items.length === 0) items.push('<div style="color: var(--lba-fg-muted); padding: 10px 0;"><i class="fa-solid fa-circle-check" style="color: var(--lba-success)"></i> Todo en orden.</div>');
+    return items.join('');
+  },
+
+  _fmtTime(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return '—'; }
   },
 
   _escape(str) {

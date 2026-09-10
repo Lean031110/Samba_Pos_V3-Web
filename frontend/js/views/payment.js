@@ -1,14 +1,10 @@
 // =====================================================================
-// views/payment.js — PaymentEditorView
+// views/payment.js — PaymentView rediseñado (Odoo 19 Payment Screen)
 // =====================================================================
-// Layout:
-//   [ Header: ticket# + remaining amount ]
-//   [ Left 60%: order list ]
-//   [ Right 40%:
-//       - Numeric keypad (4×3: 7 8 9 / 4 5 6 / 1 2 3 / ⌫ 0 ✓)
-//       - Summary: tendered, remaining, change, total
-//       - Payment type buttons (Cash, Credit Card, Voucher, Customer Account)
-//   ]
+// Spec §13: TOTAL grande, métodos de pago (botones grandes), ENTREGADO,
+// CAMBIO, numpad táctil, CONFIRMAR PAGO.
+// MISMA lógica de pagos: addPayment(ticketId, {paymentTypeId, amount,
+// tenderedAmount}) → closeTicket. Sin cambios de negocio.
 // =====================================================================
 
 const PaymentView = {
@@ -22,10 +18,13 @@ const PaymentView = {
     this.changeEl = document.getElementById('payment-change');
     this.totalEl = document.getElementById('payment-total');
     this.ticketNumberEl = document.getElementById('payment-ticket-number');
+    this.confirmBtnEl = document.getElementById('payment-confirm-btn');
 
     this._tendered = 0;
     this._ticket = null;
     this._paymentTypes = [];
+    this._selectedType = null;
+    this._processing = false;
 
     this._buildNumpad();
   },
@@ -33,21 +32,21 @@ const PaymentView = {
   async load(ticket) {
     this._ticket = ticket;
     this._tendered = 0;
+    this._selectedType = null;
     this.ticketNumberEl.textContent = '#' + (ticket.TicketNumber || ticket.Id);
     this._renderOrders();
     this._renderSummary();
 
-    // Fetch payment types from backend (no hardcoded IDs)
+    // Métodos de pago desde el backend (Cash / Credit Card / Voucher…)
     try {
       const res = await Api.getPaymentTypes();
       this._paymentTypes = (res.data || []).map(pt => ({
         Id: pt.Id,
         Name: pt.Name,
-        ButtonColor: pt.ButtonColor || 'Gainsboro',
         Icon: this._iconForPaymentType(pt.Name),
       }));
     } catch (err) {
-      window.App.toast('No se pueden cargar los tipos de pago: ' + err.message, 'error');
+      window.App.toast('No se pueden cargar los métodos de pago: ' + err.message, 'error');
       this._paymentTypes = [];
     }
     this._renderPaymentTypes();
@@ -55,28 +54,28 @@ const PaymentView = {
 
   _iconForPaymentType(name) {
     const n = (name || '').toLowerCase();
-    if (n.includes('cash'))      return 'fa-money-bill';
-    if (n.includes('card') || n.includes('credit')) return 'fa-credit-card';
-    if (n.includes('voucher'))   return 'fa-ticket';
+    if (n.includes('cash') || n.includes('cup') || n.includes('efectivo')) return 'fa-money-bill';
+    if (n.includes('card') || n.includes('credit') || n.includes('usd') || n.includes('mlc')) return 'fa-credit-card';
+    if (n.includes('transfer')) return 'fa-mobile-screen';
+    if (n.includes('voucher')) return 'fa-ticket';
     if (n.includes('account') || n.includes('customer')) return 'fa-user';
     return 'fa-money-bill-wave';
   },
 
   _renderOrders() {
     if (!this._ticket?.Orders?.length) {
-      this.ordersEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--samba-fg-muted);">Sin pedidos</div>';
+      this.ordersEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--lba-fg-muted);">Sin pedidos</div>';
       return;
     }
     this.ordersEl.innerHTML = '';
     for (const o of this._ticket.Orders) {
       const item = document.createElement('div');
-      item.className = 'ticket-item';
-      if (!o.CalculatePrice) item.classList.add('is-gift');
+      item.className = 'payline' + (o.CalculatePrice ? '' : ' is-gift');
       const total = (Number(o.Price || 0) * Number(o.Quantity || 0)).toFixed(2);
       item.innerHTML = `
-        <span class="ticket-item__name">${this._escape(o.MenuItemName)}</span>
-        <span class="ticket-item__qty">${Number(o.Quantity || 0)} ×</span>
-        <span class="ticket-item__total">$${total}</span>
+        <span class="payline__qty">${Number(o.Quantity || 0)} ×</span>
+        <span class="payline__name">${this._escape(o.MenuItemName)}</span>
+        <span class="payline__price">$${total}</span>
       `;
       this.ordersEl.appendChild(item);
     }
@@ -91,6 +90,9 @@ const PaymentView = {
     this.remaining2El.textContent = '$' + remaining.toFixed(2);
     this.changeEl.textContent = '$' + change.toFixed(2);
     this.totalEl.textContent = '$' + total.toFixed(2);
+    if (this.confirmBtnEl) {
+      this.confirmBtnEl.disabled = this._processing || this._tendered <= 0 || !this._selectedType;
+    }
   },
 
   _buildNumpad() {
@@ -98,17 +100,24 @@ const PaymentView = {
       { l: '7', v: '7' }, { l: '8', v: '8' }, { l: '9', v: '9' },
       { l: '4', v: '4' }, { l: '5', v: '5' }, { l: '6', v: '6' },
       { l: '1', v: '1' }, { l: '2', v: '2' }, { l: '3', v: '3' },
-      { l: '⌫', icon: 'fa-delete-left', cls: 'numpad__key--danger', action: 'back' },
+      { l: 'C', cls: 'np-key--clear', action: 'clear' },
       { l: '0', v: '0' },
-      { l: '✓', icon: 'fa-check', cls: 'numpad__key--accent', action: 'exact' },
+      { l: '00', cls: 'np-key--fn', action: 'zeros' },
+      { l: '⌫', cls: 'np-key--fn', action: 'back' },
+      { l: 'EXACTO', cls: 'np-key--exact', action: 'exact', wide: true },
     ];
     this.numpadEl.innerHTML = '';
     for (const k of keys) {
       const btn = document.createElement('button');
-      btn.className = 'numpad__key ' + (k.cls || '');
-      btn.innerHTML = k.icon ? `<i class="fa-solid ${k.icon}"></i>` : this._escape(k.l);
+      btn.type = 'button';
+      btn.className = 'np-key ' + (k.cls || '');
+      if (k.wide) btn.style.gridColumn = 'span 2';
+      btn.textContent = k.l;
       btn.addEventListener('click', () => {
+        if (this._processing) return;
         if (k.action === 'back') this._tendered = Math.floor(this._tendered / 10);
+        else if (k.action === 'clear') this._tendered = 0;
+        else if (k.action === 'zeros') this._tendered = this._tendered * 100;
         else if (k.action === 'exact') this._tendered = Number(this._ticket?.RemainingAmount || 0);
         else this._tendered = this._tendered * 10 + parseInt(k.v, 10);
         this._renderSummary();
@@ -120,38 +129,41 @@ const PaymentView = {
   _renderPaymentTypes() {
     this.typesEl.innerHTML = '';
     for (const pt of this._paymentTypes) {
-      const btn = document.createElement('flex-button');
-      btn.setAttribute('label', pt.Name);
-      btn.setAttribute('icon', pt.Icon);
-      btn.setAttribute('size', 'xl');
-      btn.style.minHeight = '70px';
-      btn.addEventListener('click', () => this._processPayment(pt));
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pm-btn' + (this._selectedType?.Id === pt.Id ? ' is-selected' : '');
+      btn.innerHTML = `<i class="fa-solid ${pt.Icon}"></i> ${this._escape(pt.Name)}`;
+      btn.addEventListener('click', () => {
+        this._selectedType = pt;
+        this._renderPaymentTypes();
+        this._renderSummary();
+      });
       this.typesEl.appendChild(btn);
     }
-    // Add Close button (back to POS)
-    const closeBtn = document.createElement('flex-button');
-    closeBtn.setAttribute('label', 'Volver');
-    closeBtn.setAttribute('icon', 'fa-arrow-left');
-    closeBtn.setAttribute('variant', 'danger');
-    closeBtn.style.minHeight = '70px';
-    closeBtn.addEventListener('click', () => window.App.navigate('pos'));
-    this.typesEl.appendChild(closeBtn);
+    if (this._paymentTypes.length === 0) {
+      this.typesEl.innerHTML = '<div style="grid-column: 1/-1; color: var(--lba-fg-muted); font-size: 13px; padding: 6px 2px;">Sin métodos de pago configurados.</div>';
+    }
+  },
+
+  /** CONFIRMAR PAGO — valida método + importe y procesa (misma lógica) */
+  async confirm() {
+    if (!this._selectedType) return window.App.toast('Seleccion\u00e1 un método de pago', 'warn');
+    await this._processPayment(this._selectedType);
   },
 
   async _processPayment(paymentType) {
-    // Prevent double-click: disable all payment buttons during processing
     if (this._processing) return;
-    this._processing = true;
-    this._setButtonsDisabled(true);
-
     const remaining = Number(this._ticket.RemainingAmount || 0);
     const amount = this._tendered > 0 ? Math.min(this._tendered, remaining) : remaining;
     if (amount <= 0) {
       window.App.toast('Nada que cobrar', 'warn');
-      this._processing = false;
-      this._setButtonsDisabled(false);
       return;
     }
+
+    this._processing = true;
+    this._renderSummary();
+    this._setButtonsDisabled(true);
+
     try {
       const res = await Api.addPayment(this._ticket.Id, {
         paymentTypeId: paymentType.Id,
@@ -161,11 +173,12 @@ const PaymentView = {
       window.store.setState({ currentTicket: res.data }, 'payment-processed');
       this._ticket = res.data;
       this._tendered = 0;
+      this._renderOrders();
       this._renderSummary();
       const newRemaining = Number(res.data.RemainingAmount || 0);
       if (newRemaining <= 0) {
         window.App.toast('¡Pago completo! Cerrando ticket…', 'success');
-        setTimeout(() => this._closeAndReturn(), 800);
+        setTimeout(() => this._closeAndReturn(), 700);
       } else {
         window.App.toast(`Pago parcial: $${amount.toFixed(2)} (restante: $${newRemaining.toFixed(2)})`, 'info');
       }
@@ -173,24 +186,23 @@ const PaymentView = {
       window.App.toast('Pago fallido: ' + err.message, 'error');
     } finally {
       this._processing = false;
+      this._renderSummary();
       this._setButtonsDisabled(false);
     }
   },
 
   _setButtonsDisabled(disabled) {
-    const buttons = this.typesEl.querySelectorAll('flex-button');
-    buttons.forEach(btn => {
-      if (disabled) btn.setAttribute('disabled', '');
-      else btn.removeAttribute('disabled');
-    });
+    this.typesEl.querySelectorAll('.pm-btn').forEach(btn => { btn.disabled = disabled; });
+    if (this.confirmBtnEl) this.confirmBtnEl.disabled = disabled;
   },
 
   async _closeAndReturn() {
     try {
       const res = await Api.closeTicket(this._ticket.Id);
       window.store.setState({ currentTicket: null }, 'ticket-closed');
-      window.App.toast('Ticket #' + res.data.TicketNumber + ' cerrado', 'success');
-      window.App.navigate('dashboard');
+      window.App.toast('Ticket #' + (res.data.TicketNumber || '') + ' cerrado', 'success');
+      const user = window.store.state.currentUser;
+      window.App.navigate(user && user.isAdmin ? 'tables' : 'tables');
     } catch (err) {
       window.App.toast('No se puede cerrar el ticket: ' + err.message, 'error');
     }
