@@ -261,6 +261,7 @@ class TcpTransport {
       const socket = new net.Socket();
       let bytesSent = 0;
       let settled = false;
+      let connected = false;  // track whether the connect callback fired
 
       const timeout = setTimeout(() => {
         if (!settled) {
@@ -271,8 +272,11 @@ class TcpTransport {
       }, this.timeout);
 
       socket.connect(this.port, this.host, () => {
+        // Connection established — now write the data, then end the socket
+        connected = true;
         socket.write(data, () => {
           bytesSent = data.length;
+          socket.end();
         });
       });
 
@@ -284,7 +288,13 @@ class TcpTransport {
         clearTimeout(timeout);
         if (!settled) {
           settled = true;
-          resolve({ success: true, bytesSent: data.length });
+          // If the connection was never established (e.g., server rejected it),
+          // treat as failure. Otherwise, a clean close after write = success.
+          if (connected) {
+            resolve({ success: true, bytesSent: data.length });
+          } else {
+            resolve({ success: false, bytesSent, error: 'Connection rejected by remote' });
+          }
         }
       });
 
@@ -295,9 +305,6 @@ class TcpTransport {
           resolve({ success: false, bytesSent, error: err.message });
         }
       });
-
-      // Close after sending
-      socket.end();
     });
   }
 

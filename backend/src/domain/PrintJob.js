@@ -29,6 +29,7 @@ const JOB_TYPES = Object.freeze({
   REFUND_RECEIPT: 'REFUND_RECEIPT',
   REPRINT: 'REPRINT',
   REPORT: 'REPORT',
+  TEST: 'TEST',  // BLOQUE F — test print job (used by /api/printers/:id/test)
 });
 
 const STATUS = Object.freeze({

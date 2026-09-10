@@ -173,6 +173,188 @@ router.delete('/routing-rules/:id',
   });
 
 // =====================================================================
+// Printer Templates CRUD — BLOQUE F (P2: template editor)
+// =====================================================================
+
+// GET /api/print/templates/list — list all templates
+router.get('/templates/list', requirePermission('manage.printers'), async (req, res, next) => {
+  try {
+    let query = db('PrinterTemplates').orderBy('TemplateType').orderBy('Name');
+    if (req.query.type) {
+      query = query.where({ TemplateType: req.query.type });
+    }
+    if (req.query.includeInactive !== 'true') {
+      query = query.where({ IsActive: 1 });
+    }
+    const templates = await query;
+    res.json({ data: templates, count: templates.length });
+  } catch (err) { next(err); }
+});
+
+// GET /api/print/templates/:id — get template by ID
+router.get('/templates/:id', requirePermission('manage.printers'), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) throw new ValidationError('id must be a number');
+    const template = await db('PrinterTemplates').where({ Id: id }).first();
+    if (!template) throw new NotFoundError(`Template ${id} not found`);
+    res.json({ data: template });
+  } catch (err) { next(err); }
+});
+
+// POST /api/print/templates — create a new template
+router.post('/templates',
+  requirePermission('manage.printers'),
+  auditLog('printtemplate.create', 'PrinterTemplate'),
+  async (req, res, next) => {
+    try {
+      const body = req.body || {};
+      if (!body.name) throw new ValidationError('name is required');
+      if (!body.templateType) throw new ValidationError('templateType is required');
+      const validTypes = ['RECEIPT', 'KITCHEN_ORDER', 'TEST', 'CUSTOM'];
+      if (!validTypes.includes(body.templateType)) {
+        throw new ValidationError(`templateType must be one of: ${validTypes.join(', ')}`);
+      }
+      const [id] = await db('PrinterTemplates').insert({
+        Name: body.name,
+        TemplateType: body.templateType,
+        Template: body.template || '',
+        Description: body.description || null,
+        MergeLines: body.mergeLines || 0,
+        PrinterId: body.printerId || null,
+        IsActive: 1,
+        CreatedAt: new Date().toISOString(),
+        UpdatedAt: new Date().toISOString(),
+      });
+      const created = await db('PrinterTemplates').where({ Id: id }).first();
+      res.status(201).json({ data: created });
+    } catch (err) { next(err); }
+  });
+
+// PATCH /api/print/templates/:id — update template
+router.patch('/templates/:id',
+  requirePermission('manage.printers'),
+  auditLog('printtemplate.update', 'PrinterTemplate'),
+  async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) throw new ValidationError('id must be a number');
+      const existing = await db('PrinterTemplates').where({ Id: id }).first();
+      if (!existing) throw new NotFoundError(`Template ${id} not found`);
+
+      const allowed = {};
+      const body = req.body || {};
+      if (body.name !== undefined) allowed.Name = body.name;
+      if (body.templateType !== undefined) {
+        const validTypes = ['RECEIPT', 'KITCHEN_ORDER', 'TEST', 'CUSTOM'];
+        if (!validTypes.includes(body.templateType)) {
+          throw new ValidationError(`templateType must be one of: ${validTypes.join(', ')}`);
+        }
+        allowed.TemplateType = body.templateType;
+      }
+      if (body.template !== undefined) allowed.Template = body.template;
+      if (body.description !== undefined) allowed.Description = body.description;
+      if (body.mergeLines !== undefined) allowed.MergeLines = body.mergeLines;
+      if (body.printerId !== undefined) allowed.PrinterId = body.printerId;
+      if (body.isActive !== undefined) allowed.IsActive = body.isActive ? 1 : 0;
+      allowed.UpdatedAt = new Date().toISOString();
+
+      if (Object.keys(allowed).length > 1) {
+        await db('PrinterTemplates').where({ Id: id }).update(allowed);
+      }
+      const updated = await db('PrinterTemplates').where({ Id: id }).first();
+      res.json({ data: updated });
+    } catch (err) { next(err); }
+  });
+
+// DELETE /api/print/templates/:id — soft delete (IsActive=0)
+router.delete('/templates/:id',
+  requirePermission('manage.printers'),
+  auditLog('printtemplate.delete', 'PrinterTemplate'),
+  async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) throw new ValidationError('id must be a number');
+      const template = await db('PrinterTemplates').where({ Id: id }).first();
+      if (!template) throw new NotFoundError(`Template ${id} not found`);
+      await db('PrinterTemplates').where({ Id: id }).update({
+        IsActive: 0,
+        UpdatedAt: new Date().toISOString(),
+      });
+      res.json({ data: { id, isActive: false } });
+    } catch (err) { next(err); }
+  });
+
+// POST /api/print/templates/:id/preview — render template with sample data
+router.post('/templates/:id/preview',
+  requirePermission('manage.printers'),
+  async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) throw new ValidationError('id must be a number');
+      const template = await db('PrinterTemplates').where({ Id: id }).first();
+      if (!template) throw new NotFoundError(`Template ${id} not found`);
+
+      const sampleData = generateSampleData(template.TemplateType);
+      const renderer = new EscPosRenderer({ charsPerLine: 42, codePage: 857 });
+      let bytes;
+      if (template.TemplateType === 'KITCHEN_ORDER') {
+        bytes = renderer.renderKitchenOrder(sampleData);
+      } else if (template.TemplateType === 'TEST') {
+        bytes = renderer.renderTestPrint('Sample Printer');
+      } else {
+        bytes = renderer.render(sampleData, template);
+      }
+      res.json({
+        data: {
+          templateId: id,
+          templateType: template.TemplateType,
+          bytesHex: bytes.toString('hex'),
+          bytesLength: bytes.length,
+          sampleData,
+        },
+      });
+    } catch (err) { next(err); }
+  });
+
+/**
+ * Generate sample ticket/kitchen data for template preview.
+ */
+function generateSampleData(type) {
+  if (type === 'KITCHEN_ORDER') {
+    return {
+      TicketId: 999,
+      TicketNumber: 'SAMPLE-001',
+      TableName: 'Mesa 5',
+      CreatedAt: new Date().toISOString(),
+      State: 'NEW',
+      Items: [
+        { Quantity: 2, MenuItemName: 'Hamburguesa Clásica', PortionName: 'Normal', Notes: 'Sin cebolla' },
+        { Quantity: 1, MenuItemName: 'Papas Fritas', PortionName: 'Grande', Notes: '' },
+        { Quantity: 3, MenuItemName: 'Coca Cola', PortionName: '500ml', Notes: 'Sin hielo' },
+      ],
+    };
+  }
+  return {
+    Id: 999,
+    TicketNumber: 'SAMPLE-001',
+    Date: new Date().toISOString(),
+    LastModifiedUserName: 'Administrator',
+    TotalAmount: 25.50,
+    RemainingAmount: 0,
+    Orders: [
+      { Quantity: 2, Price: 5.00, MenuItemName: 'Hamburguesa Clásica', PortionName: 'Normal', CalculatePrice: 1 },
+      { Quantity: 1, Price: 3.50, MenuItemName: 'Papas Fritas', PortionName: 'Grande', CalculatePrice: 1 },
+      { Quantity: 3, Price: 2.00, MenuItemName: 'Coca Cola', PortionName: '500ml', CalculatePrice: 1 },
+    ],
+    Payments: [
+      { Amount: 25.50, Name: 'Cash' },
+    ],
+    TicketEntities: [{ EntityName: 'Mesa 5' }],
+  };
+}
+
+// =====================================================================
 // Print Job Instances (queue monitoring) — defined BEFORE /:id
 // =====================================================================
 

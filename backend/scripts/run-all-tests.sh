@@ -45,6 +45,7 @@ run_unit "unit-conversion"         tests/unit-conversion-verification.test.js
 run_unit "domain-extended"         tests/domain-extended-verification.test.js
 run_unit "bloque-d-verification"  tests/bloque-d-verification.test.js
 run_unit "bloque-e-kds"            tests/bloque-e-kds-verification.test.js
+run_unit "bloque-f-printer"        tests/bloque-f-printer-verification.test.js
 
 echo "=== E2E (Playwright) ==="
 rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
