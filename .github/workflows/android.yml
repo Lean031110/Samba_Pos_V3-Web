@@ -243,6 +243,8 @@ jobs:
     continue-on-error: true  # emulator boot may be flaky — build gate above is the mandatory one
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
@@ -262,47 +264,9 @@ jobs:
           target: default
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            set -e
-            echo "=== 1. Install APK ==="
-            adb install -r LBApos-debug.apk
-
-            echo "=== 2. Package installed? ==="
-            adb shell pm list packages | grep com.sambapos.lba
-
-            echo "=== 3. Launch app ==="
-            # -W waits for first frame; on a cold software-rendered emulator
-            # (splash 2s + WebView init) it can legitimately time out, so the
-            # launch state is verified by focus + live process below.
-            adb shell am start -W -n com.sambapos.lba/.MainActivity > /tmp/launch.txt 2>&1 || true
-            cat /tmp/launch.txt || true
-
-            echo "=== 4. Wait for the activity to reach the foreground ==="
-            FOCUS=""
-            for i in $(seq 1 30); do
-              FOCUS=$(adb shell dumpsys window 2>/dev/null | grep -m1 -E 'mCurrentFocus' || true)
-              if echo "$FOCUS" | grep -q 'com.sambapos.lba'; then
-                echo "foreground after ${i}s: $FOCUS"
-                break
-              fi
-              sleep 1
-            done
-
-            echo "=== 5. Activity in foreground? ==="
-            echo "$FOCUS" | grep com.sambapos.lba
-
-            echo "=== 6. Process alive? ==="
-            adb shell pidof com.sambapos.lba
-
-            echo "=== 7. Screenshot evidence (splash/welcome rendered) ==="
-            sleep 3
-            adb exec-out screencap -p > emulator-launch.png
-            ls -la emulator-launch.png
-
-            echo "=== 8. Launcher label check (LBApos) ==="
-            adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.sambapos.lba || true
-
-            echo "=== SMOKE OK: installed + launched + foreground + process alive ==="
+          # The runner executes each script LINE as a separate `sh -c`,
+          # so all multi-line logic lives in the committed script file.
+          script: bash "$GITHUB_WORKSPACE/scripts/android-smoke.sh" "$GITHUB_WORKSPACE/LBApos-debug.apk"
 
       - name: Upload emulator screenshot
         if: always()
