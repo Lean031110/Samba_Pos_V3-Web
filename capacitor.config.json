@@ -1,6 +1,6 @@
 {
   "appId": "com.sambapos.lba",
-  "appName": "SambaPos LBA",
+  "appName": "LBApos",
   "webDir": "frontend",
   "bundledWebRuntime": false,
   "server": {
@@ -13,9 +13,12 @@
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 2000,
+      "launchAutoHide": true,
       "backgroundColor": "#044392",
       "androidSplashResourceName": "splash",
-      "showSpinner": false
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
     }
   }
 }

@@ -205,7 +205,19 @@ window.DEMO_STATE = {
 // Mock API — intercepta las llamadas cuando DEMO_MODE === true
 // ---------------------------------------------------------------------
 window.DEMO_API = {
+  // El backend real devuelve JSON fresco en cada respuesta (nueva referencia).
+  // El mock muta objetos internos: si devolvemos la misma referencia, el store
+  // (que compara referencias para re-renderizar) no detecta cambios. Por eso
+  // TODA respuesta del mock se clona en profundidad.
+  _clone(obj) {
+    try { return JSON.parse(JSON.stringify(obj)); } catch (e) { return obj; }
+  },
+
   handle(method, rawPath, body) {
+    return this._clone(this._handle(method, rawPath, body));
+  },
+
+  _handle(method, rawPath, body) {
     const D = window.DEMO_DATA;
     const S = window.DEMO_STATE;
     // FIX: normalizar prefijo — request() llama sin '/api'

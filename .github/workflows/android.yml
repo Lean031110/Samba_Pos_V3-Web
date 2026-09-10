@@ -52,6 +52,40 @@ jobs:
       - name: Copy web assets
         run: npx cap copy android
 
+      - name: Inject LBApos splash + branding (BLOQUE N)
+        run: |
+          # Splash del APK: logo LBA sobre azul #044392 en todas las densidades
+          RES=android/app/src/main/res
+          mkdir -p $RES/drawable $RES/drawable-hdpi $RES/drawable-xhdpi $RES/drawable-xxhdpi $RES/drawable-xxxhdpi
+          # drawable base: layer-list azul de marca (fondo del splash nativo)
+          cat > $RES/drawable/splash.xml << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+            <item android:drawable="@color/splash_blue"/>
+          </layer-list>
+          XML
+          # color de marca
+          mkdir -p $RES/values
+          grep -q splash_blue $RES/values/colors.xml 2>/dev/null || cat >> $RES/values/colors.xml << 'XML'
+          <resources>
+            <color name="splash_blue">#044392</color>
+          </resources>
+          XML
+          # imagen de splash (logo LBA) por densidad
+          for d in hdpi:480 xhdpi:720 xxhdpi:960 xxxhdpi:1440; do
+            density="${d%%:*}"
+            cp frontend/assets/splash-512.png $RES/drawable-$density/splash.png
+          done
+          cp frontend/assets/splash-512.png $RES/drawable/splash.png
+          # appName debe ser LBApos (verificación dura)
+          STRINGS=$RES/values/strings.xml
+          echo "=== strings.xml ==="; cat $STRINGS
+          grep -q 'app_name">LBApos' $STRINGS || (sed -i 's|name="app_name">[^<]*<|name="app_name">LBApos<|' $STRINGS; echo "[branding] app_name forzado a LBApos")
+          grep -q 'app_name">LBApos' $STRINGS || { echo "FAIL: app_name no es LBApos"; exit 1; }
+          # Portrait (POS/KDS son verticales por diseño) + fullscreen
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q 'android:screenOrientation' $MANIFEST || sed -i 's|android:exported="true"|android:screenOrientation="portrait"\n            android:exported="true"|' $MANIFEST
+
       - name: Sync Android project
         run: npx cap sync android
 
@@ -61,6 +95,8 @@ jobs:
           ls -la android/ | head -10
           echo "=== app/build.gradle exists? ==="
           ls -la android/app/build.gradle 2>/dev/null || echo "NOT FOUND"
+          echo "=== splash resources ==="
+          find android/app/src/main/res -name 'splash*' -type f | head -10
 
       - name: Build debug APK
         working-directory: android
@@ -74,7 +110,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SambaPos-LBA-debug.apk
+          name: LBApos-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
