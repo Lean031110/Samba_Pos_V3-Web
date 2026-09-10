@@ -11,12 +11,12 @@ const App = {
 
   async init() {
     // BLOQUE Android — Initialize server config (for Android POS tablets)
-    if (window.ServerConfig) {
+    // Skip entirely if DEMO_MODE (GitHub Pages demo — no server needed)
+    if (window.ServerConfig && !window.DEMO_MODE) {
       ServerConfig.init();
-      // If not configured, the config screen is shown — wait for user
-      if (!ServerConfig.isConfigured() && !window.DEMO_MODE) {
+      if (!ServerConfig.isConfigured()) {
         console.log('[app] Server not configured — showing config screen');
-        return; // Don't continue init until configured
+        return;
       }
     }
 

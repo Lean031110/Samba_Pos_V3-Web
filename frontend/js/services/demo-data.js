@@ -137,13 +137,31 @@ window.DEMO_API = {
     }
 
     // Products
-    if (path === '/api/products' && method === 'GET') {
+    if (path.startsWith('/api/products') && method === 'GET') {
       return { data: data.products, count: data.products.length };
     }
 
-    // Tables
+    // Tables / Dashboard
     if (path.startsWith('/api/tables') && method === 'GET') {
       return { data: data.tables, count: data.tables.length };
+    }
+
+    // Open tickets (dashboard)
+    if (path === '/api/tickets' && method === 'GET') {
+      // Return a few open tickets
+      return {
+        data: [
+          { Id: 10, TicketNumber: 'T-001', Date: new Date().toISOString(), RemainingAmount: 22.50, IsClosed: 0, IsVoided: 0, IsRefunded: 0, TicketEntities: [{ EntityName: 'Mesa 2' }] },
+          { Id: 11, TicketNumber: 'T-002', Date: new Date().toISOString(), RemainingAmount: 15.50, IsClosed: 0, IsVoided: 0, IsRefunded: 0, TicketEntities: [{ EntityName: 'Mesa 4' }] },
+          { Id: 12, TicketNumber: 'T-003', Date: new Date().toISOString(), RemainingAmount: 5.60, IsClosed: 0, IsVoided: 0, IsRefunded: 0, TicketEntities: [{ EntityName: 'Barra 1' }] },
+        ],
+        count: 3,
+      };
+    }
+
+    // Departments
+    if (path === '/api/departments' || path.startsWith('/api/departments') && method === 'GET') {
+      return { data: [{ Id: 1, Name: 'Restaurante' }], count: 1 };
     }
 
     // Kitchen
@@ -153,16 +171,41 @@ window.DEMO_API = {
     if (path.startsWith('/api/kitchen/stations') && method === 'GET') {
       return {
         data: [
-          { Id: 1, Code: 'KITCHEN', Name: 'Cocina', DisplayName: 'Cocina', IsDefault: 1, IsActive: 1 },
-          { Id: 2, Code: 'BAR', Name: 'Barra', DisplayName: 'Barra', IsDefault: 0, IsActive: 1 },
+          { Id: 1, Code: 'KITCHEN', Name: 'Cocina', DisplayName: 'Cocina', IsDefault: 1, IsActive: 1, Color: '#FF6B6B' },
+          { Id: 2, Code: 'BAR', Name: 'Barra', DisplayName: 'Barra', IsDefault: 0, IsActive: 1, Color: '#4ECDC4' },
+          { Id: 3, Code: 'DRINKS', Name: 'Bebidas', DisplayName: 'Bebidas', IsDefault: 0, IsActive: 1, Color: '#45B7D1' },
+          { Id: 4, Code: 'EXPO', Name: 'Despacho', DisplayName: 'Despacho', IsDefault: 0, IsActive: 1, Color: '#96CEB4' },
         ],
-        count: 2,
+        count: 4,
       };
     }
 
     // Inventory
     if (path.startsWith('/api/inventory/stock') && method === 'GET') {
       return { data: data.stockBalances, count: data.stockBalances.length };
+    }
+    if (path.startsWith('/api/inventory/ingredients') && method === 'GET') {
+      return { data: data.stockBalances.map(s => ({ Id: s.IngredientId, Name: s.IngredientName, Code: 'ING' + s.IngredientId, BaseUnitId: 1, MinimumStock: s.MinimumStock, CostPerUnit: 0.5 })), count: data.stockBalances.length };
+    }
+    if (path.startsWith('/api/inventory/units') && method === 'GET') {
+      return { data: [{ Id: 1, Code: 'unit', Name: 'Unidad', Type: 'count', SortOrder: 10 }, { Id: 2, Code: 'kg', Name: 'Kilo', Type: 'weight', SortOrder: 30 }], count: 2 };
+    }
+    if (path.startsWith('/api/inventory/movements') && method === 'GET') {
+      return { data: [], count: 0 };
+    }
+
+    // Recipes
+    if (path.startsWith('/api/recipes') && !path.includes('by-portion') && !path.includes('by-menu-item') && !path.includes('cost-summary') && method === 'GET') {
+      return { data: [], count: 0 };
+    }
+    if (path.startsWith('/api/recipes/by-menu-item') && method === 'GET') {
+      return { data: { menuItem: { Id: 1, Name: 'Clásica' }, portions: [{ portion: { Id: 1, Name: 'Normal' }, price: 5.00, cost: 2.50, margin: 2.50, marginPct: 50, hasRecipe: true }] } };
+    }
+    if (path.startsWith('/api/recipes/by-portion') && method === 'GET') {
+      return { data: { recipe: { Id: 1, FixedCost: 0 }, items: [{ IngredientId: 1, IngredientName: 'Pan', Quantity: 1, UnitCode: 'unit' }], portion: { Id: 1, Name: 'Normal' }, menuItem: { Id: 1, Name: 'Clásica' }, price: 5.00, cost: 2.50, margin: 2.50, marginPct: 50 } };
+    }
+    if (path.startsWith('/api/recipes/cost-summary') && method === 'GET') {
+      return { data: [] };
     }
 
     // Cash sessions
@@ -182,8 +225,33 @@ window.DEMO_API = {
     if (path === '/api/printers' && method === 'GET') {
       return { data: data.printers, count: data.printers.length };
     }
-    if (path === '/api/print/templates' && method === 'GET') {
+    if (path.startsWith('/api/printers/') && method === 'GET') {
+      return { data: data.printers[0] };
+    }
+
+    // Print areas
+    if (path === '/api/print/areas/list' && method === 'GET') {
+      return { data: [{ Id: 1, Name: 'kitchen', DisplayName: 'Cocina', AreaType: 'KITCHEN' }, { Id: 5, Name: 'cashier', DisplayName: 'Caja', AreaType: 'CASHIER' }], count: 2 };
+    }
+
+    // Print routing rules
+    if (path === '/api/print/routing-rules/list' && method === 'GET') {
+      return { data: [], count: 0 };
+    }
+
+    // Print stats
+    if (path === '/api/print/stats/list' && method === 'GET') {
+      return { data: { byStatus: { PENDING: 0, PRINTING: 0, PRINTED: 5, FAILED: 0 }, pending: 0, retryReady: 0 } };
+    }
+
+    // Print templates
+    if (path.startsWith('/api/print/templates') && method === 'GET') {
       return { data: data.templates, count: data.templates.length };
+    }
+
+    // Combos
+    if (path === '/api/combos' && method === 'GET') {
+      return { data: [], count: 0 };
     }
 
     // Version
@@ -201,12 +269,18 @@ window.DEMO_API = {
       return { data: { manifestReachable: true, manifestValid: true, manifestErrors: [], serviceWorkerExists: true, installPromptSupported: true } };
     }
 
+    // Health
+    if (path === '/health' && method === 'GET') {
+      return { status: 'ok', timestamp: new Date().toISOString() };
+    }
+
     // Default — empty response for writes
     if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
       return { data: { ok: true, demo: true } };
     }
 
     // Default empty
+    console.warn('[demo] Unhandled API call:', method, path);
     return { data: [], count: 0 };
   },
 };

@@ -1,11 +1,11 @@
 # =====================================================================
-# android.yml — Build Android APK/AAB via Capacitor
+# android.yml — Build Android APK via Capacitor
 # =====================================================================
 name: Android Build
 
 on:
   push:
-    branches: ['main', 'feature/android-ci-build']
+    branches: ['main']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     continue-on-error: true
 
     steps:
@@ -36,31 +36,35 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
-      - name: Install root dependencies (Capacitor)
-        run: npm ci
+      - name: Install Capacitor (root)
+        run: npm install
 
-      - name: Install backend dependencies
-        working-directory: backend
-        run: npm ci
-
-      - name: Install Capacitor in backend
-        working-directory: backend
+      - name: Verify Capacitor config
         run: |
-          npm install @capacitor/core@^6 @capacitor/cli@^6 @capacitor/android@^6
-          npm install -D @capacitor/splash-screen@^6
+          echo "=== capacitor.config.json ==="
+          cat capacitor.config.json
+          echo "=== frontend exists? ==="
+          ls -la frontend/index.html | head -3
 
-      - name: Copy web assets to Android
-        run: npx cap copy android || true
-
-      - name: Add Android platform (if not exists)
+      - name: Add Android platform
         run: npx cap add android || true
+
+      - name: Copy web assets
+        run: npx cap copy android
 
       - name: Sync Android project
         run: npx cap sync android
 
+      - name: List Android project structure
+        run: |
+          echo "=== android/ exists? ==="
+          ls -la android/ | head -10
+          echo "=== app/build.gradle exists? ==="
+          ls -la android/app/build.gradle 2>/dev/null || echo "NOT FOUND"
+
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK exists
         run: |
@@ -76,11 +80,11 @@ jobs:
 
       # Release AAB — only when signing secrets exist
       - name: Build release AAB (if signing configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: ${{ vars.ANDROID_KEYSTORE_BASE64 != '' }}
         working-directory: android
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_BASE64: ${{ vars.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
@@ -94,7 +98,7 @@ jobs:
           ./gradlew bundleRelease --no-daemon
 
       - name: Upload release AAB
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: ${{ vars.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: SambaPos-LBA-release.aab

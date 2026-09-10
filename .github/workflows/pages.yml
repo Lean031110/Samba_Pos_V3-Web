@@ -41,25 +41,18 @@ jobs:
 
       - name: Build demo frontend
         run: |
-          # Copy frontend to a build dir
           mkdir -p _site
           cp -r frontend/* _site/
 
-          # Set DEMO_MODE flag
-          # This tells the frontend to use mock API instead of real backend
-          sed -i 's|DEMO_MODE = false|DEMO_MODE = true|g' _site/js/services/api.js 2>/dev/null || true
+          # Inject DEMO_MODE=true at the very top of app.js
+          # This makes the frontend use mock API instead of real backend
+          echo 'window.DEMO_MODE = true;' > /tmp/demo_prefix.js
+          cat /tmp/demo_prefix.js _site/js/app.js > _site/js/app.js.tmp
+          mv _site/js/app.js.tmp _site/js/app.js
 
-          # If the flag doesn't exist as a simple replace, inject it
-          if ! grep -q "DEMO_MODE" _site/js/services/api.js 2>/dev/null; then
-            # Prepend DEMO_MODE to api.js
-            echo "window.DEMO_MODE = true;" | cat - _site/js/services/api.js > _site/js/services/api.js.tmp
-            mv _site/js/services/api.js.tmp _site/js/services/api.js
-          fi
-
-          # Copy mock data + mock API
-          if [ -f frontend/js/services/demo-data.js ]; then
-            cp frontend/js/services/demo-data.js _site/js/services/
-          fi
+          # Also inject at top of api.js for good measure
+          cat /tmp/demo_prefix.js _site/js/services/api.js > _site/js/services/api.js.tmp
+          mv _site/js/services/api.js.tmp _site/js/services/api.js
 
           # Fix base path for GitHub Pages project pages
           # manifest.webmanifest: start_url and scope
