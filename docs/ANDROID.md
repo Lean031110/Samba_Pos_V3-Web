@@ -1,6 +1,11 @@
 # ANDROID.md — Android (Capacitor) Build Guide
 
-**SambaPos_LBA — Android APK/AAB via Capacitor**
+**SambaPos_LBA — Android APK/AAB via Capacitor (LBApos)**
+
+> PR #9 hardening: the `android/` project is **versioned in git**. It is
+> never generated ad-hoc in CI (`npx cap add android || true` hid real
+> errors before). The build is a mandatory CI gate with hard post-build
+> checks (package ID, app name, versionName, APK size).
 
 ## Prerequisites
 
@@ -9,62 +14,170 @@
 | Android Studio | Hedgehog+ |
 | JDK | 17 |
 | Node.js | 20+ |
-| Capacitor CLI | 6.x |
+| Capacitor CLI | 6.x (root `package.json`) |
 
-## Setup (one-time)
+## Quick start (after `git clone` + `npm ci` at repo root)
 
 ```bash
-# 1. Install Capacitor dependencies
-cd backend
-npm install @capacitor/core @capacitor/cli @capacitor/android
-npm install -D @capacitor/splash-screen
+# Capacitor dependencies + the versioned Android project
+npm ci                     # root package.json (Capacitor only)
 
-# 2. Initialize Android project
-npx cap add android
+npm run test:android:config  # pre-flight gate: config, branding, identity
+npm run cap:sync              # copy frontend/ web assets + plugins
 
-# 3. Copy web assets to native project
-npx cap copy
-
-# 4. Open Android Studio
-npx cap open android
+npm run build:android:debug   # = cap:sync + gradlew assembleDebug
+# APK → android/app/build/outputs/apk/debug/app-debug.apk
+# CI artifact name: LBApos-debug.apk
 ```
 
-## Build APK (debug)
+Everything above runs **from the repository root** — `capacitor.config.json`
+lives at the root with `webDir: "frontend"`, so there is no `cd backend`
+involved anywhere.
+
+## Root scripts (Capacitor)
+
+| Script | What it does |
+|--------|--------------|
+| `npm run cap:add` | Bootstrap `android/` from scratch (only if missing — errors loudly otherwise) |
+| `npm run cap:copy` | Copy `frontend/` into the Android assets |
+| `npm run cap:sync` | copy + plugin update |
+| `npm run cap:open` | Open Android Studio |
+| `npm run test:android:config` | Pre-flight gate (see below) |
+| `npm run build:android:debug` | Gate + sync + `assembleDebug` |
+| `npm run build:android:release` | Gate + sync + `bundleRelease` |
+
+## Pre-flight gate: `test:android:config`
+
+`node scripts/check-android-config.js` verifies, before Gradle ever runs:
+
+- `capacitor.config.json`: appId `com.sambapos.lba`, appName `LBApos`, webDir `frontend`
+- `frontend/` web assets exist
+- the **versioned** `android/` project (gradle wrapper committed + executable)
+- `applicationId com.sambapos.lba`, `app_name = LBApos`
+- `versionName` semver (x.y.z) + integer `versionCode`
+- splash + launcher icons per density, adaptive icon XML
+- portrait orientation (POS/KDS are vertical by design)
+
+## Branding (versioned, reproducible)
+
+All Android branding is committed under `android/app/src/main/res/`:
+
+- **Splash**: full-screen compositions per orientation/density — a solid
+  `#044392` field with the logo centered at its natural aspect ratio.
+  The launch theme (`AppTheme.NoActionBarLaunch`) *stretches*
+  `android:background`, so shipping a bare square logo would deform it;
+  the port/land resources match the window aspect exactly → **the logo is
+  never distorted**.
+- **Launcher icons**: `mipmap-*` per density + adaptive icon
+  (`mipmap-anydpi-v26`) with `#044392` background and the logo inside the
+  66% safe zone.
+- **Identity**: `strings.xml` (`app_name = LBApos`), `applicationId
+  com.sambapos.lba`, `versionName` mirrors the app version.
+
+To regenerate when the logo changes:
 
 ```bash
-# From repo root
-cd backend
-npx cap copy android
-cd android
-./gradlew assembleDebug
-# APK: android/app/build/outputs/apk/debug/app-debug.apk
+python3 scripts/generate-android-resources.py   # needs Pillow
 ```
 
-## Build AAB (release — for Play Store)
+## Build AAB (release — Play Store)
+
+Signing material is **never committed**. Configure GitHub
+Variables/Secrets and the release job builds automatically:
+
+| Where | Variable |
+|-------|----------|
+| Repo variable | `ANDROID_KEYSTORE_BASE64` (base64 of the keystore) |
+| Repo variable | `ANDROID_KEY_ALIAS` |
+| Repo secret | `ANDROID_STORE_PASSWORD` |
+| Repo secret | `ANDROID_KEY_PASSWORD` |
+
+The `release` job in `.github/workflows/android.yml` then produces the
+`LBApos-release.aab` artifact. Without signing configuration, only the
+debug APK is built (the release job is skipped — it is never silently
+faked).
+
+Local release build:
 
 ```bash
-# 1. Generate keystore (one-time)
-keytool -genkey -v -keystore sambapos-release.keystore -alias sambapos -keyalg RSA -keysize 2048 -validity 10000
-
-# 2. Configure signing in android/app/build.gradle
-# 3. Build AAB
+keytool -genkey -v -keystore release.keystore -alias sambapos \
+  -keyalg RSA -keysize 2048 -validity 10000
 cd android
+cat >> gradle.properties << EOF
+android.injected.signing.store.file=release.keystore
+android.injected.signing.store.password=...
+android.injected.signing.key.alias=sambapos
+android.injected.signing.key.password=...
+EOF
 ./gradlew bundleRelease
-# AAB: android/app/build/outputs/bundle/release/app-release.aab
 ```
 
-## Configuration
+## Server configuration (Android welcome screen)
 
-The `capacitor.config.json` at repo root defines:
-- `appId`: `com.sambapos.lba` (unique Android package ID)
-- `appName`: `SambaPos LBA`
-- `webDir`: `../frontend` (the SPA web assets)
-- `server.androidScheme`: `https` (secure scheme for PWA features)
-- `SplashScreen`: 2s launch with brand blue (#044392)
+On first launch inside the native shell the app shows the
+**ServerConfig welcome screen** (single source of truth for the server
+URL, stored in `localStorage: samba_server_config`):
+
+1. Enter the server URL (e.g. `http://192.168.1.104:3001`) — or scan the
+   admin QR (URL only, never credentials).
+2. **Probar** — health check against `<url>/health` with 5s timeout.
+3. Choose the device mode: **POS** (mesas · pedidos · cobro) or
+   **COCINA** (KDS full-screen).
+4. **Guardar y continuar** — persists and reloads; `api.js` then routes
+   every call to `<serverUrl>/api`.
+
+The same `ServerConfig` module serves PWA, Android, browser and the
+GitHub Pages demo (where it stays dormant because `DEMO_MODE=true`).
+
+## cleartext / HTTPS — exact rationale (why both flags exist)
+
+`capacitor.config.json`:
+
+```json
+"server":  { "androidScheme": "https", "cleartext": true },
+"android": { "allowMixedContent": true }
+```
+
+| Flag | Why it is needed |
+|------|------------------|
+| `androidScheme: "https"` | The app is served from `https://localhost`, giving a **secure context**. Without it, the WebView origin is `http://localhost` and the app loses: Service Worker (PWA offline), `getUserMedia` (QR camera scanning), and several storage APIs. This is non-negotiable for the feature set. |
+| `cleartext: true` | LAN servers run plain `http://192.168.x.x:3001`. Android 9+ blocks cleartext network traffic by default; this flag re-enables it so the WebView can *reach* the LAN server at all. |
+| `allowMixedContent: true` | Because the app origin is `https://localhost` (previous flag) while the API is `http://…`, every `fetch`/XHR is technically *mixed content* and the WebView would block it. This flag allows exactly that combination. |
+
+**All three are required together** for the supported deployment model
+(Android app → HTTP LAN server). Removing any one breaks the LAN
+connection; switching `androidScheme` to `http` would break PWA/camera
+instead. For an HTTPS production server the flags are simply unused —
+they do not weaken anything (no cleartext is attempted when the
+configured URL is `https://`).
+
+**Production guidance**: expose the backend via HTTPS (reverse proxy
+with TLS) and configure that URL; the app then communicates fully over
+TLS. The flags exist for the LAN development/on-prem scenario, which is
+the documented deployment for this product.
+
+## CI gates (`.github/workflows/android.yml`)
+
+The Android build is a **mandatory** gate — `continue-on-error` was
+removed in PR #9:
+
+1. `npm ci` at root (lockfile-committed, reproducible)
+2. `node scripts/check-android-config.js`
+3. `npx cap sync android`
+4. Gradle wrapper verified (present + executable)
+5. `./gradlew assembleDebug` — failure fails the workflow
+6. APK exists, > 1 MB, and `aapt2 dump badging` proves:
+   `package name='com.sambapos.lba'`, `application-label:'LBApos'`,
+   semver `versionName`
+7. Artifact `LBApos-debug.apk`
+8. Release AAB only with signing configured (Secrets, never in git)
+9. Separate best-effort **emulator smoke job** (EXPERIMENTAL, explicitly
+   non-blocking): install APK → launch → package/activity/process
+   checks → screenshot evidence
 
 ## Notes
 
-- The Android app wraps the existing PWA — no code changes needed
-- WebSocket + Push notifications work via Capacitor's HTTP/WebSocket bridge
-- For production builds, configure signing in `android/app/build.gradle`
-- The backend server URL must be configured via env var `SAMBA_API_URL`
+- The Android app wraps the existing PWA — no business-logic changes.
+- WebSocket + Push work via Capacitor's bridge.
+- `android/local.properties` and `android/app/src/main/assets/public/`
+  are gitignored (machine-specific / generated by `cap sync`).
