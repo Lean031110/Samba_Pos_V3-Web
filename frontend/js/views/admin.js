@@ -196,6 +196,8 @@ const AdminView = {
       case 'recipes':   await this._renderRecipes();   break;
       case 'printers':  await this._renderPrinters();   break;
       case 'templates': await this._renderTemplates();  break;
+      case 'cash':      await this._renderCash();       break;
+      case 'reports':   await this._renderReports();    break;
       case 'config':    await this._renderConfig();    break;
       default:
         this._setContent('<p class="admin-empty">Pestaña no reconocida</p>');
@@ -1496,6 +1498,207 @@ const AdminView = {
     } catch (err) {
       this._error('No se pudo cambiar el estado: ' + (err.message || err));
     }
+  },
+
+  // ===================================================================
+  // Tab: CAJA (BLOQUE L — Fase 12: UI de caja con apertura/cierre/payout)
+  // ===================================================================
+
+  async _renderCash() {
+    this._loading('Cargando estado de caja…');
+    let sessions = [];
+    try {
+      const res = await Api.request('GET', '/api/cash-sessions?limit=10');
+      sessions = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar las sesiones de caja: ' + (err.message || err));
+      return;
+    }
+
+    const openSession = sessions.find(s => s.Status === 'OPEN');
+    const newBtn = openSession
+      ? ''
+      : this._btn('Abrir caja', 'kds-btn--primary', 'fa-cash-register', "window.AdminView._openCash()");
+
+    let html = `
+      <div class="admin-section">
+        <div class="admin-section__header">
+          <h2><i class="fa-solid fa-cash-register"></i> Sesiones de Caja</h2>
+          ${newBtn}
+        </div>
+    `;
+
+    if (openSession) {
+      html += `
+        <div class="admin-card" style="border-left: 4px solid var(--lba-success, #4CAF50);">
+          <h3><i class="fa-solid fa-circle-check"></i> Caja Abierta</h3>
+          <div class="admin-card-grid">
+            <div><span>Sesión:</span> <strong>#${openSession.Id}</strong></div>
+            <div><span>Apertura:</span> <strong>${this._escape(openSession.OpenedAt || '—')}</strong></div>
+            <div><span>Monto inicial:</span> <strong>$${Number(openSession.OpeningAmount || 0).toFixed(2)}</strong></div>
+            <div><span>Usuario:</span> <strong>${this._escape(openSession.OpenedByName || '—')}</strong></div>
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            ${this._btn('Cerrar caja', 'kds-btn--void', 'fa-lock', `window.AdminView._closeCash(${openSession.Id})`)}
+          </div>
+        </div>
+      `;
+    } else {
+      html += '<p class="admin-empty">No hay sesión de caja abierta. Hacé clic en "Abrir caja" para comenzar.</p>';
+    }
+
+    // Tabla de sesiones recientes
+    if (sessions.length > 0) {
+      const rows = sessions.map(s => {
+        const statusBadge = s.Status === 'OPEN'
+          ? '<span class="admin-tag admin-tag--success">Abierta</span>'
+          : s.Status === 'CLOSED'
+          ? '<span class="admin-tag admin-tag--info">Cerrada</span>'
+          : '<span class="admin-tag admin-tag--danger">' + this._escape(s.Status) + '</span>';
+        return `
+          <tr>
+            <td data-label="ID">#${s.Id}</td>
+            <td data-label="Estado">${statusBadge}</td>
+            <td data-label="Apertura">${this._escape(s.OpenedAt || '—')}</td>
+            <td data-label="Cierre">${this._escape(s.ClosedAt || '—')}</td>
+            <td data-label="Inicial">$${Number(s.OpeningAmount || 0).toFixed(2)}</td>
+            <td data-label="Final">${s.ClosingAmount != null ? '$' + Number(s.ClosingAmount).toFixed(2) : '—'}</td>
+          </tr>
+        `;
+      }).join('');
+      html += this._table(['ID', 'Estado', 'Apertura', 'Cierre', 'Inicial', 'Final'], rows);
+    }
+
+    html += '</div>';
+    this._setContent(html);
+  },
+
+  async _openCash() {
+    const amount = prompt('Monto inicial de caja:', '0');
+    if (amount === null) return;
+    try {
+      await Api.request('POST', '/api/cash-sessions', { openingAmount: parseFloat(amount) || 0 });
+      this._toast('Caja abierta', 'success');
+      await this._renderCash();
+    } catch (err) {
+      this._error('No se pudo abrir la caja: ' + (err.message || err));
+    }
+  },
+
+  async _closeCash(sessionId) {
+    const amount = prompt('Monto final contado:', '0');
+    if (amount === null) return;
+    try {
+      await Api.request('POST', `/api/cash-sessions/${sessionId}/close`, { closingAmount: parseFloat(amount) || 0 });
+      this._toast('Caja cerrada', 'success');
+      await this._renderCash();
+    } catch (err) {
+      this._error('No se pudo cerrar la caja: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // Tab: REPORTES (BLOQUE L — Fase 12: UI de reportes con selector de período)
+  // ===================================================================
+
+  async _renderReports() {
+    this._loading('Cargando reportes…');
+
+    // Default: today
+    const today = new Date().toISOString().slice(0, 10);
+    const fromDate = this._reportFromDate || today;
+    const toDate = this._reportToDate || today;
+
+    // Fetch summary report
+    let reportData = null;
+    try {
+      const res = await Api.request('GET', `/reports/sales-summary?from=${fromDate}&to=${toDate}`);
+      reportData = res.data;
+    } catch (err) {
+      // If endpoint not available, show placeholder
+      console.warn('[reports] No se pudo cargar el reporte:', err.message);
+    }
+
+    const dateSelector = `
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap;">
+        <label>Desde: <input type="date" id="rpt-from" value="${fromDate}" onchange="window.AdminView._setReportDates()"></label>
+        <label>Hasta: <input type="date" id="rpt-to" value="${toDate}" onchange="window.AdminView._setReportDates()"></label>
+        ${this._btn('Generar', 'kds-btn--primary', 'fa-magnifying-glass', "window.AdminView._renderReports()")}
+      </div>
+    `;
+
+    let reportCard;
+    if (reportData) {
+      const r = reportData;
+      reportCard = `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-chart-line"></i> Resumen de Ventas (${fromDate} → ${toDate})</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(r.totalSales || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Ventas totales</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${r.ticketCount || 0}</div>
+              <div class="admin-stat__label">Tickets cerrados</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">$${Number(r.averageTicket || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Ticket promedio</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">${r.voidedCount || 0}</div>
+              <div class="admin-stat__label">Tickets anulados</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">${r.refundedCount || 0}</div>
+              <div class="admin-stat__label">Tickets reembolsados</div>
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      reportCard = `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-chart-line"></i> Resumen de Ventas</h3>
+          <p class="admin-empty">Selecciona un rango de fechas y haz clic en "Generar" para ver el reporte.</p>
+        </div>
+      `;
+    }
+
+    // Fetch top products
+    let topProductsCard = '';
+    try {
+      const res = await Api.request('GET', `/reports/top-products?from=${fromDate}&to=${toDate}&limit=10`);
+      const products = res.data || [];
+      if (products.length > 0) {
+        const rows = products.map(p => `
+          <tr>
+            <td data-label="Producto">${this._escape(p.name || p.Name || '—')}</td>
+            <td data-label="Cantidad">${p.quantity || p.Quantity || 0}</td>
+            <td data-label="Total">$${Number(p.total || p.Total || 0).toFixed(2)}</td>
+          </tr>
+        `).join('');
+        topProductsCard = `
+          <div class="admin-card">
+            <h3><i class="fa-solid fa-trophy"></i> Top 10 Productos</h3>
+            ${this._table(['Producto', 'Cantidad', 'Total'], rows)}
+          </div>
+        `;
+      }
+    } catch {}
+
+    this._setContent(
+      this._header('Reportes', '') +
+      `<div class="admin-section">${dateSelector}${reportCard}${topProductsCard}</div>`
+    );
+  },
+
+  _setReportDates() {
+    const fromEl = document.getElementById('rpt-from');
+    const toEl = document.getElementById('rpt-to');
+    if (fromEl) this._reportFromDate = fromEl.value;
+    if (toEl) this._reportToDate = toEl.value;
   },
 
   // ===================================================================
