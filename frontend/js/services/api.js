@@ -16,11 +16,20 @@
 //     are enqueued for later sync when offline.
 // =====================================================================
 
-// API_BASE: if ServerConfig is set (Android), use the configured server URL.
-// Otherwise use relative '/api' (same-origin in browser/Pages).
-const API_BASE = (window.ServerConfig && ServerConfig.isConfigured())
-  ? ServerConfig.getServerUrl() + '/api'
-  : '/api';
+// API_BASE resolution is LAZY (function, not a const evaluated at parse time).
+// FIX (BLOQUE N baseline §6): evaluating ServerConfig.isConfigured() at module
+// parse time crashed with "Cannot read properties of null (reading 'configured')"
+// because ServerConfig._config is null until ServerConfig.init() runs (later,
+// inside App.init). This made api.js throw on EVERY page load → window.Api was
+// undefined → the whole frontend was dead (including the GitHub Pages demo).
+function resolveApiBase() {
+  try {
+    if (window.ServerConfig && ServerConfig.isConfigured()) {
+      return ServerConfig.getServerUrl() + '/api';
+    }
+  } catch (e) { /* ServerConfig not initialized yet — fall back to same-origin */ }
+  return '/api';
+}
 
 /**
  * Get the JWT token from localStorage (set by login view).
@@ -91,6 +100,8 @@ class ApiError extends Error {
 }
 
 async function request(method, path, body = null, skipAuth = false) {
+  const API_BASE = resolveApiBase();
+
   // DEMO_MODE — use mock API instead of real backend (for GitHub Pages)
   if (window.DEMO_MODE && window.DEMO_API) {
     const mockResponse = window.DEMO_API.handle(method, path, body);
@@ -199,6 +210,36 @@ const Api = {
     const q = stationId ? `?stationId=${stationId}` : '';
     return request('GET', `/kitchen/orders${q}`);
   },
+  // Open tickets alias (PosView uses getTickets)
+  async getTickets() { return request('GET', '/tickets'); },
+  // Ticket operations used by the POS command bar (BLOQUE N baseline §7 —
+  // these REST routes already existed in the backend; only the client
+  // convenience wrappers were missing)
+  async giftOrders(ticketId, orderIds) {
+    return request('POST', `/tickets/${ticketId}/gift`, { orderIds });
+  },
+  async setNote(ticketId, note) {
+    return request('POST', `/tickets/${ticketId}/note`, { note });
+  },
+  async setTags(ticketId, tags) {
+    return request('POST', `/tickets/${ticketId}/tags`, { tags });
+  },
+  async getCalculationTypes() { return request('GET', '/config/calculation-types'); },
+  async addCalculation(ticketId, data) {
+    return request('POST', `/tickets/${ticketId}/calculations`, data);
+  },
+  async printTicket(ticketId) { return request('GET', `/tickets/${ticketId}/print`); },
+  async printTicketSend(ticketId, data) {
+    return request('POST', `/print/tickets/${ticketId}/send`, data);
+  },
+  async getPaymentTypes() { return request('GET', '/admin/payment-types'); },
+  // Cash sessions (Caja)
+  async getCurrentCashSession() { return request('GET', '/cash-sessions/current'); },
+  async getCashSessions() { return request('GET', '/cash-sessions'); },
+  async openCashSession(data) { return request('POST', '/cash-sessions/open', data); },
+  async closeCashSession(id, data) { return request('POST', `/cash-sessions/${id}/close`, data); },
+  async getCurrentWorkPeriod() { return request('GET', '/cash-sessions/work-periods/current'); },
+  async openWorkPeriod(data) { return request('POST', '/cash-sessions/work-periods/open', data); },
   // Inventory
   async getIngredients() { return request('GET', '/inventory/ingredients'); },
   async getStockBalances(warehouseId) { return request('GET', `/inventory/stock/${warehouseId}`); },
