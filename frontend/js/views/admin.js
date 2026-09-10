@@ -1661,14 +1661,154 @@ const AdminView = {
     // Tarjeta PWA (BLOQUE G — Fase 7: install prompt visible)
     const pwaCard = this._renderPwaCard();
 
+    // Tarjeta Push (BLOQUE H — Fase 8: UX activación)
+    const pushCard = await this._renderPushCard();
+
     this._setContent(
       this._header('Configuración', refreshBtn) +
-      versionCard + wsCard + pwaCard + printersCard + queueCard
+      versionCard + wsCard + pwaCard + pushCard + printersCard + queueCard
     );
 
     // Verificación asíncrona del estado online de cada impresora
     for (const pr of printers) {
       this._checkPrinterStatusInline(pr.Id);
+    }
+  },
+
+  /**
+   * Renderiza la tarjeta Push con información de suscripción.
+   * BLOQUE H — Fase 8: P0 gap "Tab Notificaciones en Admin/Config con botón activar".
+   *
+   * Usa window.PushClient (cargado por push.js) para:
+   *   - Mostrar el botón "Activar notificaciones" si no está suscrito
+   *   - Mostrar el estado de suscripción (activo/inactivo)
+   *   - Enviar una notificación de prueba
+   *   - Listar suscripciones y historial de notificaciones
+   */
+  async _renderPushCard() {
+    // Obtener el estado de suscripción del usuario actual
+    let pushStatus = null;
+    try {
+      const res = await Api.request('GET', '/push/status');
+      pushStatus = res.data;
+    } catch (err) {
+      // Si falla, mostrar error pero no bloquear el render
+      console.warn('[push] No se pudo obtener el estado:', err.message);
+    }
+
+    if (!pushStatus) {
+      return `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-bell"></i> Notificaciones Push</h3>
+          <p class="admin-empty">No se pudo cargar el estado de notificaciones.</p>
+        </div>
+      `;
+    }
+
+    let statusBadge;
+    if (pushStatus.subscribed) {
+      statusBadge = '<span class="admin-tag admin-tag--success">Activada ✓</span>';
+    } else if (!pushStatus.vapidConfigured) {
+      statusBadge = '<span class="admin-tag admin-tag--danger">VAPID no configurado</span>';
+    } else {
+      statusBadge = '<span class="admin-tag admin-tag--warn">No activada</span>';
+    }
+
+    let actionButton = '';
+    if (pushStatus.vapidConfigured && !pushStatus.subscribed) {
+      actionButton = `
+        <div style="margin-top: 12px;">
+          ${this._btn('Activar notificaciones', 'kds-btn--primary', 'fa-bell', "window.AdminView._pushActivate()")}
+        </div>
+      `;
+    } else if (pushStatus.subscribed) {
+      actionButton = `
+        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+          ${this._btn('Enviar test', '', 'fa-paper-plane', "window.AdminView._pushTest()")}
+          ${this._btn('Desactivar', 'kds-btn--void', 'fa-bell-slash', "window.AdminView._pushDeactivate()")}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-bell"></i> Notificaciones Push</h3>
+        <div class="admin-card-grid">
+          <div><span>Estado:</span> ${statusBadge}</div>
+          <div><span>Suscripciones activas:</span> <strong>${pushStatus.subscriptionCount || 0}</strong></div>
+          <div><span>VAPID:</span> <code>${pushStatus.vapidConfigured ? 'Configurado' : 'No configurado'}</code></div>
+          <div><span>Categorías:</span> <code>${pushStatus.categories || '—'}</code></div>
+        </div>
+        ${actionButton}
+        <p class="admin-help" style="margin-top: 8px;">
+          Las notificaciones push permiten recibir alertas (pedidos nuevos, stock bajo, impresión fallida)
+          incluso cuando la pestaña del navegador está cerrada. Requiere permiso del navegador.
+        </p>
+      </div>
+    `;
+  },
+
+  /**
+   * Activa las notificaciones push para el usuario actual.
+   * Llama a PushClient.requestPermission() que solicita permiso + suscribe.
+   */
+  async _pushActivate() {
+    const pushClient = window.PushClient;
+    if (!pushClient) {
+      this._toast('Módulo push no disponible', 'error');
+      return;
+    }
+    if (!('Notification' in window)) {
+      this._toast('Este navegador no soporta notificaciones', 'error');
+      return;
+    }
+    this._toast('Solicitando permiso de notificaciones…', 'info');
+    try {
+      const granted = await pushClient.requestPermission();
+      if (granted) {
+        this._toast('Notificaciones activadas', 'success');
+      } else {
+        this._toast('Permiso denegado por el usuario', 'warn');
+      }
+    } catch (err) {
+      this._toast('Error al activar: ' + (err.message || err), 'error');
+    }
+    // Re-render para actualizar el estado
+    await this._renderConfig();
+  },
+
+  /**
+   * Desactiva las notificaciones push para el usuario actual.
+   */
+  async _pushDeactivate() {
+    try {
+      const pushClient = window.PushClient;
+      if (pushClient && pushClient._subscription) {
+        await pushClient.unsubscribe();
+      }
+      this._toast('Notificaciones desactivadas', 'info');
+    } catch (err) {
+      this._toast('Error al desactivar: ' + (err.message || err), 'error');
+    }
+    await this._renderConfig();
+  },
+
+  /**
+   * Envía una notificación push de prueba al usuario actual.
+   */
+  async _pushTest() {
+    this._toast('Enviando notificación de prueba…', 'info');
+    try {
+      const res = await Api.request('POST', '/push/test', {});
+      if (res.sent > 0) {
+        this._toast(`Notificación enviada (${res.sent} enviadas, ${res.failed} fallidas)`, 'success');
+      } else if (res.expired > 0) {
+        this._toast(`Suscripción expirada (${res.expired})`, 'warn');
+      } else {
+        this._toast('No se pudo enviar (0 enviadas)', 'warn');
+      }
+    } catch (err) {
+      this._toast('Error: ' + (err.message || err), 'error');
     }
   },
 
