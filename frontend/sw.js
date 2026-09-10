@@ -13,32 +13,49 @@
 const SW_VERSION = 'sambapos-lba-v0.4.0';
 const OFFLINE_SHELL_CACHE = `${SW_VERSION}-shell`;
 const RUNTIME_CACHE = `${SW_VERSION}-runtime`;
-const OFFLINE_URL = '/offline.html';
+
+// ---------------------------------------------------------------------
+// APP_BASE_PATH (PR #9 hardening)
+// The SW script URL is {base}/sw.js, so its own directory IS the base
+// path ('/' in production, '/Samba_Pos_V3-Web/' on GitHub Pages).
+// Every precache / offline URL is resolved from it, so the same
+// artifact works at the root AND under any sub-path with zero
+// deploy-time patching.
+// NOTE: new URL() requires an ABSOLUTE base — self.location.href, not a
+// pathname — or the SW fails to evaluate ("Invalid base URL").
+// ---------------------------------------------------------------------
+const SCOPE_URL = new URL('.', self.location.href);      // 'http://host/…/'
+const BASE_PATH = SCOPE_URL.pathname;                    // '/…/'
+const BASE = (p) => new URL(String(p).replace(/^\/+/, ''), SCOPE_URL).pathname;
+
+const OFFLINE_URL = BASE('offline.html');
 
 const PRECACHE_URLS = [
-  '/',
-  '/index.html',
-  '/offline.html',
-  '/manifest.webmanifest',
-  '/css/reset.css',
-  '/css/variables.css',
-  '/css/layout.css',
-  '/css/components.css',
-  '/js/app.js',
-  '/js/services/api.js',
-  '/js/store/store.js',
-  '/js/store/websocket-client.js',
-  '/vendor/css/fontawesome.min.css',
-  '/vendor/js/socket.io.min.js',
+  BASE('.'),
+  BASE('index.html'),
+  BASE('offline.html'),
+  BASE('manifest.webmanifest'),
+  BASE('css/reset.css'),
+  BASE('css/variables.css'),
+  BASE('css/layout.css'),
+  BASE('css/components.css'),
+  BASE('js/app.js'),
+  BASE('js/config.js'),
+  BASE('js/services/api.js'),
+  BASE('js/store/store.js'),
+  BASE('js/store/websocket-client.js'),
+  BASE('vendor/css/fontawesome.min.css'),
+  BASE('vendor/js/socket.io.min.js'),
 ];
 
 // Routes that must NEVER be cached (always go to network).
+// Anchored to the live BASE_PATH, not to '/'.
 const NEVER_CACHE = [
-  /^\/api\//,
-  /^\/health$/,
-  /^\/ready$/,
-  /^\/version$/,
-  /^\/socket\.io\//,
+  new RegExp(`^${BASE('api')}`),
+  new RegExp(`^${BASE('health')}$`),
+  new RegExp(`^${BASE('ready')}$`),
+  new RegExp(`^${BASE('version')}$`),
+  new RegExp(`^${BASE('socket.io/')}`),
 ];
 
 self.addEventListener('install', (event) => {
@@ -109,7 +126,7 @@ async function networkFirstNavigation(request) {
   } catch (err) {
     const cached = await caches.match(request);
     if (cached) return cached;
-    const shell = await caches.match('/index.html');
+    const shell = await caches.match(BASE('index.html'));
     if (shell) return shell;
     return caches.match(OFFLINE_URL);
   }

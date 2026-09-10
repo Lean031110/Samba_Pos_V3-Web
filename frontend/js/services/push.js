@@ -180,8 +180,9 @@ const PushClient = {
 
     const n = new Notification(title, {
       body: body || '',
-      icon: icon || '/icons/icon-192.png',
-      badge: '/icons/favicon.png',
+      // APP_BASE_PATH: iconos resueltos desde el base path
+      icon: icon || (window.LBA_BASE || '/') + 'icons/icon-192.png',
+      badge: (window.LBA_BASE || '/') + 'icons/favicon.png',
       tag: tag || 'sambapos',
       requireInteraction: false,
     });

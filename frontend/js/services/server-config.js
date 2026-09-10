@@ -68,7 +68,7 @@ const ServerConfig = {
     overlay.innerHTML = `
       <div class="sc-card">
         <div class="sc-brand">
-          <img src="/assets/logo-login.png" alt="LBApos" class="sc-logo"
+          <img src="assets/logo-login.png" alt="LBApos" class="sc-logo"
                onerror="this.style.display='none'">
           <h1 class="sc-title">LBApos</h1>
           <p class="sc-subtitle">POS de restaurante</p>

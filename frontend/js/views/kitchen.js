@@ -335,7 +335,8 @@ const KitchenView = {
       const body = orders.length === 1
         ? (orders[0].TableName ? `Mesa ${orders[0].TableName}` : 'Para llevar')
         : `${orders.length} pedidos esperando preparación`;
-      const n = new Notification(title, { body, icon: '/icons/icon-192.png', badge: '/icons/favicon.png', tag: 'kds-new-order' });
+      // APP_BASE_PATH: iconos resueltos desde el base path (root o sub-path de Pages)
+      const n = new Notification(title, { body, icon: (window.LBA_BASE || '/') + 'icons/icon-192.png', badge: (window.LBA_BASE || '/') + 'icons/favicon.png', tag: 'kds-new-order' });
       n.onclick = () => { window.focus(); n.close(); };
       setTimeout(() => n.close(), 10000);
     } catch (e) { /* Notification API */ }

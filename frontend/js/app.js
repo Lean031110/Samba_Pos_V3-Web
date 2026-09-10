@@ -61,6 +61,7 @@ const App = {
     };
 
     this._startClock();
+    this._toggleDemoBadge();
 
     // Initial navigation
     const deviceMode = window.ServerConfig ? ServerConfig.getMode() : 'pos';
@@ -254,6 +255,16 @@ const App = {
     const tick = () => { el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
     tick();
     setInterval(tick, 15000);
+  },
+
+  // DEMO_MODE (PR #9 hardening): badge visible en el topbar cuando la
+  // build corre con la config explícita de demo (GitHub Pages). Las
+  // builds de producción (LAN / APK) nunca lo muestran.
+  _toggleDemoBadge() {
+    const badge = document.getElementById('topbar-demo-badge');
+    if (!badge) return;
+    const isDemo = !!(window.LBA_CONFIG && window.LBA_CONFIG.DEMO_MODE === true);
+    badge.hidden = !isDemo;
   },
 };
 

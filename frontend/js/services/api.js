@@ -102,8 +102,12 @@ class ApiError extends Error {
 async function request(method, path, body = null, skipAuth = false) {
   const API_BASE = resolveApiBase();
 
-  // DEMO_MODE — use mock API instead of real backend (for GitHub Pages)
-  if (window.DEMO_MODE && window.DEMO_API) {
+  // DEMO_MODE (PR #9 hardening) — the Mock API activates ONLY when the
+  // runtime config explicitly sets LBA_CONFIG.DEMO_MODE === true (see
+  // js/config.js). Production builds ship DEMO_MODE=false, so a stray
+  // `window.DEMO_MODE` global can never accidentally route real traffic
+  // to the mock. A build de producción NUNCA usa Mock API.
+  if (window.LBA_CONFIG && window.LBA_CONFIG.DEMO_MODE === true && window.DEMO_API) {
     const mockResponse = window.DEMO_API.handle(method, path, body);
     return mockResponse;
   }

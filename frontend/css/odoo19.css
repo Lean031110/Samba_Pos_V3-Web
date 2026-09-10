@@ -81,6 +81,22 @@ html, body {
   white-space: nowrap;
 }
 
+/* DEMO badge (PR #9 hardening) — sólo visible en builds de demo
+   (GitHub Pages, LBA_CONFIG.DEMO_MODE === true). Producción nunca lo muestra. */
+.topbar__demo-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: #b45309;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
 .topbar__area {
   display: inline-flex;
   align-items: center;

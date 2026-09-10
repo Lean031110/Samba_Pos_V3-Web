@@ -9,23 +9,23 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="LBApos">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
-  <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192-maskable.png">
-  <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512-maskable.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192-maskable.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512-maskable.png">
   <title>LBApos — SambaPos_LBA</title>
 
   <!-- Font Awesome 6 Free (vendored locally for offline/LAN support) -->
-  <link rel="stylesheet" href="/vendor/css/fontawesome.min.css">
+  <link rel="stylesheet" href="vendor/css/fontawesome.min.css">
 
   <!-- App styles (odoo19.css carga al final: redesign overlay) -->
-  <link rel="stylesheet" href="/css/reset.css">
-  <link rel="stylesheet" href="/css/variables.css">
-  <link rel="stylesheet" href="/css/layout.css">
-  <link rel="stylesheet" href="/css/components.css">
-  <link rel="stylesheet" href="/css/mobile.css">
-  <link rel="stylesheet" href="/css/odoo19.css">
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/mobile.css">
+  <link rel="stylesheet" href="css/odoo19.css">
 </head>
 <body data-view="login">
   <div id="app">
@@ -37,13 +37,14 @@
         <i class="fa-solid fa-bars"></i>
       </button>
       <div class="topbar__brand">
-        <img src="/assets/logo-header.png" alt="LBApos" class="topbar__logo" id="topbar-logo">
+        <img src="assets/logo-header.png" alt="LBApos" class="topbar__logo" id="topbar-logo">
         <span class="topbar__appname">LBApos</span>
       </div>
       <span class="topbar__area" id="topbar-area">
         <i class="fa-solid fa-house"></i>
         <span id="topbar-area-name">Inicio</span>
       </span>
+      <span class="topbar__demo-badge" id="topbar-demo-badge" hidden title="Build demo: datos ficticios, sin backend">DEMO</span>
       <div class="topbar__spacer"></div>
       <input type="search" class="topbar__search" id="topbar-search" placeholder="Buscar…" autocomplete="off">
       <span class="topbar__clock" id="header-clock">--:--</span>
@@ -84,7 +85,7 @@
       <section class="view view-login" id="view-login">
         <div class="login-card no-select">
           <div class="login-card__logo">
-            <img src="/assets/logo-login.png" alt="LBApos">
+            <img src="assets/logo-login.png" alt="LBApos">
           </div>
           <h1 class="login-card__title">LBApos</h1>
           <p class="login-card__subtitle">Iniciá sesión con tu usuario y PIN</p>
@@ -106,7 +107,7 @@
       <section class="view view-areas" id="view-areas">
         <div class="areas-hero">
           <div class="areas-hero__app">
-            <img src="/assets/logo-header.png" alt="LBApos" id="areas-logo">
+            <img src="assets/logo-header.png" alt="LBApos" id="areas-logo">
             LBApos
           </div>
           <p class="areas-hero__hello" id="areas-hello">Hola</p>
@@ -345,35 +346,42 @@
 
   <!-- =========================================================== -->
   <!-- Scripts (sin bundler — orden importa)                        -->
+  <!-- config.js SIEMPRE primero: APP_BASE_PATH + DEMO_MODE         -->
+  <!-- (única fuente de verdad; en el demo de Pages se reemplaza    -->
+  <!-- por config.demo.js en el deploy, sin parches sed)            -->
   <!-- =========================================================== -->
-  <script src="/js/components/flex-button.js"></script>
-  <script src="/js/services/server-config.js"></script>
-  <script src="/js/services/demo-data.js"></script>
-  <script src="/js/services/api.js"></script>
-  <script src="/js/services/pwa.js"></script>
-  <script src="/js/services/push.js"></script>
-  <script src="/js/store/store.js"></script>
-  <script src="/js/store/offlineQueue.js"></script>
-  <script src="/js/store/websocket-client.js"></script>
-  <script src="/js/views/login.js"></script>
-  <script src="/js/views/areas.js"></script>
-  <script src="/js/views/dashboard.js"></script>
-  <script src="/js/views/tables.js"></script>
-  <script src="/js/views/pos.js"></script>
-  <script src="/js/views/payment.js"></script>
-  <script src="/js/views/kitchen.js"></script>
-  <script src="/js/views/cash.js"></script>
-  <script src="/js/views/reports.js"></script>
-  <script src="/js/views/inventory.js"></script>
-  <script src="/js/views/admin.js"></script>
-  <script src="/js/app.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/components/flex-button.js"></script>
+  <script src="js/services/server-config.js"></script>
+  <script src="js/services/demo-data.js"></script>
+  <script src="js/services/api.js"></script>
+  <script src="js/services/pwa.js"></script>
+  <script src="js/services/push.js"></script>
+  <script src="js/store/store.js"></script>
+  <script src="js/store/offlineQueue.js"></script>
+  <script src="js/store/websocket-client.js"></script>
+  <script src="js/views/login.js"></script>
+  <script src="js/views/areas.js"></script>
+  <script src="js/views/dashboard.js"></script>
+  <script src="js/views/tables.js"></script>
+  <script src="js/views/pos.js"></script>
+  <script src="js/views/payment.js"></script>
+  <script src="js/views/kitchen.js"></script>
+  <script src="js/views/cash.js"></script>
+  <script src="js/views/reports.js"></script>
+  <script src="js/views/inventory.js"></script>
+  <script src="js/views/admin.js"></script>
+  <script src="js/app.js"></script>
 
-  <!-- PWA: Service Worker -->
+  <!-- PWA: Service Worker (registrado relativo al base path — APP_BASE_PATH) -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
+        // URLs relativas al documento: funcionan en la raíz (producción
+        // LAN / APK), en GitHub Pages (/Samba_Pos_V3-Web/) y en cualquier
+        // sub-path, sin parchear rutas en el deploy.
         navigator.serviceWorker
-          .register('/sw.js', { scope: '/' })
+          .register('sw.js', { scope: './' })
           .then((reg) => {
             reg.addEventListener('updatefound', () => {
               const nw = reg.installing;
