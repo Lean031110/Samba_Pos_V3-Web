@@ -55,20 +55,28 @@ test.describe('Pages demo — artifact integrity', () => {
   });
 
   test('manifest + service worker + icons resolve under the sub-path', async ({ page }) => {
+    // JS MIME varies by server: GitHub Pages CDN → application/javascript,
+    // local preview server → text/javascript. Both are valid.
+    const JS_MIMES = ['text/javascript', 'application/javascript'];
     const checks = [
       ['manifest.webmanifest', 'application/manifest+json'],
-      ['sw.js', 'text/javascript'],
+      ['sw.js', JS_MIMES],
       ['icons/icon-192.png', 'image/png'],
       ['icons/favicon.png', 'image/png'],
       ['assets/logo-login.png', 'image/png'],
       ['css/odoo19.css', 'text/css'],
-      ['js/app.js', 'text/javascript'],
+      ['js/app.js', JS_MIMES],
       ['vendor/css/fontawesome.min.css', 'text/css'],
     ];
-    for (const [file, contentType] of checks) {
+    for (const [file, contentTypes] of checks) {
       const res = await page.request.get(BASE + file);
       expect(res.status(), `${BASE + file} must be 200`).toBe(200);
-      expect(res.headers()['content-type']).toContain(contentType.split(';')[0]);
+      const accepted = Array.isArray(contentTypes) ? contentTypes : [contentTypes];
+      const actual = (res.headers()['content-type'] || '').split(';')[0].trim();
+      expect(
+        accepted.some((t) => actual === t || actual.startsWith(t)),
+        `${BASE + file}: content-type "${actual}" not in ${JSON.stringify(accepted)}`
+      ).toBe(true);
     }
   });
 });
