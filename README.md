@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="docs/screenshots/01-login.png" alt="SambaPos_LBA" width="600">
+<img src="docs/screenshots/redesign/03-area-selector.png" alt="LBApos — selector de áreas" width="600">
 
-# 🍽️ SambaPos_LBA
+# 🍽️ LBApos — SambaPos_LBA
 
-### Sistema POS web moderno, táctil, instalable y offline-capable para restaurantes
+### POS de restaurante moderno, táctil, instalable y offline-capable — UI estilo Odoo 19
 
-Construido con **Node.js · Express · Knex · Socket.io · Vanilla JS**
+Construido con **Node.js · Express · Knex · Socket.io · Vanilla JS** · Interfaz **Odoo 19** (marca LBA `#044392`)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Lean031110/Samba_Pos_V3-Web/ci.yml?branch=main&label=CI&style=for-the-badge)](https://github.com/Lean031110/Samba_Pos_V3-Web/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-528%2F528-brightgreen?style=for-the-badge)](#-pruebas)
+[![Tests](https://img.shields.io/badge/tests-533%2F533-brightgreen?style=for-the-badge)](#-pruebas)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-20%2B-green?style=for-the-badge)](https://nodejs.org/)
 [![PWA](https://img.shields.io/badge/PWA-installable-blue?style=for-the-badge)](#-pwa--android)
@@ -44,10 +44,35 @@ Construido con **Node.js · Express · Knex · Socket.io · Vanilla JS**
 
 ## 📸 Capturas de pantalla
 
+### Interfaz Odoo 19 (BLOQUE N — rediseño)
+
+<table>
+<tr>
+<td align="center"><b>Selector de áreas</b></td>
+<td align="center"><b>POS (pedido + productos)</b></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/redesign/03-area-selector.png" alt="Áreas" width="400"></td>
+<td><img src="docs/screenshots/redesign/05-pos.png" alt="POS" width="400"></td>
+</tr>
+<tr>
+<td align="center"><b>Payment (numpad + cambio)</b></td>
+<td align="center"><b>KDS (Preparation Display)</b></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/redesign/07-payment.png" alt="Pago" width="400"></td>
+<td><img src="docs/screenshots/redesign/08-kds.png" alt="KDS" width="400"></td>
+</tr>
+</table>
+
+Ver las 13 capturas del rediseño en `docs/screenshots/redesign/` (también publicadas como artifact del CI).
+
+### Capturas del flujo completo
+
 <table>
 <tr>
 <td align="center"><b>Login</b></td>
-<td align="center"><b>Dashboard (mapa de mesas)</b></td>
+<td align="center"><b>Dashboard (KPIs)</b></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/01-login.png" alt="Login" width="400"></td>
@@ -355,9 +380,31 @@ Postura de seguridad **fail-secure**:
 
 ---
 
+## 🎨 Interfaz Odoo 19 (BLOQUE N — rediseño UI)
+
+La interfaz fue rediseñada desde cero inspirada en **Odoo 19** (Point of Sale, Preparation Display y Webclient), adaptada al uso real de un restaurante cubano y manteniendo la identidad azul LBA `#044392`:
+
+| Área | Pantallas |
+|------|-----------|
+| **Selector de áreas** | Pantalla principal post-login: Administración, POS, Cocina, Caja, Inventario, Reportes, Configuración (visibles según rol) |
+| **Flujo por rol** | Admin → Dashboard · Mesero → POS (mesas) · Cocina → KDS · Cajero → Caja |
+| **POS** | Order panel 40% + productos 60%, categorías con scroll horizontal, líneas con ±/nota/eliminar, PAGAR prominente |
+| **Mesas** | Grid con estados libre/ocupada/cuenta — color + icono + texto |
+| **Payment** | TOTAL grande, numpad táctil (EXACTO), entregado/restante/cambio, métodos grandes |
+| **KDS** | Pantalla completa oscura: stages con contadores, sidebar de estaciones, cards con timer SLA (URGENTE discreto) |
+| **Dashboard admin** | KPIs (ventas, tickets, promedio, caja, cocina, stock bajo), top productos, actividad, alertas, accesos rápidos |
+| **Caja / Reportes / Inventario** | Vistas dedicadas con tabs Odoo-style |
+| **Android (LBApos)** | Welcome screen + configuración de servidor con QR + modo POS/KDS, splash azul con logo, appName LBApos |
+
+Documentación: [docs/UI_REDESIGN_BASELINE.md](docs/UI_REDESIGN_BASELINE.md) (auditoría previa) · [docs/UI_REDESIGN_FINAL.md](docs/UI_REDESIGN_FINAL.md) (entrega).
+
+> ⚠️ El rediseño es **100% UI**: no se modificó la lógica de negocio, APIs, DB, pagos, KDS, inventario, impresión ni sincronización.
+
+---
+
 ## 📱 PWA / Android
 
-SambaPos_LBA es una **PWA instalable** con soporte Android nativo via Capacitor:
+LBApos (SambaPos_LBA) es una **PWA instalable** con soporte Android nativo via Capacitor:
 
 ### PWA (instalación desde navegador)
 
