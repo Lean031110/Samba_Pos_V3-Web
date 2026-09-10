@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LBApos</string>
+    <string name="title_activity_main">LBApos</string>
+    <string name="package_name">com.sambapos.lba</string>
+    <string name="custom_url_scheme">com.sambapos.lba</string>
+</resources>
