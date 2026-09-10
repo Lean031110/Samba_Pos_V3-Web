@@ -60,18 +60,34 @@
         e.preventDefault();
         this._deferredPrompt = e;
         this._setCanInstall(true);
+        // BLOQUE G — notify any open Admin Config view to re-render the PWA card
+        this._notifyConfigView();
       });
 
       window.addEventListener('appinstalled', () => {
         console.log('[PWA] appinstalled — installed as PWA');
         this.installed = true;
         this._setCanInstall(false);
+        this._notifyConfigView();
       });
 
       // SW update available banner.
       window.addEventListener('sw:update-available', () => {
         this._showUpdateBanner();
       });
+    },
+
+    /**
+     * BLOQUE G — Notifies the Admin Config view (if open) to re-render the
+     * PWA card so the "Instalar app" button appears/disappears in real time.
+     */
+    _notifyConfigView() {
+      if (window.App && window.App.views && window.App.views.admin
+          && window.App.views.admin._currentTab === 'config') {
+        setTimeout(() => {
+          window.App.views.admin._renderPwaCard && window.App.views.admin._renderPwaCard();
+        }, 100);
+      }
     },
 
     _showUpdateBanner() {
