@@ -79,17 +79,23 @@ module.exports = {
     debug: false,
   },
   production: {
-    // For production we can swap to better-sqlite3 or Postgres later
-    // without changing application code, only this file.
-    client: 'sqlite3',
-    connection: { filename: DB_PATH },
-    useNullAsDefault: true,
+    // BLOQUE J — Fase 10: PostgreSQL support for production.
+    // Set DATABASE_URL=postgres://user:pass@host:5432/dbname to use PostgreSQL.
+    // Falls back to SQLite if DATABASE_URL is not set or doesn't start with 'postgres'.
+    client: (process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgres')) ? 'pg' : 'sqlite3',
+    connection: (process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgres'))
+      ? process.env.DATABASE_URL
+      : { filename: DB_PATH },
+    useNullAsDefault: !(process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgres')),
     pool: {
       min: 2,
       max: 20,
-      afterCreate: (conn, done) => {
-        PRAGMA_HOOK(conn).then(() => done(null, conn)).catch((err) => done(err, conn));
-      },
+      // SQLite PRAGMA hook — only runs for SQLite, not PG
+      ...(!(process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgres')) ? {
+        afterCreate: (conn, done) => {
+          PRAGMA_HOOK(conn).then(() => done(null, conn)).catch((err) => done(err, conn));
+        },
+      } : {}),
     },
     migrations: {
       directory: path.join(__dirname, 'migrations'),

@@ -109,8 +109,20 @@ exports.up = async function (knex) {
   // add a few columns for SambaPos_LBA-specific features.
 
   // Add columns to Printers (if they don't already exist)
-  const printerCols = await knex.raw('PRAGMA table_info(Printers)');
-  const printerColNames = printerCols.map(c => c.name);
+  // BLOQUE J — use database-agnostic column check
+  const isSQLite = knex.client.config.client === 'sqlite3';
+  let printerColNames;
+  if (isSQLite) {
+    const printerCols = await knex.raw('PRAGMA table_info(Printers)');
+    printerColNames = printerCols.map(c => c.name);
+  } else {
+    // PostgreSQL
+    const cols = await knex.raw(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'Printers'
+    `);
+    printerColNames = cols.rows ? cols.rows.map(r => r.column_name) : [];
+  }
   if (!printerColNames.includes('PrintAreaId')) {
     await knex.schema.table('Printers', (t) => {
       t.integer('PrintAreaId').nullable();

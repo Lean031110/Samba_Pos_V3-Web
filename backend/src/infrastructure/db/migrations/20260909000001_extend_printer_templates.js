@@ -16,9 +16,19 @@
 // =====================================================================
 
 exports.up = async function (knex) {
-  // Add columns (additive — SQLite supports ADD COLUMN)
-  const cols = await knex.raw('PRAGMA table_info(PrinterTemplates)');
-  const colNames = cols.map(c => c.name);
+  // BLOQUE J — database-agnostic column check
+  const isSQLite = knex.client.config.client === 'sqlite3';
+  let colNames;
+  if (isSQLite) {
+    const cols = await knex.raw('PRAGMA table_info(PrinterTemplates)');
+    colNames = cols.map(c => c.name);
+  } else {
+    const cols = await knex.raw(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'PrinterTemplates'
+    `);
+    colNames = cols.rows ? cols.rows.map(r => r.column_name) : [];
+  }
 
   if (!colNames.includes('TemplateType')) {
     await knex.schema.table('PrinterTemplates', (t) => {

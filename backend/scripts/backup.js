@@ -91,6 +91,25 @@ try {
         path.join(BACKUP_DIR, `samba-backup-${ts}.meta.json`),
         JSON.stringify(meta, null, 2)
       );
+
+      // BLOQUE J — Backup rotation: keep last N backups, delete older ones
+      const MAX_BACKUPS = parseInt(process.env.BACKUP_RETENTION || '30', 10);
+      const allBackups = fs.readdirSync(BACKUP_DIR)
+        .filter(f => f.startsWith('samba-backup-') && f.endsWith('.db'))
+        .sort()
+        .reverse();  // newest first
+      if (allBackups.length > MAX_BACKUPS) {
+        const toDelete = allBackups.slice(MAX_BACKUPS);
+        for (const f of toDelete) {
+          const filePath = path.join(BACKUP_DIR, f);
+          fs.unlinkSync(filePath);
+          // Also delete the meta file
+          const metaFile = filePath.replace('.db', '.meta.json');
+          if (fs.existsSync(metaFile)) fs.unlinkSync(metaFile);
+          console.log(`[backup] Rotated out old backup: ${f}`);
+        }
+        console.log(`[backup] Retention: kept ${MAX_BACKUPS} of ${allBackups.length} backups`);
+      }
     });
   });
 } catch (err) {

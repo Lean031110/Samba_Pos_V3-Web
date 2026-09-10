@@ -29,17 +29,30 @@
 // =====================================================================
 
 exports.up = async function (knex) {
+  // BLOQUE J — Detect database type for SQLite-specific vs PG-compatible operations
+  const isSQLite = knex.client.config.client === 'sqlite3';
+
   // 1. Drop the single-column UNIQUE constraint on Key.
   //    In SQLite, UNIQUE constraints created inline cannot be dropped
   //    directly — we need to recreate the table.
-  //    However, we can drop the unique INDEX if it was created as one.
-  //    Knex's .unique() creates a UNIQUE constraint, not an index, so
-  //    we need the table-recreation approach for SQLite.
+  //    In PostgreSQL, we can use ALTER TABLE DROP CONSTRAINT.
 
-  // Check current schema
-  const tableInfo = await knex.raw('PRAGMA table_info(IdempotencyKeys)');
-  const hasStatusColumn = tableInfo.some(c => c.name === 'Status');
-  const hasRequestBodyHash = tableInfo.some(c => c.name === 'RequestBodyHash');
+  // Check current schema — use information_schema for PG, PRAGMA for SQLite
+  let hasStatusColumn, hasRequestBodyHash;
+  if (isSQLite) {
+    const tableInfo = await knex.raw('PRAGMA table_info(IdempotencyKeys)');
+    hasStatusColumn = tableInfo.some(c => c.name === 'Status');
+    hasRequestBodyHash = tableInfo.some(c => c.name === 'RequestBodyHash');
+  } else {
+    // PostgreSQL — query information_schema
+    const cols = await knex.raw(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'IdempotencyKeys'
+    `);
+    const colNames = cols.rows ? cols.rows.map(r => r.column_name) : [];
+    hasStatusColumn = colNames.includes('Status');
+    hasRequestBodyHash = colNames.includes('RequestBodyHash');
+  }
 
   // Add new columns if missing
   if (!hasStatusColumn) {
@@ -55,56 +68,70 @@ exports.up = async function (knex) {
   }
 
   // For the UNIQUE constraint change, SQLite requires table recreation.
-  // We use a transaction to ensure atomicity.
-  // Step 1: Create new table with composite UNIQUE
-  await knex.raw(`
-    CREATE TABLE IF NOT EXISTS IdempotencyKeys_new (
-      Id INTEGER PRIMARY KEY AUTOINCREMENT,
-      Key VARCHAR(128) NOT NULL,
-      UserId INTEGER NOT NULL,
-      Endpoint VARCHAR(200) NOT NULL,
-      RequestBody TEXT,
-      RequestBodyHash VARCHAR(64),
-      ResponseStatus INTEGER,
-      ResponseBody TEXT,
-      Status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-      CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      ExpiresAt DATETIME NOT NULL,
-      UNIQUE(Key, Endpoint)
-    )
-  `);
+  // PostgreSQL can use ALTER TABLE DROP CONSTRAINT + ADD CONSTRAINT.
+  // BLOQUE J — branch by database type.
+  if (isSQLite) {
+    // SQLite: table recreation approach
+    await knex.raw(`
+      CREATE TABLE IF NOT EXISTS IdempotencyKeys_new (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Key VARCHAR(128) NOT NULL,
+        UserId INTEGER NOT NULL,
+        Endpoint VARCHAR(200) NOT NULL,
+        RequestBody TEXT,
+        RequestBodyHash VARCHAR(64),
+        ResponseStatus INTEGER,
+        ResponseBody TEXT,
+        Status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+        CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ExpiresAt DATETIME NOT NULL,
+        UNIQUE(Key, Endpoint)
+      )
+    `);
 
-  // Step 2: Copy data from old table
-  const hasStatus = tableInfo.some(c => c.name === 'Status');
-  const hasHash = tableInfo.some(c => c.name === 'RequestBodyHash');
-  if (hasStatus && hasHash) {
-    await knex.raw(`
-      INSERT INTO IdempotencyKeys_new
-        (Id, Key, UserId, Endpoint, RequestBody, RequestBodyHash,
-         ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
-      SELECT Id, Key, UserId, Endpoint, RequestBody, RequestBodyHash,
-             ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt
-      FROM IdempotencyKeys
-    `);
-  } else if (hasStatus) {
-    await knex.raw(`
-      INSERT INTO IdempotencyKeys_new
-        (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
-      SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt
-      FROM IdempotencyKeys
-    `);
+    // Step 2: Copy data from old table
+    if (hasStatusColumn && hasRequestBodyHash) {
+      await knex.raw(`
+        INSERT INTO IdempotencyKeys_new
+          (Id, Key, UserId, Endpoint, RequestBody, RequestBodyHash,
+           ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
+        SELECT Id, Key, UserId, Endpoint, RequestBody, RequestBodyHash,
+               ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt
+        FROM IdempotencyKeys
+      `);
+    } else if (hasStatusColumn) {
+      await knex.raw(`
+        INSERT INTO IdempotencyKeys_new
+          (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
+        SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt
+        FROM IdempotencyKeys
+      `);
+    } else {
+      await knex.raw(`
+        INSERT INTO IdempotencyKeys_new
+          (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
+        SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, 'COMPLETED', CreatedAt, ExpiresAt
+        FROM IdempotencyKeys
+      `);
+    }
+
+    // Step 3: Drop old table, rename new
+    await knex.raw('DROP TABLE IdempotencyKeys');
+    await knex.raw('ALTER TABLE IdempotencyKeys_new RENAME TO IdempotencyKeys');
   } else {
-    await knex.raw(`
-      INSERT INTO IdempotencyKeys_new
-        (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, Status, CreatedAt, ExpiresAt)
-      SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, 'COMPLETED', CreatedAt, ExpiresAt
-      FROM IdempotencyKeys
-    `);
+    // PostgreSQL: just add the composite unique constraint
+    // (the single-column UNIQUE was already on the Key column from the original schema)
+    try {
+      await knex.raw(`
+        ALTER TABLE "IdempotencyKeys"
+        ADD CONSTRAINT "idempotencykeys_key_endpoint_unique"
+        UNIQUE ("Key", "Endpoint")
+      `);
+    } catch (e) {
+      // Constraint may already exist — that's OK
+      console.log('[migration] Composite UNIQUE constraint already exists on IdempotencyKeys');
+    }
   }
-
-  // Step 3: Drop old table, rename new
-  await knex.raw('DROP TABLE IdempotencyKeys');
-  await knex.raw('ALTER TABLE IdempotencyKeys_new RENAME TO IdempotencyKeys');
 
   // Step 4: Recreate indexes
   await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_Key ON IdempotencyKeys(Key)');
