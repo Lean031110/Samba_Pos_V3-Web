@@ -54,26 +54,12 @@ jobs:
 
       - name: Inject LBApos splash + branding (BLOQUE N)
         run: |
-          # Splash del APK: logo LBA sobre azul #044392 en todas las densidades
+          # Splash del APK: logo LBA (PNG) por densidad.
+          # El fondo azul #044392 lo aporta el plugin SplashScreen
+          # (backgroundColor en capacitor.config.json) — sin XML duplicado.
           RES=android/app/src/main/res
           mkdir -p $RES/drawable $RES/drawable-hdpi $RES/drawable-xhdpi $RES/drawable-xxhdpi $RES/drawable-xxxhdpi
-          # drawable base: layer-list azul de marca (fondo del splash nativo)
-          cat > $RES/drawable/splash.xml << 'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-            <item android:drawable="@color/splash_blue"/>
-          </layer-list>
-          XML
-          # color de marca
-          mkdir -p $RES/values
-          grep -q splash_blue $RES/values/colors.xml 2>/dev/null || cat >> $RES/values/colors.xml << 'XML'
-          <resources>
-            <color name="splash_blue">#044392</color>
-          </resources>
-          XML
-          # imagen de splash (logo LBA) por densidad
-          for d in hdpi:480 xhdpi:720 xxhdpi:960 xxxhdpi:1440; do
-            density="${d%%:*}"
+          for density in hdpi xhdpi xxhdpi xxxhdpi; do
             cp frontend/assets/splash-512.png $RES/drawable-$density/splash.png
           done
           cp frontend/assets/splash-512.png $RES/drawable/splash.png
@@ -82,7 +68,7 @@ jobs:
           echo "=== strings.xml ==="; cat $STRINGS
           grep -q 'app_name">LBApos' $STRINGS || (sed -i 's|name="app_name">[^<]*<|name="app_name">LBApos<|' $STRINGS; echo "[branding] app_name forzado a LBApos")
           grep -q 'app_name">LBApos' $STRINGS || { echo "FAIL: app_name no es LBApos"; exit 1; }
-          # Portrait (POS/KDS son verticales por diseño) + fullscreen
+          # Portrait (POS/KDS son verticales por diseño)
           MANIFEST=android/app/src/main/AndroidManifest.xml
           grep -q 'android:screenOrientation' $MANIFEST || sed -i 's|android:exported="true"|android:screenOrientation="portrait"\n            android:exported="true"|' $MANIFEST
 
