@@ -14,19 +14,38 @@ export CI=1
 
 PASS=0
 FAIL=0
+SUITE_ERRORS=0
 
 run_unit () {
   local name="$1"
   local file="$2"
   rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
   node scripts/run-migrations.js >/dev/null 2>&1
-  local out
-  out=$(node --test "$file" 2>&1 || true)
-  local p=$(echo "$out" | grep -E "^ℹ pass" | tail -1 | awk '{print $3}')
-  local f=$(echo "$out" | grep -E "^ℹ fail" | tail -1 | awk '{print $3}')
+  # NOTE (PR #9 hardening): the old version used `|| true` and only parsed
+  # the Node 22+ spec-reporter format ("^ℹ pass"), so on Node 20 (TAP format
+  # "# pass N") every count parsed as empty and a failing suite could NOT
+  # fail this script. Exit codes + both formats are now the source of truth.
+  local out rc=0
+  out=$(node --test "$file" 2>&1) || rc=$?
+  # Node 20 (TAP):  "# pass 14"  / "# fail 0"
+  # Node 22+ (spec): "ℹ pass 14" / "ℹ fail 0"
+  local p=$(echo "$out" | grep -E '^(ℹ|#) pass' | tail -1 | grep -oE '[0-9]+' | tail -1)
+  local f=$(echo "$out" | grep -E '^(ℹ|#) fail' | tail -1 | grep -oE '[0-9]+' | tail -1)
+  p=${p:-0}
+  f=${f:-0}
+  # A non-zero exit code means the suite failed (or crashed) even when the
+  # counters could not be parsed — never let that pass silently.
+  if [ "$rc" -ne 0 ] && [ "$f" -eq 0 ]; then
+    f=1
+    echo "  !! SUITE FAILED without parseable counts (exit $rc) — forced fail" >&2
+  fi
+  if [ "$rc" -ne 0 ]; then
+    SUITE_ERRORS=$((SUITE_ERRORS + 1))
+    echo "$out" | tail -30 >&2
+  fi
   PASS=$((PASS + p))
   FAIL=$((FAIL + f))
-  printf "  %-40s pass=%3s fail=%3s\n" "$name" "$p" "$f"
+  printf "  %-40s pass=%3s fail=%3s exit=%s\n" "$name" "$p" "$f" "$rc"
 }
 
 echo "=== UNIT TESTS ==="
@@ -57,17 +76,17 @@ echo "=== E2E (Playwright) ==="
 # Only run E2E if PLAYWwright browsers are available (skip in CI if already handled separately)
 if [ "${SKIP_E2E:-0}" != "1" ]; then
   rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
-  npx playwright test --reporter=line > /tmp/e2e.log 2>&1 || true
-  P_E2E=$(grep -cE "passed" /tmp/e2e.log | tail -1)
-  if echo "$P_E2E" | grep -q "passed"; then
-    E2E_PASS=$(grep -oE "[0-9]+ passed" /tmp/e2e.log | awk '{print $1}')
-  else
-    E2E_PASS=0
+  # Same hardening: exit code is truth, `|| true` removed.
+  E2E_RC=0
+  npx playwright test --reporter=line > /tmp/e2e.log 2>&1 || E2E_RC=$?
+  E2E_PASS=$(grep -oE "[0-9]+ passed" /tmp/e2e.log | tail -1 | grep -oE '[0-9]+' || echo 0)
+  E2E_FAIL=$(grep -oE "[0-9]+ failed" /tmp/e2e.log | tail -1 | grep -oE '[0-9]+' || echo 0)
+  if [ "$E2E_RC" -ne 0 ] && [ "${E2E_FAIL:-0}" -eq 0 ]; then
+    E2E_FAIL=1
   fi
-  E2E_FAIL=$(grep -oE "[0-9]+ failed" /tmp/e2e.log | awk '{print $1}' || echo 0)
   PASS=$((PASS + E2E_PASS))
   FAIL=$((FAIL + E2E_FAIL))
-  printf "  %-40s pass=%3s fail=%3s\n" "playwright E2E" "${E2E_PASS:-0}" "${E2E_FAIL:-0}"
+  printf "  %-40s pass=%3s fail=%3s exit=%s\n" "playwright E2E" "${E2E_PASS:-0}" "${E2E_FAIL:-0}" "$E2E_RC"
 else
   echo "  (skipped — SKIP_E2E=1)"
 fi
@@ -77,7 +96,9 @@ echo "=== FINAL ==="
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
 echo "TOTAL: $((PASS + FAIL))"
+# Machine-readable line for CI (ci.yml writes it to the job summary):
+echo "UNIT_TEST_RESULTS: pass=$PASS fail=$FAIL total=$((PASS + FAIL)) suite_errors=$SUITE_ERRORS"
 
-if [ "$FAIL" -gt 0 ]; then
+if [ "$FAIL" -gt 0 ] || [ "$SUITE_ERRORS" -gt 0 ]; then
   exit 1
 fi
