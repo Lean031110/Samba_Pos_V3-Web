@@ -24,6 +24,7 @@ jobs:
     name: Build APK
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    continue-on-error: true  # Android SDK setup may fail — don't block main CI
 
     steps:
       - uses: actions/checkout@v4

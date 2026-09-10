@@ -159,9 +159,9 @@ jobs:
           DATABASE_URL: postgres://samba:samba@localhost:5432/sambapos_test
         run: |
           set -e
-          # Create database
-          PGPASSWORD=samba psql -h localhost -U samba -c "DROP DATABASE IF EXISTS sambapos_test;" || true
-          PGPASSWORD=samba psql -h localhost -U samba -c "CREATE DATABASE sambapos_test;"
+          # Create database (connect to default 'postgres' db first)
+          PGPASSWORD=samba psql -h localhost -U samba -d postgres -c "DROP DATABASE IF EXISTS sambapos_test;" || true
+          PGPASSWORD=samba psql -h localhost -U samba -d postgres -c "CREATE DATABASE sambapos_test;"
           # Run migrations on PostgreSQL
           npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js --env production
           # Run seed
