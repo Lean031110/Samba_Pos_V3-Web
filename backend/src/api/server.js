@@ -114,6 +114,44 @@ function createApp() {
     });
   });
 
+  // === PWA install status (BLOQUE G — Fase 7) ===
+  app.get('/api/pwa/install-status', authenticate, (req, res) => {
+    const manifestPath = path.join(FRONTEND_DIR, 'manifest.webmanifest');
+    const swPath = path.join(FRONTEND_DIR, 'sw.js');
+    const fs = require('fs');
+    let manifest = null;
+    let manifestValid = false;
+    let manifestErrors = [];
+    try {
+      const raw = fs.readFileSync(manifestPath, 'utf8');
+      manifest = JSON.parse(raw);
+      if (!manifest.name) manifestErrors.push('Missing "name"');
+      if (!manifest.start_url) manifestErrors.push('Missing "start_url"');
+      if (manifest.display !== 'standalone') manifestErrors.push(`display should be "standalone", got "${manifest.display}"`);
+      const icons = manifest.icons || [];
+      const has192 = icons.some(i => (i.sizes === '192x192' || i.sizes === '512x512'));
+      if (!has192) manifestErrors.push('Missing 192x192 or 512x512 icon');
+      manifestValid = manifestErrors.length === 0;
+    } catch (err) {
+      manifestErrors.push(`Cannot read manifest: ${err.message}`);
+    }
+    let swExists = false;
+    try {
+      fs.accessSync(swPath, fs.constants.R_OK);
+      swExists = true;
+    } catch {}
+    res.json({
+      data: {
+        manifestReachable: !!manifest,
+        manifestValid,
+        manifestErrors,
+        manifest,
+        serviceWorkerExists: swExists,
+        installPromptSupported: true,
+      },
+    });
+  });
+
   // === Metrics endpoint (Fase 18 — observability) ===
   // Protected by authentication — requires a valid JWT.
   // In production, restrict further to admin network or localhost.

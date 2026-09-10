@@ -1657,15 +1657,112 @@ const AdminView = {
     }
 
     const refreshBtn = this._btn('Actualizar', 'kds-btn--primary', 'fa-rotate', "window.AdminView._renderConfig()");
+
+    // Tarjeta PWA (BLOQUE G — Fase 7: install prompt visible)
+    const pwaCard = this._renderPwaCard();
+
     this._setContent(
       this._header('Configuración', refreshBtn) +
-      versionCard + wsCard + printersCard + queueCard
+      versionCard + wsCard + pwaCard + printersCard + queueCard
     );
 
     // Verificación asíncrona del estado online de cada impresora
     for (const pr of printers) {
       this._checkPrinterStatusInline(pr.Id);
     }
+  },
+
+  _renderPwaCard() {
+    const pwa = window.SambaPWA;
+    if (!pwa) {
+      return `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-mobile-screen"></i> Aplicación (PWA)</h3>
+          <p class="admin-empty">El módulo PWA no está cargado.</p>
+        </div>
+      `;
+    }
+
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+
+    let swStatus = '<span class="admin-tag admin-tag--info">Verificando…</span>';
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        const el = document.getElementById('pwa-sw-status');
+        if (!el) return;
+        if (!reg) {
+          el.innerHTML = '<span class="admin-tag admin-tag--danger">No registrado</span>';
+        } else if (reg.waiting) {
+          el.innerHTML = '<span class="admin-tag admin-tag--warn">Actualización disponible</span>';
+        } else {
+          el.innerHTML = '<span class="admin-tag admin-tag--success">Registrado</span>';
+        }
+      }).catch(() => {
+        const el = document.getElementById('pwa-sw-status');
+        if (el) el.innerHTML = '<span class="admin-tag admin-tag--danger">Error</span>';
+      });
+    }
+
+    let installButtonHtml;
+    if (isStandalone) {
+      installButtonHtml = `
+        <div class="admin-card-grid">
+          <div><span>Estado:</span> <strong>Instalada como PWA ✓</strong></div>
+          <div><span>Modo:</span> <code>standalone</code></div>
+        </div>
+      `;
+    } else if (pwa.canInstall) {
+      installButtonHtml = `
+        <div class="admin-card-grid">
+          <div><span>Estado:</span> <strong>Listo para instalar</strong></div>
+          <div><span>Modo:</span> <code>navegador</code></div>
+        </div>
+        <div style="margin-top: 12px;">
+          ${this._btn('Instalar app', 'kds-btn--primary', 'fa-download', "window.AdminView._pwaInstall()")}
+        </div>
+      `;
+    } else {
+      installButtonHtml = `
+        <div class="admin-card-grid">
+          <div><span>Estado:</span> <strong>Ejecutándose en navegador</strong></div>
+          <div><span>Modo:</span> <code>browser</code></div>
+        </div>
+        <p class="admin-help" style="margin-top: 8px;">
+          Para instalar la app como PWA: en Chrome/Edge, abre el menú
+          <i class="fa-solid fa-ellipsis-vertical"></i> → "Instalar SambaPos…".
+          El botón "Instalar app" aparecerá aquí automáticamente cuando el
+          navegador lo permita.
+        </p>
+      `;
+    }
+
+    return `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-mobile-screen"></i> Aplicación (PWA)</h3>
+        ${installButtonHtml}
+        <div class="admin-card-grid" style="margin-top: 12px;">
+          <div><span>Service Worker:</span> <span id="pwa-sw-status">${swStatus}</span></div>
+          <div><span>Manifest:</span> <code>/manifest.webmanifest</code></div>
+        </div>
+      </div>
+    `;
+  },
+
+  async _pwaInstall() {
+    const pwa = window.SambaPWA;
+    if (!pwa) {
+      this._toast('Módulo PWA no disponible', 'error');
+      return;
+    }
+    this._toast('Iniciando instalación…', 'info');
+    const installed = await pwa.promptInstall();
+    if (installed) {
+      this._toast('App instalada correctamente', 'success');
+    } else {
+      this._toast('Instalación cancelada o no disponible', 'warn');
+    }
+    await this._renderConfig();
   },
 
   /**
