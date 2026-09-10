@@ -50,6 +50,7 @@ run_unit "bloque-g-pwa"           tests/bloque-g-pwa-verification.test.js
 run_unit "bloque-h-push"          tests/bloque-h-push-verification.test.js
 run_unit "bloque-i-offline"       tests/bloque-i-offline-verification.test.js
 run_unit "bloque-j-production"    tests/bloque-j-production-verification.test.js
+run_unit "bloque-klm"            tests/bloque-klm-verification.test.js
 
 echo "=== E2E (Playwright) ==="
 rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
