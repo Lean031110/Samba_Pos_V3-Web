@@ -1,251 +1,238 @@
 /* =====================================================================
-   components.css — FlexButton, TicketItem, NumberPad, etc.
+   components.css — Odoo-inspired component styles
+   =====================================================================
+   Redesign BLOQUE N — Fase 18: UI final estilo Odoo 19 moderno.
    ===================================================================== */
 
-/* =====================================================================
-   flex-button — the workhorse touch button
-   Mirrors Samba.Presentation.Controls.FlexButton behavior:
-     - Auto-contrast foreground (luminance < 128 → white text)
-     - Border = Lerp(bgColor, black, 0.3)
-     - Press feedback <100ms (transform + bg flash)
-     - Glow on hover
-   ===================================================================== */
-.flex-button {
+/* === Product buttons (POS grid) === */
+.pos-products__grid .product-btn,
+.pos-products__grid button {
+  height: var(--lba-touch-large);
+  border: 1px solid var(--lba-border-light);
+  background: var(--lba-bg-panel);
+  border-radius: var(--lba-radius-md);
+  font-size: var(--lba-fs-sm);
+  font-weight: 500;
+  color: var(--lba-fg-default);
+  cursor: pointer;
+  transition: all var(--lba-anim-fast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  text-align: center;
+}
+.pos-products__grid .product-btn:hover,
+.pos-products__grid button:hover {
+  border-color: var(--lba-blue-400);
+  background: var(--lba-blue-50);
+  transform: translateY(-1px);
+  box-shadow: var(--lba-shadow-sm);
+}
+.pos-products__grid .product-btn:active,
+.pos-products__grid button:active {
+  transform: translateY(0);
+  background: var(--lba-blue-100);
+}
+.product-btn__price {
+  font-size: var(--lba-fs-xs);
+  color: var(--lba-fg-muted);
+  font-weight: 400;
+}
+
+/* === Category tabs === */
+.category-tab {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--lba-fg-muted);
+  font-size: var(--lba-fs-sm);
+  font-weight: 500;
+  border-radius: var(--lba-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--lba-anim-fast);
+}
+.category-tab:hover { background: var(--lba-bg-hover); color: var(--lba-fg-default); }
+.category-tab.is-active { background: var(--lba-blue-600); color: #fff; }
+
+/* === Order rows (ticket lines) === */
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--lba-border-light);
+  font-size: var(--lba-fs-sm);
+  cursor: pointer;
+  transition: background var(--lba-anim-fast);
+}
+.order-row:hover { background: var(--lba-bg-hover); }
+.order-row--selected { background: var(--lba-bg-selected); border-left: 3px solid var(--lba-blue-500); }
+.order-row--locked { opacity: 0.5; }
+.order-row--gift { background: var(--lba-bg-order-gift); }
+.order-row--void { background: var(--lba-bg-order-void); text-decoration: line-through; }
+.order-row__qty {
+  font-weight: 700;
+  min-width: 36px;
+  text-align: center;
+  color: var(--lba-blue-600);
+}
+.order-row__name { flex: 1; }
+.order-row__portion { font-size: var(--lba-fs-xs); color: var(--lba-fg-muted); }
+.order-row__price { font-weight: 600; color: var(--lba-fg-default); }
+.order-row__tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--lba-radius-sm);
+  background: var(--lba-warning-bg);
+  color: #856404;
+}
+
+/* === Numpad keys === */
+.numpad__key {
+  height: var(--lba-touch-comfort);
+  border: 1px solid var(--lba-border-light);
+  background: var(--lba-bg-panel);
+  border-radius: var(--lba-radius-md);
+  font-size: var(--lba-fs-xl);
+  font-weight: 600;
+  color: var(--lba-fg-default);
+  cursor: pointer;
+  transition: all var(--lba-anim-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.numpad__key:hover { background: var(--lba-bg-hover); border-color: var(--lba-blue-300); }
+.numpad__key:active { transform: scale(0.96); background: var(--lba-blue-100); }
+.numpad__key--danger { color: var(--lba-danger); }
+.numpad__key--success { color: var(--lba-success); }
+.numpad__key--login { background: var(--lba-blue-600); color: #fff; border-color: var(--lba-blue-600); }
+.numpad__key--login:hover { background: var(--lba-blue-700); }
+
+/* === KDS buttons === */
+.kds-btn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--lba-radius-sm);
+  font-size: var(--lba-fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--lba-anim-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--lba-touch-min);
+}
+.kds-btn--primary { background: var(--lba-blue-500); color: #fff; }
+.kds-btn--primary:hover { background: var(--lba-blue-700); }
+.kds-btn--ready { background: var(--lba-success); color: #fff; }
+.kds-btn--ready:hover { background: #1e7e34; }
+.kds-btn--served { background: #6c757d; color: #fff; }
+.kds-btn--served:hover { background: #5a6268; }
+.kds-btn--void { background: var(--lba-danger); color: #fff; }
+.kds-btn--void:hover { background: #c82333; }
+.kds-btn--recall { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.8); }
+.kds-btn--recall:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+/* === Generic buttons (command bar, admin) === */
+.kds-btn--primary,
+button.kds-btn--primary {
+  background: var(--lba-blue-600);
+  color: #fff;
+}
+button.kds-btn--void {
+  background: var(--lba-danger);
+  color: #fff;
+}
+
+/* === flex-button web component overrides === */
+flex-button {
+  display: inline-flex;
+  cursor: pointer;
+}
+flex-button button,
+flex-button .flex-button-inner {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: var(--samba-min-btn-h);
-  min-width: var(--samba-min-btn-w);
-  padding: var(--samba-pad-btn);
-  margin: 0 var(--samba-gap-btn) var(--samba-gap-btn) 0;
-  border-radius: var(--samba-radius-button);
-  border: 1px solid;
-  font-weight: bold;
-  font-family: inherit;
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--samba-anim-fast),
-              transform var(--samba-anim-fast),
-              box-shadow var(--samba-anim-fast);
-  background: var(--flex-bg, var(--samba-bg-button-default));
-  color: var(--flex-fg, var(--samba-fg-default));
-  /* Auto-contrast border: darkens the bg by 30% via color-mix (modern browsers) */
-  border-color: color-mix(in srgb, var(--flex-bg, var(--samba-bg-button-default)) 70%, black);
-  position: relative;
-  overflow: hidden;
-  touch-action: manipulation;
-}
-.flex-button:hover {
-  box-shadow: var(--samba-shadow-glow);
-  background: color-mix(in srgb, var(--flex-bg, var(--samba-bg-button-default)) 90%, white);
-}
-.flex-button:active,
-.flex-button.is-pressed {
-  transform: translate(1px, 1px);
-  box-shadow: var(--samba-shadow-pressed);
-  background: color-mix(in srgb, var(--flex-bg, var(--samba-bg-button-default)) 80%, black);
-  transition: background 0ms, transform 0ms, box-shadow 0ms;
-}
-.flex-button:disabled,
-.flex-button.is-disabled {
-  background: var(--samba-bg-button-disabled);
-  color: var(--samba-fg-inverse);
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-.flex-button__icon { font-size: 1.4em; }
-.flex-button__label { font-size: var(--flex-fs, var(--samba-fs-md)); }
-.flex-button__sublabel { font-size: var(--samba-fs-xs); opacity: 0.8; font-weight: normal; }
-
-/* Variant utility classes (when not using inline --flex-bg) */
-.flex-button--success { --flex-bg: var(--samba-bg-button-success); --flex-fg: var(--samba-fg-inverse); }
-.flex-button--danger  { --flex-bg: var(--samba-bg-button-danger);  --flex-fg: var(--samba-fg-inverse); }
-.flex-button--warning { --flex-bg: var(--samba-bg-button-warning); --flex-fg: var(--samba-fg-default); }
-.flex-button--discount{ --flex-bg: var(--samba-bg-button-discount);--flex-fg: var(--samba-fg-inverse); }
-.flex-button--action  { --flex-bg: var(--samba-bg-button-action);  --flex-fg: var(--samba-fg-inverse); }
-.flex-button--info    { --flex-bg: var(--samba-bg-button-info);    --flex-fg: var(--samba-fg-default); }
-
-/* Tall button (command bar) */
-.flex-button--tall { min-height: var(--samba-h-cmd-bar); }
-
-/* Big payment button (FontSize=40 in original) */
-.flex-button--xl { font-size: var(--samba-fs-3xl); min-height: 80px; }
-
-/* =====================================================================
-   NumberPad (calc-style keypad, 4×3)
-   ===================================================================== */
-.numpad {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-}
-.numpad__key {
-  min-height: 50px;
-  min-width: 50px;
-  background: var(--samba-bg-button-default);
-  border: 1px solid;
-  border-color: color-mix(in srgb, var(--samba-bg-button-default) 70%, black);
-  border-radius: var(--samba-radius-button);
-  font-size: var(--samba-fs-xl);
-  font-weight: bold;
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--samba-anim-fast), transform var(--samba-anim-fast);
-}
-.numpad__key:hover { background: var(--samba-bg-button-hover); }
-.numpad__key:active { transform: translate(1px, 1px); background: var(--samba-bg-button-pressed); }
-.numpad__key--accent { background: var(--samba-bg-button-action); color: var(--samba-fg-inverse); border-color: color-mix(in srgb, var(--samba-bg-button-action) 70%, black); }
-.numpad__key--danger { background: var(--samba-bg-button-danger);  color: var(--samba-fg-inverse); border-color: color-mix(in srgb, var(--samba-bg-button-danger) 70%, black); }
-
-/* =====================================================================
-   ticket-item — order row in ticket list
-   ===================================================================== */
-.ticket-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--samba-border-light);
-  font-size: var(--samba-fs-md);
-  cursor: pointer;
-  transition: background var(--samba-anim-fast);
-  background: var(--samba-bg-order-normal);
-  user-select: none;
-}
-.ticket-item:hover { background: var(--samba-bg-button-hover); }
-.ticket-item.is-selected { background: var(--samba-bg-order-selected); }
-.ticket-item.is-locked   { background: var(--samba-bg-order-locked); color: var(--samba-fg-disabled); }
-.ticket-item.is-gift     { background: var(--samba-bg-order-gift); font-style: italic; }
-.ticket-item.is-void     { background: var(--samba-bg-order-void); color: var(--samba-fg-inverse); text-decoration: line-through; }
-.ticket-item__name { flex: 1; }
-.ticket-item__qty { font-weight: bold; margin: 0 8px; }
-.ticket-item__total { font-weight: bold; }
-
-/* =====================================================================
-   Category tab (top of product selector)
-   ===================================================================== */
-.category-tab {
-  min-height: 45px;
+  gap: 6px;
+  height: var(--lba-touch-min);
   padding: 0 16px;
-  background: var(--samba-bg-button-default);
-  border: 1px solid;
-  border-color: color-mix(in srgb, var(--samba-bg-button-default) 70%, black);
-  border-radius: var(--samba-radius-button);
-  font-weight: bold;
+  border: 1px solid var(--lba-border-default);
+  background: var(--lba-bg-panel);
+  color: var(--lba-fg-default);
+  font-size: var(--lba-fs-sm);
+  font-weight: 500;
+  border-radius: var(--lba-radius-sm);
   cursor: pointer;
-  user-select: none;
-  transition: background var(--samba-anim-fast);
+  transition: all var(--lba-anim-fast);
   white-space: nowrap;
 }
-.category-tab:hover { background: var(--samba-bg-button-hover); }
-.category-tab.is-active {
-  background: var(--samba-bg-button-action);
-  color: var(--samba-fg-inverse);
-  border-color: color-mix(in srgb, var(--samba-bg-button-action) 70%, black);
+flex-button button:hover,
+flex-button .flex-button-inner:hover {
+  background: var(--lba-bg-hover);
+  border-color: var(--lba-blue-300);
+}
+flex-button button:active,
+flex-button .flex-button-inner:active {
+  transform: scale(0.97);
+}
+flex-button[variant="success"] button,
+flex-button[variant="success"] .flex-button-inner {
+  background: var(--lba-success);
+  color: #fff;
+  border-color: var(--lba-success);
+}
+flex-button[variant="success"] button:hover { background: #1e7e34; }
+
+flex-button[variant="info"] button,
+flex-button[variant="info"] .flex-button-inner {
+  background: var(--lba-blue-600);
+  color: #fff;
+  border-color: var(--lba-blue-600);
+}
+flex-button[variant="info"] button:hover { background: var(--lba-blue-700); }
+
+flex-button[variant="danger"] button,
+flex-button[variant="danger"] .flex-button-inner {
+  background: transparent;
+  color: var(--lba-danger);
+  border-color: var(--lba-danger);
 }
 
-/* =====================================================================
-   Login keypad (60×60 keys, larger than numpad)
-   ===================================================================== */
-.login-keypad .numpad__key {
-  min-height: 60px;
-  min-width: 60px;
-  font-size: var(--samba-fs-2xl);
+/* === Paging buttons === */
+.pos-products__paging button {
+  min-width: 40px;
+  height: 36px;
+  border: 1px solid var(--lba-border-default);
+  background: var(--lba-bg-panel);
+  border-radius: var(--lba-radius-sm);
+  cursor: pointer;
+  font-size: var(--lba-fs-sm);
+  color: var(--lba-fg-default);
 }
-.login-keypad .numpad__key--login {
-  background: linear-gradient(to bottom, #FFB9EFA9, #FF288D09);
-  color: var(--samba-fg-inverse);
-  border-color: #FF288D09;
-}
+.pos-products__paging button:hover { background: var(--lba-bg-hover); }
+.pos-products__paging button:disabled { opacity: 0.4; cursor: default; }
 
-/* =====================================================================
-   Print preview modal
-   ===================================================================== */
-.print-preview {
-  font-family: 'Courier New', monospace;
-  background: #FFFFFF;
-  padding: 16px;
-  border: 1px solid var(--samba-border-light);
-  border-radius: var(--samba-radius-panel);
-  white-space: pre;
-  font-size: var(--samba-fs-sm);
-  max-height: 60vh;
-  overflow-y: auto;
+/* === Open ticket tiles === */
+.pos-opentickets__tile {
+  position: relative;
 }
-
-/* =====================================================================
-   Loading spinner
-   ===================================================================== */
-.spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--samba-border-light);
-  border-top-color: var(--samba-bg-button-action);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.pos-opentickets__tile-number {
+  font-size: var(--lba-fs-md);
+  font-weight: 700;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* =====================================================================
-   Connection indicator (top right of header)
-   ===================================================================== */
-.conn-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--samba-fs-xs);
+.pos-opentickets__tile-amount {
+  font-size: var(--lba-fs-xs);
+  opacity: 0.8;
+  margin-top: 2px;
 }
-.conn-indicator__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--samba-bg-button-danger);
+.pos-opentickets__tile-table {
+  font-size: var(--lba-fs-xs);
+  opacity: 0.6;
+  margin-top: 2px;
 }
-.conn-indicator.is-connected .conn-indicator__dot { background: var(--samba-bg-button-success); }
-.conn-indicator.is-reconnecting .conn-indicator__dot { background: var(--samba-bg-button-warning); animation: pulse 1s infinite; }
-@keyframes pulse { 50% { opacity: 0.3; } }
-
-/* =====================================================================
-   KDS (Kitchen Display System) styles
-   ===================================================================== */
-.kds-stations-bar {
-  display: flex; gap: 4px; padding: 8px 12px; background: var(--samba-bg-panel);
-  border-bottom: 2px solid var(--samba-border-default); overflow-x: auto;
-}
-.kds-orders-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px; padding: 16px; overflow-y: auto; flex: 1;
-}
-.kds-card {
-  border-radius: 8px; border: 3px solid; display: flex; flex-direction: column;
-  min-height: 200px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;
-}
-.kds-card-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 12px; font-weight: bold;
-}
-.kds-ticket-info { display: flex; gap: 8px; align-items: center; }
-.kds-ticket-num { font-size: 18px; }
-.kds-table { font-size: 13px; opacity: 0.8; }
-.kds-timer { font-family: 'Courier New', monospace; font-size: 16px; background: rgba(0,0,0,0.1); padding: 2px 8px; border-radius: 4px; }
-.kds-card-body { padding: 8px 12px; flex: 1; overflow-y: auto; }
-.kds-item { padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
-.kds-item-qty { font-weight: bold; margin-right: 6px; }
-.kds-item-name { font-size: 14px; }
-.kds-item-portion { font-size: 12px; color: var(--samba-fg-muted); }
-.kds-item-notes { font-size: 12px; color: #E65100; margin-top: 2px; margin-left: 20px; }
-.kds-card-footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; gap: 4px; }
-.kds-state { font-size: 12px; font-weight: bold; text-transform: uppercase; }
-.kds-btn {
-  padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer;
-  font-size: 13px; font-weight: bold; transition: opacity 100ms;
-}
-.kds-btn:hover { opacity: 0.85; }
-.kds-btn:active { transform: scale(0.96); }
-.kds-btn--ready { background: #4CAF50; color: white; }
-.kds-btn--preparing { background: #FF9800; color: white; }
-.kds-btn--served { background: #2196F3; color: white; }
-.kds-btn--recall { background: #9E9E9E; color: white; }
-.kds-btn--void { background: #F44336; color: white; }
