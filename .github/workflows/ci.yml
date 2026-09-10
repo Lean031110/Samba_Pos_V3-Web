@@ -117,11 +117,11 @@ jobs:
         working-directory: backend
         run: node scripts/run-migrations.js
 
-      - name: All unit tests (528 tests, 21 suites)
+      - name: All unit tests (reset DB per suite — 533 tests, 22 suites)
         working-directory: backend
-        run: |
-          node scripts/run-migrations.js
-          npm run test:unit
+        env:
+          SKIP_E2E: '1'
+        run: bash scripts/run-all-tests.sh
 
       - name: Print test count summary
         working-directory: backend

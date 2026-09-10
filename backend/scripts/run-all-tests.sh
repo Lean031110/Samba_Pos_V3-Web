@@ -54,18 +54,23 @@ run_unit "bloque-klm"            tests/bloque-klm-verification.test.js
 run_unit "bloque-refund-report"  tests/bloque-refund-report-verification.test.js
 
 echo "=== E2E (Playwright) ==="
-rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
-npx playwright test --reporter=line > /tmp/e2e.log 2>&1 || true
-P_E2E=$(grep -cE "passed" /tmp/e2e.log | tail -1)
-if echo "$P_E2E" | grep -q "passed"; then
-  E2E_PASS=$(grep -oE "[0-9]+ passed" /tmp/e2e.log | awk '{print $1}')
+# Only run E2E if PLAYWwright browsers are available (skip in CI if already handled separately)
+if [ "${SKIP_E2E:-0}" != "1" ]; then
+  rm -f ../data/samba.db ../data/samba.db-wal ../data/samba.db-shm
+  npx playwright test --reporter=line > /tmp/e2e.log 2>&1 || true
+  P_E2E=$(grep -cE "passed" /tmp/e2e.log | tail -1)
+  if echo "$P_E2E" | grep -q "passed"; then
+    E2E_PASS=$(grep -oE "[0-9]+ passed" /tmp/e2e.log | awk '{print $1}')
+  else
+    E2E_PASS=0
+  fi
+  E2E_FAIL=$(grep -oE "[0-9]+ failed" /tmp/e2e.log | awk '{print $1}' || echo 0)
+  PASS=$((PASS + E2E_PASS))
+  FAIL=$((FAIL + E2E_FAIL))
+  printf "  %-40s pass=%3s fail=%3s\n" "playwright E2E" "${E2E_PASS:-0}" "${E2E_FAIL:-0}"
 else
-  E2E_PASS=0
+  echo "  (skipped — SKIP_E2E=1)"
 fi
-E2E_FAIL=$(grep -oE "[0-9]+ failed" /tmp/e2e.log | awk '{print $1}' || echo 0)
-PASS=$((PASS + E2E_PASS))
-FAIL=$((FAIL + E2E_FAIL))
-printf "  %-40s pass=%3s fail=%3s\n" "playwright E2E" "${E2E_PASS:-0}" "${E2E_FAIL:-0}"
 
 echo
 echo "=== FINAL ==="
