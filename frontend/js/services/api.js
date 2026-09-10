@@ -87,6 +87,12 @@ class ApiError extends Error {
 }
 
 async function request(method, path, body = null, skipAuth = false) {
+  // DEMO_MODE — use mock API instead of real backend (for GitHub Pages)
+  if (window.DEMO_MODE && window.DEMO_API) {
+    const mockResponse = window.DEMO_API.handle(method, path, body);
+    return mockResponse;
+  }
+
   // Check if we should use the offline queue
   const useOfflineQueue = !skipAuth
     && isOfflineable(method, path)

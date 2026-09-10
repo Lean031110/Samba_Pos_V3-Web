@@ -85,6 +85,21 @@ jobs:
     timeout-minutes: 15
     needs: security  # fail fast on security issues
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: samba
+          POSTGRES_PASSWORD: samba
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U samba"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       JWT_SECRET: ci-test-secret-do-not-use-in-production-32chars
       ADMIN_PIN: '1234'
@@ -104,6 +119,9 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
       - name: Syntax check (node --check on every .js file)
         working-directory: backend
@@ -130,6 +148,28 @@ jobs:
           ls tests/*.test.js | wc -l
           echo "=== E2E SUITES ==="
           ls tests/e2e/*.spec.js 2>/dev/null | wc -l
+
+      # -----------------------------------------------------------------
+      # PostgreSQL integration test — verifies migrations + seed + login
+      # work on a REAL PostgreSQL instance (not just SQLite).
+      # -----------------------------------------------------------------
+      - name: PostgreSQL integration test
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://samba:samba@localhost:5432/sambapos_test
+        run: |
+          set -e
+          # Create database
+          PGPASSWORD=samba psql -h localhost -U samba -c "DROP DATABASE IF EXISTS sambapos_test;" || true
+          PGPASSWORD=samba psql -h localhost -U samba -c "CREATE DATABASE sambapos_test;"
+          # Run migrations on PostgreSQL
+          npx knex migrate:latest --knexfile src/infrastructure/db/knexfile.js --env production
+          # Run seed
+          npx knex seed:run --knexfile src/infrastructure/db/knexfile.js --env production
+          # Verify tables exist
+          PGPASSWORD=samba psql -h localhost -U samba -d sambapos_test -c "\dt" | head -30
+          # Verify admin user was seeded
+          PGPASSWORD=samba psql -h localhost -U samba -d sambapos_test -c "SELECT COUNT(*) FROM Users;"
 
       # -----------------------------------------------------------------
       # Playwright E2E

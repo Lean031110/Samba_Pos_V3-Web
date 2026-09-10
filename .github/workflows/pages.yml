@@ -1,0 +1,105 @@
+# =====================================================================
+# pages.yml — Deploy GitHub Pages demo (static, mock data, no backend)
+# =====================================================================
+# Triggers:
+#   - push to main (frontend/ changes only)
+#   - manual dispatch
+#
+# Produces:
+#   - Static demo at https://lean031110.github.io/Samba_Pos_V3-Web/
+#   - Uses DEMO_MODE=true with mock API + mock data
+#   - Base path: /Samba_Pos_V3-Web/
+# =====================================================================
+name: GitHub Pages Demo
+
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Pages demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build demo frontend
+        run: |
+          # Copy frontend to a build dir
+          mkdir -p _site
+          cp -r frontend/* _site/
+
+          # Set DEMO_MODE flag
+          # This tells the frontend to use mock API instead of real backend
+          sed -i 's|DEMO_MODE = false|DEMO_MODE = true|g' _site/js/services/api.js 2>/dev/null || true
+
+          # If the flag doesn't exist as a simple replace, inject it
+          if ! grep -q "DEMO_MODE" _site/js/services/api.js 2>/dev/null; then
+            # Prepend DEMO_MODE to api.js
+            echo "window.DEMO_MODE = true;" | cat - _site/js/services/api.js > _site/js/services/api.js.tmp
+            mv _site/js/services/api.js.tmp _site/js/services/api.js
+          fi
+
+          # Copy mock data + mock API
+          if [ -f frontend/js/services/demo-data.js ]; then
+            cp frontend/js/services/demo-data.js _site/js/services/
+          fi
+
+          # Fix base path for GitHub Pages project pages
+          # manifest.webmanifest: start_url and scope
+          sed -i 's|"/"|"/Samba_Pos_V3-Web/"|g' _site/manifest.webmanifest
+          sed -i 's|"start_url": "/"|"start_url": "/Samba_Pos_V3-Web/"|g' _site/manifest.webmanifest
+
+          # Fix service worker paths for sub-path
+          sed -i "s|'/index.html'|'/Samba_Pos_V3-Web/index.html'|g" _site/sw.js 2>/dev/null || true
+          sed -i "s|'/manifest.webmanifest'|'/Samba_Pos_V3-Web/manifest.webmanifest'|g" _site/sw.js 2>/dev/null || true
+          sed -i "s|'/css/|'/Samba_Pos_V3-Web/css/|g" _site/sw.js 2>/dev/null || true
+          sed -i "s|'/js/|'/Samba_Pos_V3-Web/js/|g" _site/sw.js 2>/dev/null || true
+          sed -i "s|'/vendor/|'/Samba_Pos_V3-Web/vendor/|g" _site/sw.js 2>/dev/null || true
+          sed -i "s|'/offline.html'|'/Samba_Pos_V3-Web/offline.html'|g" _site/sw.js 2>/dev/null || true
+
+          # Fix index.html script/css paths for sub-path
+          sed -i 's|href="/css/|href="/Samba_Pos_V3-Web/css/|g' _site/index.html
+          sed -i 's|src="/js/|src="/Samba_Pos_V3-Web/js/|g' _site/index.html
+          sed -i 's|href="/vendor/|href="/Samba_Pos_V3-Web/vendor/|g' _site/index.html
+          sed -i 's|href="/manifest.webmanifest"|href="/Samba_Pos_V3-Web/manifest.webmanifest"|g' _site/index.html
+          sed -i 's|href="/icons/|href="/Samba_Pos_V3-Web/icons/|g' _site/index.html
+          sed -i 's|src="/assets/|src="/Samba_Pos_V3-Web/assets/|g' _site/index.html
+
+          # Create a .nojekyll file to bypass Jekyll processing
+          touch _site/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
