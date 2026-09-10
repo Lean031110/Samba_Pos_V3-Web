@@ -32,7 +32,6 @@ jobs:
     name: Build Pages demo
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true  # Pages may not be enabled yet — don't block CI
 
     steps:
       - uses: actions/checkout@v4
