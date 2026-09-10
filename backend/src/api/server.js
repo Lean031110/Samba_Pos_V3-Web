@@ -382,6 +382,18 @@ async function startServer() {
       if (callback) callback({ success: true });
     });
 
+    // unsubscribe:role — leave a role-based room (e.g., when navigating away
+    // from a view that subscribed to role:kitchen)
+    socket.on('unsubscribe:role', (role, callback) => {
+      if (!role || typeof role !== 'string') {
+        if (callback) callback({ success: false, error: 'Invalid role' });
+        return;
+      }
+      socket.leave(`role:${role}`);
+      log(LEVELS.DEBUG, `WS ${socket.id} (${socketUser.username}) left role:${role}`);
+      if (callback) callback({ success: true });
+    });
+
     // subscribe:ticket — join a ticket-specific room
     // Authorization: user must have pos.login permission
     // (In production, should also check if user has access to this specific ticket)

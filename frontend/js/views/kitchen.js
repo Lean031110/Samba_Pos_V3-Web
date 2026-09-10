@@ -50,6 +50,19 @@ const KitchenView = {
       window.App.toast('No se pueden cargar las estaciones de cocina: ' + err.message, 'error');
       this._stations = [];
     }
+    // Subscribe to the kitchen role room so we receive KitchenOrderAdded / Updated / Voided
+    // events. Without this, the KDS view would NOT receive realtime updates — the server
+    // only emits these events to the role:kitchen room (see server.js bridgeEventsToSocket).
+    if (window.socket && window.socket.connected) {
+      window.socket.emit('subscribe:role', 'kitchen');
+    } else {
+      // Socket not yet connected — retry in 1s (websocket-client polls every 3s)
+      setTimeout(() => {
+        if (window.socket && window.socket.connected) {
+          window.socket.emit('subscribe:role', 'kitchen');
+        }
+      }, 1500);
+    }
     await this.refresh();
     // Start timer refresh (every 1s for live timer display)
     if (this._timerInterval) clearInterval(this._timerInterval);
@@ -60,6 +73,10 @@ const KitchenView = {
   },
 
   unload() {
+    // Leave the kitchen role room when leaving the KDS view
+    if (window.socket && window.socket.connected) {
+      window.socket.emit('unsubscribe:role', 'kitchen');
+    }
     if (this._timerInterval) {
       clearInterval(this._timerInterval);
       this._timerInterval = null;
