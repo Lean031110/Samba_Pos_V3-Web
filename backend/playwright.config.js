@@ -47,13 +47,19 @@ module.exports = defineConfig({
     {
       name: 'chromium',
       use: { browserName: 'chromium' },
-      testIgnore: /screenshots\.spec\.js/,  // Screenshots run separately
+      testIgnore: /screenshots\.spec\.js|visual-regression\.spec\.js/,  // Screenshots + visual run separately
     },
     {
       name: 'screenshots',
       use: { browserName: 'chromium' },
       testMatch: /screenshots\.spec\.js/,
       retries: 0,  // No retries for screenshots — they are documentation, not functional tests
+    },
+    {
+      name: 'visual',
+      use: { browserName: 'chromium' },
+      testMatch: /visual-regression\.spec\.js/,
+      retries: 0,  // A visual diff is deterministic — retrying only hides a real regression
     },
   ],
   // Run seed before all tests (migrations run automatically in server startup)
