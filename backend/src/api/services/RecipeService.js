@@ -304,6 +304,184 @@ class RecipeService {
     return { recipeId, isActive: false };
   }
 
+  // ===================================================================
+  // BLOQUE D — Versionado de recetas
+  // ===================================================================
+
+  /**
+   * Save a new version of a recipe.
+   *
+   * Flow:
+   *   1. Snapshot current RecipeItems as JSON (for audit)
+   *   2. Create RecipeVersions row with next VersionNumber
+   *   3. Update Recipes.ActiveVersionId to the new version
+   *   4. Replace RecipeItems with the new ones (tagged with VersionId)
+   *
+   * This means each version's items are preserved as a snapshot in
+   * RecipeVersions.Snapshot (JSON), and the live items in RecipeItems
+   * always reflect the active version.
+   *
+   * @param {number} menuItemPortionId
+   * @param {Array<{ingredientId, quantity, unitId}>} items
+   * @param {number} fixedCost
+   * @param {string} [label] — optional human-readable label 'v2 — sin cebolla'
+   * @param {number} [userId]
+   * @param {trx} [trx]
+   */
+  async saveRecipeVersion(menuItemPortionId, items, fixedCost = 0, label = null, userId = 0, trx = null) {
+    const conn = this._conn(trx);
+    if (!Array.isArray(items)) throw new ValidationError('items must be an array');
+    if (items.length === 0 && fixedCost === 0) {
+      throw new ValidationError('Recipe must have at least one item or a non-zero fixedCost');
+    }
+    for (const item of items) {
+      if (!item.ingredientId) throw new ValidationError('each item must have ingredientId');
+      if (typeof item.quantity !== 'number' || item.quantity <= 0) {
+        throw new ValidationError('each item quantity must be a positive number');
+      }
+      if (!item.unitId) throw new ValidationError('each item must have unitId');
+    }
+
+    // Find the recipe (or create one if missing)
+    let recipe = await conn('Recipes').where({ MenuItemPortionId: menuItemPortionId, IsActive: 1 }).first();
+    if (!recipe) {
+      const [newRecipeId] = await conn('Recipes').insert({
+        MenuItemPortionId: menuItemPortionId, FixedCost: fixedCost, IsActive: 1,
+      });
+      recipe = await conn('Recipes').where({ Id: newRecipeId }).first();
+    }
+
+    // Compute next version number
+    const lastVersion = await conn('RecipeVersions')
+      .where({ RecipeId: recipe.Id })
+      .orderBy('VersionNumber', 'desc')
+      .first();
+    const nextVersionNumber = (lastVersion?.VersionNumber || 0) + 1;
+
+    // Snapshot of current items (BEFORE we replace them) — only meaningful for v2+
+    // For v1 there are no prior items, so the snapshot is just the new items.
+    const snapshot = JSON.stringify({
+      items: items.map(i => ({
+        ingredientId: i.ingredientId,
+        quantity: i.quantity,
+        unitId: i.unitId,
+      })),
+      fixedCost,
+      label,
+      userId,
+    });
+
+    // Create the version row
+    const [versionId] = await conn('RecipeVersions').insert({
+      RecipeId: recipe.Id,
+      VersionNumber: nextVersionNumber,
+      Label: label || `v${nextVersionNumber}`,
+      Snapshot: snapshot,
+      CreatedBy: userId,
+    });
+
+    // Delete existing RecipeItems (we replace with new version-tagged items)
+    await conn('RecipeItems').where({ RecipeId: recipe.Id }).del();
+
+    // Insert new items tagged with VersionId
+    for (const item of items) {
+      await conn('RecipeItems').insert({
+        RecipeId: recipe.Id,
+        IngredientId: item.ingredientId,
+        Quantity: item.quantity,
+        UnitId: item.unitId,
+        VersionId: versionId,
+      });
+    }
+
+    // Update recipe's active version + fixed cost
+    await conn('Recipes').where({ Id: recipe.Id }).update({
+      ActiveVersionId: versionId,
+      FixedCost: fixedCost,
+    });
+
+    const totalCost = await this.calculateRecipeCost(recipe.Id, trx);
+
+    return {
+      recipeId: recipe.Id,
+      versionId,
+      versionNumber: nextVersionNumber,
+      label: label || `v${nextVersionNumber}`,
+      itemCount: items.length,
+      fixedCost: Number(fixedCost),
+      totalCost,
+    };
+  }
+
+  /**
+   * Get the full version history of a recipe.
+   *
+   * @param {number} menuItemPortionId
+   * @param {trx} [trx]
+   */
+  async getRecipeVersions(menuItemPortionId, trx = null) {
+    const conn = this._conn(trx);
+    const recipe = await conn('Recipes').where({ MenuItemPortionId: menuItemPortionId, IsActive: 1 }).first();
+    if (!recipe) return { recipe: null, versions: [] };
+
+    const versions = await conn('RecipeVersions')
+      .where({ RecipeId: recipe.Id })
+      .leftJoin('Users', 'RecipeVersions.CreatedBy', 'Users.Id')
+      .select(
+        'RecipeVersions.Id', 'RecipeVersions.VersionNumber', 'RecipeVersions.Label',
+        'RecipeVersions.Snapshot', 'RecipeVersions.CreatedAt',
+        'Users.Name as CreatedByName'
+      )
+      .orderBy('RecipeVersions.VersionNumber', 'desc');
+
+    return {
+      recipe: { Id: recipe.Id, ActiveVersionId: recipe.ActiveVersionId, FixedCost: recipe.FixedCost },
+      activeVersionId: recipe.ActiveVersionId,
+      versions: versions.map(v => ({
+        id: v.Id,
+        versionNumber: v.VersionNumber,
+        label: v.Label,
+        snapshot: v.Snapshot ? JSON.parse(v.Snapshot) : null,
+        createdAt: v.CreatedAt,
+        createdByName: v.CreatedByName,
+        isActive: v.Id === recipe.ActiveVersionId,
+      })),
+    };
+  }
+
+  /**
+   * Restore a previous version: copies its snapshot into a NEW version
+   * and makes that the active one. The original version is preserved
+   * as-is (audit integrity — versions are immutable).
+   *
+   * @param {number} menuItemPortionId
+   * @param {number} versionId
+   * @param {string} [label]
+   * @param {number} [userId]
+   * @param {trx} [trx]
+   */
+  async restoreVersion(menuItemPortionId, versionId, label = null, userId = 0, trx = null) {
+    const conn = this._conn(trx);
+    const recipe = await conn('Recipes').where({ MenuItemPortionId: menuItemPortionId, IsActive: 1 }).first();
+    if (!recipe) throw new NotFoundError(`Recipe for portion ${menuItemPortionId} not found`);
+    const version = await conn('RecipeVersions').where({ Id: versionId, RecipeId: recipe.Id }).first();
+    if (!version) throw new NotFoundError(`Version ${versionId} not found in recipe ${recipe.Id}`);
+
+    const snapshot = JSON.parse(version.Snapshot || '{}');
+    if (!Array.isArray(snapshot.items)) {
+      throw new ValidationError('Version snapshot is malformed — cannot restore');
+    }
+
+    return this.saveRecipeVersion(
+      menuItemPortionId,
+      snapshot.items,
+      snapshot.fixedCost || 0,
+      label || `Restored from v${version.VersionNumber}`,
+      userId,
+      trx
+    );
+  }
+
   /**
    * Get a cost summary for ALL menu items — used by the admin dashboard
    * to surface high-level profitability.

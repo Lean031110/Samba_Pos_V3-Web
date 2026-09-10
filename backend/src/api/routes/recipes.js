@@ -141,4 +141,58 @@ router.delete('/:recipeId',
     } catch (err) { next(err); }
   });
 
+// =====================================================================
+// BLOQUE D — Versionado de recetas
+// =====================================================================
+
+// GET /api/recipes/by-portion/:portionId/versions — version history
+router.get('/by-portion/:portionId/versions', requirePermission('recipes.view'), async (req, res, next) => {
+  try {
+    const portionId = parseInt(req.params.portionId, 10);
+    if (isNaN(portionId)) throw new ValidationError('portionId must be a number');
+    const result = await recipeService.getRecipeVersions(portionId);
+    res.json({ data: result });
+  } catch (err) { next(err); }
+});
+
+// POST /api/recipes/by-portion/:portionId/versions — save new version
+// Body: { items, fixedCost, label }
+router.post('/by-portion/:portionId/versions',
+  requirePermission('recipes.edit'),
+  auditLog('recipe.saveVersion', 'RecipeVersion'),
+  async (req, res, next) => {
+    try {
+      const portionId = parseInt(req.params.portionId, 10);
+      if (isNaN(portionId)) throw new ValidationError('portionId must be a number');
+      const { items, fixedCost, label } = req.body || {};
+      const result = await withTransaction(async (trx) => {
+        return recipeService.saveRecipeVersion(
+          portionId, items || [], fixedCost || 0, label, req.user?.userId || 0, trx
+        );
+      });
+      res.status(201).json({ data: result });
+    } catch (err) { next(err); }
+  });
+
+// POST /api/recipes/by-portion/:portionId/restore/:versionId — restore a previous version
+router.post('/by-portion/:portionId/restore/:versionId',
+  requirePermission('recipes.edit'),
+  auditLog('recipe.restoreVersion', 'RecipeVersion'),
+  async (req, res, next) => {
+    try {
+      const portionId = parseInt(req.params.portionId, 10);
+      const versionId = parseInt(req.params.versionId, 10);
+      if (isNaN(portionId) || isNaN(versionId)) {
+        throw new ValidationError('portionId and versionId must be numbers');
+      }
+      const { label } = req.body || {};
+      const result = await withTransaction(async (trx) => {
+        return recipeService.restoreVersion(
+          portionId, versionId, label, req.user?.userId || 0, trx
+        );
+      });
+      res.status(201).json({ data: result });
+    } catch (err) { next(err); }
+  });
+
 module.exports = router;
