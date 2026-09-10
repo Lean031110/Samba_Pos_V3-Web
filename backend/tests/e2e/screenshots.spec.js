@@ -222,7 +222,7 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await ensureDemoTables();
     await loginViaUI(page);
     // After login we're on the dashboard already (refresh runs on entry).
-    await page.waitForSelector('#dashboard-grid .table-tile', { timeout: 10000 });
+    await page.waitForSelector('.kpi-card', { timeout: 10000 });  // BLOQUE N: dashboard = KPIs
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(SHOTS, '02-dashboard.png'), fullPage: false });
   });
@@ -243,7 +243,7 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await page.evaluate(() => window.App.navigate('pos'));
     await page.waitForSelector('#view-pos.is-active', { timeout: 5000 });
     // Wait for the products grid to render at least one flex-button.
-    await page.waitForSelector('#pos-products-grid flex-button', { timeout: 10000 });
+    await page.waitForSelector('#pos-products-grid .product-card', { timeout: 10000 });
     await page.waitForTimeout(500);
     await page.screenshot({ path: path.join(SHOTS, '04-pos-with-products.png'), fullPage: false });
   });
@@ -256,7 +256,7 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await page.evaluate(() => window.App.navigate('pos'));
     await page.waitForSelector('#view-pos.is-active', { timeout: 5000 });
     await createTicketInStore(page, product.Id, [2, 1, 1]);
-    await page.waitForSelector('#pos-orders-list .ticket-item', { timeout: 5000 });
+    await page.waitForSelector('#pos-orders-list .orderline', { timeout: 5000 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, '05-ticket-with-orders.png'), fullPage: false });
   });
@@ -267,11 +267,12 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await loginViaUI(page);
     await page.evaluate(() => window.App.navigate('pos'));
     await page.waitForSelector('#view-pos.is-active', { timeout: 5000 });
-    await page.waitForSelector('#pos-products-grid flex-button', { timeout: 10000 });
+    await page.waitForSelector('#pos-products-grid .product-card', { timeout: 10000 });
     // Sanity-check the command bar is fully rendered before capturing.
-    const labels = await page.locator('#pos-cmdbar flex-button').allTextContents();
-    expect(labels.some(t => t.includes('Cobrar'))).toBeTruthy();
+    const labels = await page.locator('#pos-cmdbar .pos-cmd').allTextContents();
     expect(labels.some(t => t.includes('Nota'))).toBeTruthy();
+    expect(labels.some(t => t.includes('Descuento'))).toBeTruthy();
+    await expect(page.locator('#pos-pay-btn')).toBeVisible();
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(SHOTS, '06-command-bar.png'), fullPage: false });
   });
@@ -314,7 +315,7 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await page.evaluate(() => window.App.views.pos.pay());
     await page.waitForSelector('#view-payment.is-active', { timeout: 5000 });
     // Wait for payment type buttons to be fetched from /api/payment-types.
-    await page.waitForSelector('#payment-types flex-button', { timeout: 5000 });
+    await page.waitForSelector('#payment-types .pm-btn', { timeout: 5000 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, '08-payment.png'), fullPage: false });
   });
@@ -395,7 +396,7 @@ test.describe('Screenshots documentales — SambaPos_LBA', () => {
     await loginViaUI(page);
     await page.evaluate(() => window.App.navigate('kitchen'));
     await page.waitForSelector('#view-kitchen.is-active', { timeout: 5000 });
-    await page.waitForSelector('.kds-toolbar', { timeout: 5000 });
+    await page.waitForSelector('.kds-stagebar', { timeout: 5000 }); // BLOQUE N: KDS rediseñado
     // Give the KDS a moment to fetch + render the active orders.
     await page.waitForTimeout(1500);
     await page.screenshot({ path: path.join(SHOTS, '10-kds.png'), fullPage: false });
