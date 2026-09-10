@@ -45,10 +45,13 @@ const MASK_SELECTORS = [
 ];
 
 // toHaveScreenshot's mask requires Locator objects (not raw selectors).
+// maxDiffPixelRatio 2%: headroom for cross-environment antialiasing
+// (text-heavy screens diff ~1-1.5% between font rasterizations); real
+// visual regressions (layout breaks, missing sections) are 10%+.
 const buildShot = (page) => ({
   animations: 'disabled',
   caret: 'hide',
-  maxDiffPixelRatio: 0.01,
+  maxDiffPixelRatio: 0.02,
   threshold: 0.2,
   style: VISUAL_STYLE,
   mask: MASK_SELECTORS.map((sel) => page.locator(sel)),

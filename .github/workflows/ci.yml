@@ -144,7 +144,9 @@ jobs:
         working-directory: backend
         env:
           SKIP_E2E: '1'
-        run: bash scripts/run-all-tests.sh | tee /tmp/unit-tests.log
+        run: |
+          set -o pipefail
+          bash scripts/run-all-tests.sh | tee /tmp/unit-tests.log
 
       - name: Fail CI on any unit test failure
         working-directory: backend
@@ -221,11 +223,18 @@ jobs:
 
       - name: Run E2E tests (functional — GATE)
         working-directory: backend
-        run: npx playwright test --project=chromium --reporter=line 2>&1 | tee /tmp/e2e-tests.log
+        # NOTE: `set -o pipefail` is MANDATORY here — without it, `| tee`
+        # swallows playwright's exit code and a FAILING suite shows a
+        # green step (exactly the bug PR #9 exists to kill).
+        run: |
+          set -o pipefail
+          npx playwright test --project=chromium --reporter=line 2>&1 | tee /tmp/e2e-tests.log
 
       - name: Run screenshot tests (documentation + visual baseline — GATE)
         working-directory: backend
-        run: npx playwright test --project=screenshots --reporter=line 2>&1 | tee /tmp/e2e-screenshots.log
+        run: |
+          set -o pipefail
+          npx playwright test --project=screenshots --reporter=line 2>&1 | tee /tmp/e2e-screenshots.log
 
       # -----------------------------------------------------------------
       # Visual regression (PR #9): pixel baseline for login, dashboard,
@@ -244,7 +253,9 @@ jobs:
 
       - name: Run visual regression tests (GATE)
         working-directory: backend
-        run: npx playwright test --project=visual --reporter=line 2>&1 | tee /tmp/e2e-visual.log
+        run: |
+          set -o pipefail
+          npx playwright test --project=visual --reporter=line 2>&1 | tee /tmp/e2e-visual.log
 
       - name: Upload visual diff report on failure
         if: failure()
@@ -266,6 +277,7 @@ jobs:
             echo '```'
             echo "functional: $(grep -oE '[0-9]+ passed \([0-9.]+m?\)' /tmp/e2e-tests.log | tail -1)"
             echo "screenshots: $(grep -oE '[0-9]+ passed \([0-9.]+m?\)' /tmp/e2e-screenshots.log | tail -1)"
+            echo "visual: $(grep -oE '[0-9]+ passed \([0-9.]+m?\)' /tmp/e2e-visual.log | tail -1)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
