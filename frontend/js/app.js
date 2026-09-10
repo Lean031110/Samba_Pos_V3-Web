@@ -30,6 +30,25 @@ const App = {
       PushClient.init();
     }
 
+    // BLOQUE I — Listen for offline sync auth-expired events
+    // When JWT expires during offline sync, show a toast + redirect to login
+    window.addEventListener('offline:auth-expired', (e) => {
+      const msg = e.detail?.message || 'Tu sesión ha expirado durante la sincronización.';
+      this.toast(msg, 'error');
+      // Navigate to login (the sync is paused — user must re-login to resume)
+      Api.setToken(null);
+      this.navigate('login');
+    });
+
+    // BLOQUE I — Resume offline sync after successful login
+    // When the user logs in again, resume the paused sync
+    window.addEventListener('store:state', (e) => {
+      const state = e.detail?.state;
+      if (state?.currentUser && window.OfflineQueue && OfflineQueue._syncPaused) {
+        OfflineQueue.resumeSync();
+      }
+    });
+
     // Expose globally for inline onclick handlers
     window.App = this;
   },
