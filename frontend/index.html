@@ -21,6 +21,7 @@
 
   <!-- App styles -->
   <link rel="stylesheet" href="/css/reset.css">
+  <link rel="stylesheet" href="/css/design-system.css">
   <link rel="stylesheet" href="/css/variables.css">
   <link rel="stylesheet" href="/css/layout.css">
   <link rel="stylesheet" href="/css/components.css">
@@ -237,9 +238,21 @@
     <!-- =========================================================== -->
     <!-- Footer                                                       -->
     <!-- =========================================================== -->
-    <footer class="app-footer no-select">
-      <span>SambaPos_LBA · Terminal: <strong>Servidor</strong></span>
-      <span id="footer-status">Listo</span>
+    <!-- Footer global — info técnica siempre visible (Odoo style)   -->
+    <!-- =========================================================== -->
+    <footer class="ds-footer no-select">
+      <div class="ds-footer__section">
+        <span class="ds-footer__item">LBApos <strong>0.5.0</strong></span>
+        <span class="ds-footer__item">Estación: <strong id="footer-station">—</strong></span>
+        <span class="ds-footer__item">Servidor: <strong id="footer-server">localhost:3001</strong></span>
+      </div>
+      <div class="ds-footer__section">
+        <span class="ds-footer__item ds-conn" id="footer-conn">
+          <span class="ds-conn__dot"></span>
+          <span id="footer-conn-label">Conectado</span>
+        </span>
+        <span class="ds-footer__item" id="footer-mode">Modo: <strong>POS</strong></span>
+      </div>
     </footer>
 
     <!-- =========================================================== -->
