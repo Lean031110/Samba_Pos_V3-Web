@@ -336,6 +336,14 @@ window.DEMO_API = {
     if (path === '/api/cash-sessions' && method === 'GET') {
       return { data: data.cashSessions, count: data.cashSessions.length };
     }
+    if (path.match(/^\/api\/cash-sessions\/\d+\/events$/) && method === 'GET') {
+      return { data: [
+        { Id: 1, EventType: 'OPEN',    Amount: 100.00, Note: 'Apertura inicial', UserId: 3, CreatedAt: new Date(Date.now() - 7200000).toISOString() },
+        { Id: 2, EventType: 'SALE',    Amount: 22.50,  Note: 'Ticket T-001',     UserId: 2, CreatedAt: new Date(Date.now() - 3600000).toISOString() },
+        { Id: 3, EventType: 'SALE',    Amount: 15.00,  Note: 'Ticket T-002',     UserId: 2, CreatedAt: new Date(Date.now() - 1800000).toISOString() },
+        { Id: 4, EventType: 'PAYOUT',  Amount: -20.00, Note: 'Compra insumos',   UserId: 3, CreatedAt: new Date().toISOString() },
+      ], count: 4 };
+    }
 
     // Reports
     if (path.startsWith('/api/reports/sales') && method === 'GET') {

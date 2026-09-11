@@ -1553,6 +1553,9 @@ const AdminView = {
             <div><span>Usuario:</span> <strong>${this._escape(openSession.OpenedByName || '—')}</strong></div>
           </div>
           <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            ${this._btn('Retiro (payout)', '', 'fa-money-bill-transfer', `window.AdminView._cashPayout(${openSession.Id})`)}
+            ${this._btn('Transferencia', '', 'fa-arrow-right-arrow-left', `window.AdminView._cashTransfer(${openSession.Id})`)}
+            ${this._btn('Ver eventos', '', 'fa-list', `window.AdminView._cashEvents(${openSession.Id})`)}
             ${this._btn('Cerrar caja', 'kds-btn--void', 'fa-lock', `window.AdminView._closeCash(${openSession.Id})`)}
           </div>
         </div>
@@ -1609,6 +1612,60 @@ const AdminView = {
     } catch (err) {
       this._error('No se pudo cerrar la caja: ' + (err.message || err));
     }
+  },
+
+  async _cashPayout(sessionId) {
+    const amount = prompt('Monto del retiro:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Motivo del retiro:', '') || '';
+    try {
+      await Api.request('POST', `/api/cash-sessions/${sessionId}/payout`, { amount: amt, note });
+      this._toast('Retiro registrado', 'success');
+      await this._renderCash();
+    } catch (err) {
+      this._error('No se pudo registrar retiro: ' + (err.message || err));
+    }
+  },
+
+  async _cashTransfer(sessionId) {
+    const amount = prompt('Monto a transferir:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Destino/nota:', '') || '';
+    try {
+      await Api.request('POST', `/api/cash-sessions/${sessionId}/transfer`, { amount: amt, note });
+      this._toast('Transferencia registrada', 'success');
+      await this._renderCash();
+    } catch (err) {
+      this._error('No se pudo registrar transferencia: ' + (err.message || err));
+    }
+  },
+
+  async _cashEvents(sessionId) {
+    this._loading('Cargando eventos de caja…');
+    let events = [];
+    try {
+      const res = await Api.request('GET', `/api/cash-sessions/${sessionId}/events`);
+      events = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar eventos: ' + (err.message || err));
+      return;
+    }
+    const rows = events.length ? events.map(e => `
+      <tr>
+        <td><code>${this._escape(e.EventType || e.Type || '—')}</code></td>
+        <td class="admin-num">$${Number(e.Amount || 0).toFixed(2)}</td>
+        <td>${this._escape(e.Note || '—')}</td>
+        <td>${this._formatDate(e.CreatedAt)}</td>
+        <td>${e.UserId || '—'}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5" class="admin-empty">Sin eventos</td></tr>';
+    this._setContent(this._header(`Eventos de Caja #${sessionId}`, '') +
+      this._table(['Tipo', 'Monto', 'Nota', 'Fecha', 'Usuario'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a caja', '', 'fa-arrow-left', "window.AdminView.showTab('cash')")}</div>`);
   },
 
   // ===================================================================
