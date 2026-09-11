@@ -206,19 +206,23 @@ jobs:
           test -n "$ANDROID_KEY_ALIAS"        || { echo "FAIL: secret ANDROID_KEY_ALIAS is empty"; exit 1; }
           test -n "$ANDROID_STORE_PASSWORD"   || { echo "FAIL: secret ANDROID_STORE_PASSWORD is empty"; exit 1; }
           test -n "$ANDROID_KEY_PASSWORD"     || { echo "FAIL: secret ANDROID_KEY_PASSWORD is empty"; exit 1; }
-          # ⚠️ The injected store.file path is resolved relative to the
-          # APP MODULE (android/app/), NOT to the gradle root project.
-          # Writing it to android/ was the bug that made signReleaseBundle
-          # fail with "storeFile ... doesn't exist" (caught by this gate
-          # the first time the release channel ran for real — PR #11).
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > app/release.keystore
-          KS_SIZE=$(stat -c%s app/release.keystore)
+          # ⚠️ android.injected.signing.store.file MUST be an ABSOLUTE
+          # path: relative paths are resolved inconsistently by AGP
+          # (input validation → relative to the app module;
+          # validateSigningRelease → relative to the gradle DAEMON cwd).
+          # Run 1 of this release channel failed with 'storeFile ...
+          # doesn't exist' (module), run 2 with 'Keystore file
+          # /home/runner/.gradle/daemon/.../release.keystore not
+          # found' — both real, both fixed by absoluteness (PR #11).
+          KS_FILE="$(pwd)/app/release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KS_FILE"
+          KS_SIZE=$(stat -c%s "$KS_FILE")
           if [ "$KS_SIZE" -lt 1000 ]; then
             echo "FAIL: decoded keystore is only ${KS_SIZE} bytes — ANDROID_KEYSTORE_BASE64 is not a valid keystore"
             exit 1
           fi
           cat >> gradle.properties << EOF
-          android.injected.signing.store.file=release.keystore
+          android.injected.signing.store.file=$KS_FILE
           android.injected.signing.store.password=$ANDROID_STORE_PASSWORD
           android.injected.signing.key.alias=$ANDROID_KEY_ALIAS
           android.injected.signing.key.password=$ANDROID_KEY_PASSWORD

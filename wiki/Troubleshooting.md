@@ -164,25 +164,32 @@ Checklist en orden:
 
 ---
 
-### 12. `signReleaseBundle`: "storeFile ... doesn't exist"
+### 12. Release AAB: fallas de firma por ruta del keystore
 
-**Síntoma**: el job `Release AAB` falla en
-`:app:signReleaseBundle (FinalizeBundleTask)` con
-`storeFile specifies file '.../android/app/release.keystore' which doesn't exist`.
+**Síntomas (dos runs distintos, dos errores distintos)**:
+- Run 1: `:app:signReleaseBundle` →
+  `storeFile specifies file '.../android/app/release.keystore' which doesn't exist`
+- Run 2: `:app:validateSigningRelease` →
+  `Keystore file '/home/runner/.gradle/daemon/8.2.1/release.keystore' not found`
 
-**Causa**: la propiedad inyectada
-`android.injected.signing.store.file` se resuelve relativa al
-**módulo app** (`android/app/`), NO al proyecto gradle raíz. El
-workflow escribía el keystore en `android/` (cwd) y Gradle lo buscaba
-en `android/app/`. El bug existía desde el diseño del canal release
-pero **nunca se había visto** porque los secrets no estaban
-configurados (el job saltaba) — apareció la primera vez que el canal
-corrió de verdad (PR #11).
+**Causa raíz**: la propiedad inyectada
+`android.injected.signing.store.file` con ruta RELATIVA se resuelve de
+forma **inconsistente dentro de AGP**: la validación de inputs la
+resuelve relativa al módulo app (`android/app/`), mientras
+`validateSigningRelease` la resuelve relativa al **cwd del daemon de
+Gradle**. Estas propiedades fueron diseñadas para Android Studio, que
+siempre pasa rutas absolutas — las relativas son comportamiento
+indefinido.
 
-**Fix**: escribir el keystore en `app/release.keystore` (o usar ruta
-`../../<repo-root>/<path>` en builds locales). El workflow ya está
-corregido; la lección: **un canal de release sin secrets configurados
-nunca ha sido probado**.
+**Fix**: pasar SIEMPRE una ruta **absoluta**
+(`KS_FILE="$(pwd)/app/release.keystore"` en CI; `KS="$(pwd)/..."` en
+local). El workflow ya está corregido.
+
+**Contexto**: el bug existía desde el diseño del canal release pero no
+se había visto porque **nunca había corrido** (sin secrets
+configurados, el job saltaba). Apareció las dos primeras veces que el
+canal corrió de verdad (PR #11). Lección: un canal de release sin
+secretos configurados nunca fue probado.
 
 ---
 

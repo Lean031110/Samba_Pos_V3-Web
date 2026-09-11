@@ -86,9 +86,10 @@ CLI: `gh secret set ANDROID_KEYSTORE_BASE64 < keystore-base64.txt` etc.
 
 ```bash
 bash scripts/gen-release-keystore.sh release-signing/   # solo la 1ª vez
+KS="$(pwd)/release-signing/lba-release.jks"             # ¡RUTA ABSOLUTA!
 cd android
 cat >> gradle.properties << EOF
-android.injected.signing.store.file=../../release-signing/lba-release.jks
+android.injected.signing.store.file=$KS
 android.injected.signing.store.password=<store>
 android.injected.signing.key.alias=lba-release
 android.injected.signing.key.password=<key>
@@ -96,11 +97,11 @@ EOF
 ./gradlew bundleRelease
 ```
 
-> ⚠️ El path inyectado de `store.file` se resuelve relativo al
-> **módulo app** (`android/app/`), NO al proyecto gradle raíz: desde
-> `android/`, el keystore en la raíz del repo queda en `../../<ruta>`.
-> Si lo pones mal, `signReleaseBundle` falla con
-> `storeFile ... doesn't exist` (bug real — ver
+> ⚠️ `android.injected.signing.store.file` debe ser una ruta
+> **absoluta**: AGP resuelve las relativas de forma inconsistente
+> (validación de inputs → módulo app; `validateSigningRelease` → cwd
+> del daemon de Gradle) — rompió el canal release dos veces antes de
+> encontrar la causa raíz (ver
 > [Troubleshooting](Troubleshooting)).
 
 ### Publicar en Google Play
