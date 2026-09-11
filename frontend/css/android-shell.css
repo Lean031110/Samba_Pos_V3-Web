@@ -1,0 +1,239 @@
+/* =====================================================================
+   android-shell.css — Android (Capacitor) + tablet shell enhancements
+   =====================================================================
+   Bloque 6 — SambaPos_LBA Android shell
+
+   Detects the runtime via:
+     - html.is-android      → Capacitor Android WebView
+     - html.is-ios          → Capacitor iOS WebView (future)
+     - html.is-tablet       → width ≥ 768px
+     - html.is-desktop      → width ≥ 1280px
+
+   All these flags are toggled by frontend/js/services/android-shell.js.
+
+   Key features:
+     1. Safe-area insets: notch, navigation bar, status bar.
+     2. Touch target enforcement (≥48px).
+     3. Status bar background = brand color.
+     4. No text selection on UI chrome (already in mobile.css, reinforced).
+     5. Native back button → App.navigate('back') (handled in JS).
+     6. Tablet-specific density tuning (POS product grid, KDS column count).
+     7. Kiosk-mode: hide header + footer when html.is-kiosk.
+     8. Print orientation: when printing from tablet, hide all non-essential.
+   ===================================================================== */
+
+/* Status bar color (Capacitor) — also set in manifest, but reinforce via CSS */
+:root {
+  --lba-safe-top: env(safe-area-inset-top, 0px);
+  --lba-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --lba-safe-left: env(safe-area-inset-left, 0px);
+  --lba-safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* =====================================================================
+   Android shell — global overrides
+   ===================================================================== */
+html.is-android, html.is-ios {
+  /* Disable text size adjust — we manage our own font sizing */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Disable tap highlight (blue flash on touch) */
+  -webkit-tap-highlight-color: transparent;
+  /* Disable text selection on chrome — user must explicitly enable */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html.is-android body {
+  /* White background to avoid black flash on cold start */
+  background: var(--lba-bg-app, #f0eeee);
+  /* Allow overscroll for natural bounce */
+  overscroll-behavior: contain;
+}
+
+/* Inputs/textareas can be selected */
+html.is-android input, html.is-android textarea, html.is-android [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Status bar (top safe-area) */
+html.is-android .app-header,
+html.is-android .ds-footer {
+  padding-top: var(--lba-safe-top);
+  padding-bottom: var(--lba-safe-bottom);
+  padding-left: var(--lba-safe-left);
+  padding-right: var(--lba-safe-right);
+}
+
+/* =====================================================================
+   Tablet form factor — adjust grid densities
+   ===================================================================== */
+html.is-tablet .pos-products__grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+html.is-tablet .pos-products__grid .product-btn {
+  min-height: 88px;
+  font-size: 14px;
+}
+
+/* KDS column count adapts to width */
+html.is-tablet .kds-column {
+  flex: 0 0 25%;
+}
+html.is-tablet.is-portrait .kds-column {
+  flex: 0 0 50%;
+}
+html.is-tablet.is-landscape .kds-column {
+  flex: 0 0 25%;
+}
+
+/* Admin sidebar — fixed on tablet, full-width on phone */
+html.is-tablet .ds-sidebar {
+  width: var(--lba-sidebar-w, 240px);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+html.is-tablet.is-portrait .ds-sidebar {
+  width: 200px;
+}
+
+/* Touch targets — enforce minimum 44px (Apple HIG) / 48px (Material) */
+html.is-android button,
+html.is-android .kds-btn,
+html.is-android .flex-button,
+html.is-android [role="button"] {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+/* Smaller targets only in dense tables — but never below 40px */
+html.is-android .admin-row-actions .kds-btn {
+  min-height: 36px;
+  min-width: 36px;
+  padding: 4px 8px;
+}
+
+/* =====================================================================
+   Kiosk mode — hide all chrome, fullscreen POS
+   ===================================================================== */
+html.is-kiosk .app-header,
+html.is-kiosk .ds-footer {
+  display: none;
+}
+html.is-kiosk .app-main {
+  padding: 0;
+}
+
+/* =====================================================================
+   Android boot splash — dark brand background before React/inits run
+   ===================================================================== */
+html.is-android body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--lba-blue-900, #044392);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 1;
+  animation: android-boot-fade 400ms ease-out 200ms forwards;
+}
+
+@keyframes android-boot-fade {
+  to { opacity: 0; visibility: hidden; }
+}
+
+/* Once App is ready, body has class .app-ready → kill splash immediately */
+html.is-android body.app-ready::before {
+  animation: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* =====================================================================
+   Native feedback — touch ripple-like effect on pressable elements
+   ===================================================================== */
+html.is-android .kds-btn:active,
+html.is-android .flex-button:active,
+html.is-android .product-btn:active {
+  transform: scale(0.97);
+  transition: transform 80ms ease-out;
+  background-color: var(--lba-blue-100, #dbeafe);
+}
+
+/* =====================================================================
+   Responsive scrollbars — invisible on touch, visible on desktop
+   ===================================================================== */
+html.is-android ::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+html.is-android ::-webkit-scrollbar-track {
+  background: transparent;
+}
+html.is-android ::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.15);
+  border-radius: 2px;
+}
+
+/* =====================================================================
+   Tablet landscape POS layout — widen products panel
+   ===================================================================== */
+html.is-tablet.is-landscape .pos-main {
+  grid-template-columns: 320px 1fr;
+}
+html.is-tablet.is-landscape .pos-products__grid {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+/* =====================================================================
+   Tablet portrait POS layout — stack orders below products
+   ===================================================================== */
+html.is-tablet.is-portrait .pos-main {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+}
+html.is-tablet.is-portrait .pos-orders {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+/* =====================================================================
+   Phone POS — minimal chrome
+   ===================================================================== */
+html.is-phone .pos-ticketinfo {
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+html.is-phone .pos-opentickets__tile {
+  min-width: 80px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+html.is-phone .pos-cmdbar {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+html.is-phone .pos-cmdbar .flex-button {
+  min-width: 70px;
+  font-size: 11px;
+}
+
+/* =====================================================================
+   Print styles — only receipt prints
+   ===================================================================== */
+@media print {
+  .app-header, .ds-footer, .pos-cmdbar, .pos-ticketinfo, .pos-opentickets,
+  .pos-categories, .pos-products__paging {
+    display: none !important;
+  }
+  body, html {
+    background: white !important;
+  }
+  .pos-main {
+    grid-template-columns: 1fr !important;
+  }
+}

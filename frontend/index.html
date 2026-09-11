@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="/css/layout.css">
   <link rel="stylesheet" href="/css/components.css">
   <link rel="stylesheet" href="/css/mobile.css">
+  <link rel="stylesheet" href="/css/android-shell.css">
 </head>
 <body>
   <div id="app">
@@ -305,6 +306,9 @@
                 <button class="ds-nav-item" data-admin-tab="system" onclick="window.App.views.admin.showTab('system')">
                   <i class="fa-solid fa-server"></i> <span>Sistema</span>
                 </button>
+                <button class="ds-nav-item" data-admin-tab="errors" onclick="window.App.views.admin.showTab('errors')">
+                  <i class="fa-solid fa-bug"></i> <span>Errores</span>
+                </button>
               </div>
             </nav>
           </aside>
@@ -353,11 +357,13 @@
   <!-- Scripts (loaded in order — no module bundler)               -->
   <!-- =========================================================== -->
   <script src="/js/components/flex-button.js"></script>
+  <script src="/js/services/android-shell.js"></script>
   <script src="/js/services/server-config.js"></script>
   <script src="/js/services/demo-data.js"></script>
   <script src="/js/services/api.js"></script>
   <script src="/js/services/pwa.js"></script>
   <script src="/js/services/push.js"></script>
+  <script src="/js/services/error-reporter.js"></script>
   <script src="/js/store/store.js"></script>
   <script src="/js/store/offlineQueue.js"></script>
   <script src="/js/store/websocket-client.js"></script>

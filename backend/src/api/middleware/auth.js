@@ -78,9 +78,13 @@ function verifyToken(token) {
  * Skips /auth/login (public) and non-/api routes (static files).
  */
 async function authenticate(req, res, next) {
-  // Skip auth for login route
+  // Skip auth for login route and error-reporting POST (Bloque 7 — pre-login errors must be reportable)
   const publicPaths = ['/auth/login'];
   if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) {
+    return next();
+  }
+  // POST /errors (client error reporting) is public
+  if (req.path === '/errors' && req.method === 'POST') {
     return next();
   }
 

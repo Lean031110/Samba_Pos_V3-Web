@@ -207,6 +207,7 @@ const AdminView = {
       case 'combos':    await this._renderCombos();     break;
       case 'transfers': await this._renderTransfers();  break;
       case 'system':    await this._renderSystem();     break;
+      case 'errors':    await this._renderErrors();     break;
       default:
         this._setContent('<div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-folder-open"></i></div><div class="ds-empty__title">Sección no disponible</div></div>');
     }
@@ -2877,6 +2878,127 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
     `);
+  },
+
+  // ===================================================================
+  // BLOQUE 7 — ERRORES (client-side error log viewer)
+  // ===================================================================
+
+  async _renderErrors() {
+    this._loading('Cargando errores…');
+    let errors = [];
+    let stats = null;
+    try {
+      const [e, s] = await Promise.all([
+        Api.request('GET', '/errors?limit=100'),
+        Api.request('GET', '/errors/stats').catch(() => ({ data: null })),
+      ]);
+      errors = e.data || [];
+      stats = s.data;
+    } catch (err) {
+      // Fall back to demo data if endpoint not available
+      this._error('No se pueden cargar errores: ' + (err.message || err));
+      return;
+    }
+    const clearBtn = this._btn('Limpiar logs', 'kds-btn--void', 'fa-trash', "window.AdminView._clearErrors()");
+    const refreshBtn = this._btn('Actualizar', '', 'fa-rotate', "window.AdminView._renderErrors()");
+    if (errors.length === 0) {
+      this._setContent(this._header('Errores de cliente', refreshBtn + clearBtn) +
+        '<div class="admin-empty"><i class="fa-solid fa-circle-check" style="font-size: 36px; color: var(--lba-success, #198754);"></i><br>No hay errores reportados. ¡Excelente!</div>');
+      return;
+    }
+    // Stats summary
+    const statsHtml = stats ? `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-chart-pie"></i> Resumen (últimas 24h)</h3>
+        <div class="admin-stats-grid">
+          <div class="admin-stat admin-stat--info">
+            <div class="admin-stat__num">${stats.last24h || 0}</div>
+            <div class="admin-stat__label">Errores 24h</div>
+          </div>
+          <div class="admin-stat">
+            <div class="admin-stat__num">${stats.total || 0}</div>
+            <div class="admin-stat__label">Total histórico</div>
+          </div>
+          ${Object.entries(stats.byPlatform || {}).map(([p, c]) => `
+            <div class="admin-stat">
+              <div class="admin-stat__num">${c}</div>
+              <div class="admin-stat__label">${this._escape(p)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+    const rows = errors.map(e => {
+      const typeColor = {
+        uncaught: 'admin-tag--danger',
+        unhandledrejection: 'admin-tag--danger',
+        'console.error': 'admin-tag--warning',
+        manual: 'admin-tag--info',
+      }[e.Type] || '';
+      return `
+        <tr>
+          <td><span class="admin-tag ${typeColor}">${this._escape(e.Type)}</span></td>
+          <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this._escape(e.Message)}">${this._escape(e.Message)}</td>
+          <td>${this._escape(e.View || '—')}</td>
+          <td>${this._escape(e.Platform || 'web')}</td>
+          <td>${this._formatDate(e.ServerTimestamp)}</td>
+          <td class="admin-row-actions">
+            ${this._btn('Ver', '', 'fa-eye', `window.AdminView._viewError(${e.Id})`)}
+          </td>
+        </tr>`;
+    }).join('');
+    this._setContent(this._header('Errores de cliente', refreshBtn + clearBtn) +
+      statsHtml + this._table(['Tipo', 'Mensaje', 'Vista', 'Plataforma', 'Fecha', 'Acciones'], rows));
+  },
+
+  async _viewError(id) {
+    try {
+      const res = await Api.request('GET', '/errors?limit=200');
+      const err = (res.data || []).find(e => e.Id === id);
+      if (!err) { this._toast('Error no encontrado', 'warn'); return; }
+      this._showModal('Detalle del error #' + err.Id, `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-circle-exclamation"></i> Información</h3>
+          <div class="admin-card-grid">
+            <div><span>Tipo:</span> <strong>${this._escape(err.Type)}</strong></div>
+            <div><span>Vista:</span> <strong>${this._escape(err.View || '—')}</strong></div>
+            <div><span>Usuario:</span> <strong>${err.UserId || '—'}</strong></div>
+            <div><span>Plataforma:</span> <strong>${this._escape(err.Platform || 'web')}</strong></div>
+            <div><span>Factor:</span> <strong>${this._escape(err.FormFactor || '—')}</strong></div>
+            <div><span>Evento:</span> <strong>${this._formatDate(err.EventTimestamp)}</strong></div>
+            <div><span>Servidor:</span> <strong>${this._formatDate(err.ServerTimestamp)}</strong></div>
+            <div><span>URL:</span> <code>${this._escape(err.Url || err.Href || '')}</code></div>
+          </div>
+        </div>
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-message"></i> Mensaje</h3>
+          <pre style="white-space: pre-wrap; word-wrap: break-word; background: var(--lba-blue-50, #eff6ff); padding: 10px; border-radius: 4px; font-size: 13px;">${this._escape(err.Message)}</pre>
+        </div>
+        ${err.Stack ? `
+          <div class="admin-card">
+            <h3><i class="fa-solid fa-code"></i> Stack trace</h3>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; background: var(--lba-blue-50, #eff6ff); padding: 10px; border-radius: 4px; font-size: 12px; max-height: 400px; overflow-y: auto;">${this._escape(err.Stack)}</pre>
+          </div>
+        ` : ''}
+        <div class="admin-modal-actions">
+          ${this._btn('Cerrar', '', '', "window.AdminView._closeModal()")}
+        </div>
+      `);
+    } catch (err) {
+      this._error('No se puede cargar el error: ' + (err.message || err));
+    }
+  },
+
+  async _clearErrors() {
+    if (!confirm('¿Borrar todos los logs de errores? Esta acción no se puede deshacer.')) return;
+    try {
+      await Api.request('DELETE', '/errors');
+      this._toast('Logs borrados', 'success');
+      await this._renderErrors();
+    } catch (err) {
+      this._error('No se pueden borrar: ' + (err.message || err));
+    }
   },
 };
 

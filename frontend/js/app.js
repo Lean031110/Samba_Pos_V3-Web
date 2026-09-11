@@ -85,6 +85,8 @@ const App = {
     if (target) {
       target.classList.add('is-active');
       window.store.setState({ currentView: viewName }, 'navigate');
+      // Bloque 7 — track current view for error reporter
+      if (window.ErrorReporter) window.ErrorReporter.setView(viewName);
       // Refresh data when entering certain views
       if (viewName === 'dashboard') DashboardView.refresh();
       if (viewName === 'pos') PosView.refresh();
@@ -162,6 +164,8 @@ const App = {
       window.store.setState({ currentUser: res.user }, 'logged-in');
       LoginView.reset();
       document.getElementById('header-user').textContent = res.user.name;
+      // Bloque 7 — track user for error reporter
+      if (window.ErrorReporter) window.ErrorReporter.setUserId(res.user.userId);
       // BLOQUE 2 — Role-based landing: navigate to the appropriate view
       const landingView = this._resolveLandingView(res.user);
       this.navigate(landingView);
@@ -176,6 +180,8 @@ const App = {
     Api.setToken(null);
     window.store.setState({ currentUser: null, currentTicket: null }, 'logged-out');
     document.getElementById('header-user').textContent = '—';
+    // Bloque 7 — clear user from error reporter
+    if (window.ErrorReporter) window.ErrorReporter.setUserId(null);
     this.navigate('login');
     this.toast('Sesión cerrada', 'info');
   },

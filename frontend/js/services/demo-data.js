@@ -335,6 +335,17 @@ window.DEMO_API = {
       ], count: 2 };
     }
 
+    // Errors (Bloque 7)
+    if (path === '/api/errors' && method === 'GET') {
+      return { data: [
+        { Id: 1, Type: 'uncaught', Message: 'Cannot read property "x" of undefined', View: 'pos', Platform: 'android', FormFactor: 'tablet', Orientation: 'landscape', ServerTimestamp: new Date(Date.now() - 3600000).toISOString(), EventTimestamp: new Date(Date.now() - 3600000).toISOString(), UserId: 2, Url: '/pos' },
+        { Id: 2, Type: 'console.error', Message: 'API timeout: /api/tickets/123', View: 'dashboard', Platform: 'web', FormFactor: 'desktop', Orientation: 'landscape', ServerTimestamp: new Date(Date.now() - 7200000).toISOString(), EventTimestamp: new Date(Date.now() - 7200000).toISOString(), UserId: 1, Url: '/dashboard' },
+      ], count: 2, total: 2 };
+    }
+    if (path === '/api/errors/stats' && method === 'GET') {
+      return { data: { last24h: 2, total: 5, byType: { uncaught: 1, 'console.error': 1 }, byPlatform: { android: 1, web: 1 } } };
+    }
+
     // Version
     if (path === '/version' && method === 'GET') {
       return data.version;
