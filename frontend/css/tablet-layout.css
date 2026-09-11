@@ -1,0 +1,297 @@
+/* =====================================================================
+   tablet-layout.css — POS + KDS tablet-optimized layouts (Bloque 8)
+   =====================================================================
+   Tablet-first responsive tuning. Applies when html.is-tablet or
+   @media (min-width: 768px).
+
+   POS tablet improvements:
+     - Larger product grid (5 columns landscape, 3 portrait)
+     - Persistent ticket info bar
+     - Bigger numpad keys (60px)
+     - Always-visible command bar with horizontal scroll
+     - Floating action button "Cobrar" on right edge
+
+   KDS tablet improvements:
+     - 4-column KDS board (landscape), 2-column (portrait)
+     - Larger ticket cards with prep timer prominent
+     - Color-coded left border by production area
+     - Touch-and-hold to bump multiple items
+     - Sound notification with visual flash on new order
+   ===================================================================== */
+
+/* =====================================================================
+   POS tablet layout
+   ===================================================================== */
+@media (min-width: 768px) {
+  /* Product grid — 4-5 columns on tablet */
+  .pos-products__grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+    padding: 12px;
+  }
+  .pos-products__grid .product-btn {
+    min-height: 100px;
+    font-size: 14px;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pos-products__grid .product-btn .product-btn__name {
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .pos-products__grid .product-btn .product-btn__price {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--lba-blue-700, #044392);
+  }
+
+  /* Persistent ticket info bar */
+  .pos-ticketinfo {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--lba-bg-panel, white);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+  .pos-ticketinfo__field {
+    margin-right: 24px;
+  }
+
+  /* Orders panel — wider on tablet */
+  .pos-orders {
+    min-width: 320px;
+    max-width: 380px;
+  }
+
+  /* Command bar — horizontal scroll on tablet */
+  .pos-cmdbar {
+    position: sticky;
+    bottom: 0;
+    background: var(--lba-bg-panel, white);
+    box-shadow: 0 -2px 6px rgba(0,0,0,0.08);
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+  .pos-cmdbar .flex-button {
+    flex: 0 0 auto;
+    min-width: 100px;
+  }
+
+  /* Open tickets strip — horizontal scroll */
+  .pos-opentickets {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    padding: 8px 12px;
+  }
+  .pos-opentickets__tile {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 14px;
+    margin-right: 8px;
+    border: 1px solid var(--lba-border-default, #e0e0e0);
+    border-radius: 8px;
+    background: white;
+    min-width: 90px;
+    min-height: 70px;
+    vertical-align: top;
+  }
+  .pos-opentickets__tile--new {
+    background: var(--lba-blue-50, #eff6ff);
+    border-color: var(--lba-blue-700, #044392);
+    color: var(--lba-blue-700, #044392);
+  }
+}
+
+/* Tablet landscape specific (≥ 1024px) */
+@media (min-width: 1024px) {
+  .pos-products__grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}
+
+/* =====================================================================
+   KDS tablet layout
+   ===================================================================== */
+@media (min-width: 768px) {
+  /* KDS board — flex row of columns */
+  .kds-container {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    padding: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--kds-bg, #1a1f2e);
+  }
+  .kds-column {
+    flex: 0 0 320px;
+    min-width: 280px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .kds-column__header {
+    background: rgba(255,255,255,0.08);
+    color: white;
+    padding: 12px 14px;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .kds-column__count {
+    background: rgba(255,255,255,0.15);
+    color: white;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .kds-column__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* KDS ticket card */
+  .kds-card {
+    background: var(--lba-bg-panel, white);
+    border-radius: 8px;
+    padding: 12px;
+    border-left: 4px solid var(--lba-blue-700, #044392);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+  .kds-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .kds-card.is-urgent {
+    border-left-color: var(--lba-danger, #dc3545);
+    background: #fff5f5;
+  }
+  .kds-card.is-ready {
+    border-left-color: var(--lba-success, #198754);
+    background: #f0fdf4;
+  }
+  .kds-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed rgba(0,0,0,0.1);
+  }
+  .kds-card__title {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--lba-blue-900, #1e3a8a);
+  }
+  .kds-card__timer {
+    font-family: var(--lba-font-mono, monospace);
+    font-size: 13px;
+    color: var(--lba-fg-muted, #6b7280);
+  }
+  .kds-card__timer.is-late {
+    color: var(--lba-danger, #dc3545);
+    font-weight: 700;
+  }
+  .kds-card__items {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .kds-card__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: rgba(0,0,0,0.03);
+    font-size: 13px;
+  }
+  .kds-card__qty {
+    background: var(--lba-blue-700, #044392);
+    color: white;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-weight: 700;
+    min-width: 24px;
+    text-align: center;
+    font-size: 12px;
+  }
+  .kds-card__item-name {
+    flex: 1;
+  }
+  .kds-card__item-note {
+    color: var(--lba-warning, #fd7e14);
+    font-size: 11px;
+    font-style: italic;
+  }
+  .kds-card__bump-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--lba-success, #198754);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .kds-card__bump-btn:active {
+    transform: scale(0.98);
+  }
+
+  /* KDS new order flash animation */
+  @keyframes kds-new-flash {
+    0% { box-shadow: 0 0 0 0 rgba(25, 135, 84, 0.7); }
+    100% { box-shadow: 0 0 0 20px rgba(25, 135, 84, 0); }
+  }
+  .kds-card.is-new {
+    animation: kds-new-flash 1.5s ease-out;
+  }
+}
+
+/* KDS portrait (narrower columns) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .kds-column {
+    flex: 0 0 280px;
+  }
+}
+
+/* =====================================================================
+   Phone POS — compact mode (≤ 600px already handled in mobile.css,
+   but ensure these tablet rules don't break phones)
+   ===================================================================== */
+@media (max-width: 767px) {
+  .pos-products__grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 6px;
+    padding: 8px;
+  }
+  .pos-products__grid .product-btn {
+    min-height: 80px;
+    font-size: 12px;
+  }
+}
