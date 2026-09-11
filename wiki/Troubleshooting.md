@@ -16,7 +16,8 @@ Cada entrada documenta un problema REAL que ocurrió y cómo se cerró
 9. [API 404 en `actions/public-key` (secrets por API)](#9-api-404-en-actionspublic-key-secrets-por-api)
 10. [La demo de Pages muestra datos reales](#10-la-demo-de-pages-muestra-datos-reales)
 11. [El APK instala pero no conecta al servidor](#11-el-apk-instala-pero-no-conecta-al-servidor)
-12. [`signReleaseBundle`: "storeFile ... doesn't exist"](#12-signreleasebundle-storefile--doesnt-exist)
+12. [Release AAB: fallas de firma por ruta del keystore](#12-release-aab-fallas-de-firma-por-ruta-del-keystore)
+13. ["final block not properly padded" al leer la clave (PKCS12)](#13-final-block-not-properly-padded-al-leer-la-clave-pkcs12)
 
 ---
 
@@ -190,6 +191,34 @@ se había visto porque **nunca había corrido** (sin secrets
 configurados, el job saltaba). Apareció las dos primeras veces que el
 canal corrió de verdad (PR #11). Lección: un canal de release sin
 secretos configurados nunca fue probado.
+
+---
+
+### 13. "final block not properly padded" al leer la clave (PKCS12)
+
+**Síntoma**: `:app:signReleaseBundle` falla con
+`Failed to read key *** from store ".../release.keystore": Get Key
+failed: Given final block not properly padded. Such issues can arise
+if a bad key is used during decryption.`
+
+**Causa**: `keytool` moderno genera por defecto keystores **PKCS12**,
+que NO soportan contraseñas distintas para store y key. keytool
+**ignora** `-keypass` con un warning ("Different store and key
+passwords not supported for PKCS12 KeyStores") y cifra TODO con el
+storepass. Si el secret `ANDROID_KEY_PASSWORD` tiene un valor
+distinto, la clave no se puede descifrar → este error criptográfico
+engañoso (parece keystore corrupto, es solo password).
+
+**Verificación local**:
+```bash
+keytool -list -keystore lba-release.jks -storepass <SP> \
+  -alias lba-release -keypass <KP>   # el warning de PKCS12 lo dice
+```
+
+**Fix**: `ANDROID_KEY_PASSWORD` debe ser IGUAL a
+`ANDROID_STORE_PASSWORD` (así lo genera `gen-release-keystore.sh`
+desde la corrección del PR #11). Si tienes un keystore legacy con
+contraseñas distintas, migra a JKS o iguala los secrets.
 
 ---
 

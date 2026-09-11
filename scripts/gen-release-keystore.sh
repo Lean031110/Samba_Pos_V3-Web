@@ -46,13 +46,18 @@ if [ -f "$KEYSTORE" ]; then
   exit 1
 fi
 
-# Contraseñas aleatorias fuertes (32 chars hex = 128 bits de entropía).
+# Contraseña aleatoria fuerte (32 chars hex = 128 bits de entropía).
 # openssl rand produce exactamente N chars sin tuberías → sin SIGPIPE.
 gen_pass() {
   openssl rand -hex 16
 }
+# ⚠️ PKCS12 (formato default de keytool moderno) NO soporta contraseñas
+# distintas para store y key — keytool IGNORA -keypass con un warning
+# y cifra todo con el storepass. Si el CI recibe un key password
+# distinto, la lectura de la clave falla con "final block not properly
+# padded". Por eso usamos UNA sola contraseña para ambos.
 STORE_PASS="$(gen_pass)"
-KEY_PASS="$(gen_pass)"
+KEY_PASS="$STORE_PASS"
 
 DNAME="CN=LBApos, OU=SambaPOS, O=Lean031110, L=La Habana, C=CU"
 
