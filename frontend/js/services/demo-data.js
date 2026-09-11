@@ -8,7 +8,7 @@
 window.DEMO_DATA = {
   // Auth
   token: 'demo-token-not-real',
-  user: { userId: 1, name: 'Administrator', isAdmin: true, roleId: 1 },
+  user: { userId: 1, name: 'Administrator', isAdmin: true, roleId: 1, roleName: 'Administrator' },
 
   // Tables / Dashboard
   tables: [

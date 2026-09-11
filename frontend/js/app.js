@@ -32,18 +32,24 @@ const App = {
     // Clock
     this._startClock();
 
-    // Initial navigation — respect device mode (POS vs Kitchen)
+    // Initial navigation — role-based landing (not hardcoded)
     const deviceMode = window.ServerConfig ? ServerConfig.getMode() : 'pos';
     if (deviceMode === 'kitchen') {
       this.navigate('kitchen');
     } else {
-      this.navigate('login');
+      // Role-based landing: determine the best view for this user
+      const user = window.store.state.currentUser;
+      const landingView = this._resolveLandingView(user);
+      this.navigate(landingView);
     }
 
     // Initialize push notifications (after login will subscribe properly)
     if (window.PushClient) {
       PushClient.init();
     }
+
+    // BLOQUE 2 — Update footer with station/server info
+    this._updateFooter();
 
     // BLOQUE I — Listen for offline sync auth-expired events
     // When JWT expires during offline sync, show a toast + redirect to login
@@ -96,6 +102,51 @@ const App = {
   },
 
   /**
+   * BLOQUE 2 — Update footer with station/server/mode info.
+   * Shows: version, station name, server URL, connection status, device mode.
+   */
+  _updateFooter() {
+    const stationEl = document.getElementById('footer-station');
+    const serverEl = document.getElementById('footer-server');
+    const modeEl = document.getElementById('footer-mode');
+
+    // Station name (from ServerConfig or default)
+    const mode = window.ServerConfig ? ServerConfig.getMode() : 'pos';
+    const serverUrl = window.ServerConfig && ServerConfig.isConfigured()
+      ? ServerConfig.getServerUrl()
+      : (window.location.origin || 'localhost:3001');
+
+    if (stationEl) stationEl.textContent = mode === 'kitchen' ? 'KDS' : 'POS';
+    if (serverEl) serverEl.textContent = serverUrl.replace(/^https?:\/\//, '');
+    if (modeEl) modeEl.innerHTML = 'Modo: <strong>' + (mode === 'kitchen' ? 'Cocina' : 'POS') + '</strong>';
+  },
+
+  /**
+   * BLOQUE 2 — Resolve the landing view based on user role/permissions.
+   * Not hardcoded — uses a configurable policy:
+   *   - Admin → dashboard (can see everything)
+   *   - Kitchen role → kitchen (KDS)
+   *   - POS/Cashier role → pos
+   *   - Default → login (no user, or unknown role)
+   *
+   * Future: this can be replaced by a RoleDefaultView config from the backend.
+   */
+  _resolveLandingView(user) {
+    if (!user) return 'login';
+    if (user.isAdmin) return 'dashboard';
+    // Check role-based permissions for landing
+    // This is a hint, not the final authority — the backend still protects
+    if (user.roleName) {
+      const role = user.roleName.toLowerCase();
+      if (role.includes('cocina') || role.includes('kitchen') || role.includes('chef')) return 'kitchen';
+      if (role.includes('caja') || role.includes('cashier')) return 'admin'; // cash tab
+      if (role.includes('inventario') || role.includes('inventory')) return 'admin'; // inventory tab
+    }
+    // Default for POS users (waiters, cashiers, etc.)
+    return 'pos';
+  },
+
+  /**
    * Login handler — calls POST /api/auth/login to get a JWT.
    * Stores token in localStorage via Api.setToken().
    */
@@ -111,10 +162,13 @@ const App = {
       window.store.setState({ currentUser: res.user }, 'logged-in');
       LoginView.reset();
       document.getElementById('header-user').textContent = res.user.name;
-      this.navigate('dashboard');
+      // BLOQUE 2 — Role-based landing: navigate to the appropriate view
+      const landingView = this._resolveLandingView(res.user);
+      this.navigate(landingView);
       this.toast('Bienvenido, ' + res.user.name, 'success');
     } catch (err) {
-      LoginView.showError(err.message || 'Error al iniciar sesión');
+      // Discrete error — don't reveal if the user exists
+      LoginView.showError('Credenciales no válidas');
     }
   },
 

@@ -60,23 +60,54 @@
     <!-- Main view container (one active view at a time)              -->
     <!-- =========================================================== -->
     <main class="app-main">
-      <!-- LoginView -->
+      <!-- LoginView — Split screen: branding | login -->
       <section class="view view-login" id="view-login">
-        <div class="login-card no-select">
-          <div class="login-card__logo">
-            <img src="/assets/logo-login.png" alt="SambaPos_LBA">
+        <div class="ds-login-split no-select">
+          <!-- Left: Branding -->
+          <div class="ds-login-brand">
+            <img src="/assets/logo-login.png" alt="SambaPos_LBA" class="ds-login-brand__logo">
+            <h1 class="ds-login-brand__title">SambaPos_LBA</h1>
+            <p class="ds-login-brand__subtitle">POS de Restaurante</p>
+            <p class="ds-login-brand__version">v0.5.0</p>
           </div>
-          <input type="text" class="login-card__input" id="login-username"
-                 placeholder="Usuario" value="Administrador" autocomplete="off">
-          <input type="password" class="login-card__input" id="login-pin"
-                 placeholder="PIN" inputmode="numeric" autocomplete="off">
-          <div class="login-keypad numpad" id="login-keypad">
-            <!-- Keypad populated by JS -->
+          <!-- Right: Login form -->
+          <div class="ds-login-form">
+            <div class="ds-login-form__card">
+              <div class="ds-login-form__header">
+                <i class="fa-solid fa-user-circle ds-login-form__icon"></i>
+                <h2 class="ds-login-form__title">Iniciar sesión</h2>
+              </div>
+              <!-- User selector -->
+              <div class="ds-field">
+                <label class="ds-field__label">Usuario</label>
+                <div class="ds-login-userselector" id="login-userselector">
+                  <div class="ds-login-userselector__display" id="login-userselector-display" onclick="window.LoginView.toggleUserList()">
+                    <span id="login-userselector-name">Administrador</span>
+                    <i class="fa-solid fa-chevron-down"></i>
+                  </div>
+                  <div class="ds-login-userselector__list ds-hidden" id="login-userselector-list">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+              </div>
+              <!-- PIN -->
+              <div class="ds-field">
+                <label class="ds-field__label">PIN</label>
+                <input type="password" class="ds-input" id="login-pin"
+                       placeholder="● ● ● ●" inputmode="numeric" autocomplete="off"
+                       style="text-align: center; letter-spacing: 8px; font-size: 18px;">
+              </div>
+              <!-- Keypad -->
+              <div class="ds-login-keypad" id="login-keypad">
+                <!-- Populated by JS -->
+              </div>
+              <!-- Login button -->
+              <button class="ds-btn ds-btn--primary ds-btn--lg ds-btn--block" onclick="window.App.login()">
+                <i class="fa-solid fa-right-to-bracket"></i> Entrar
+              </button>
+              <div id="login-error" class="ds-login-error"></div>
+            </div>
           </div>
-          <flex-button variant="success" icon="fa-right-to-bracket" label="Iniciar sesión"
-                       style="min-height: 50px;"
-                       onclick="window.App.login()"></flex-button>
-          <div id="login-error" style="color: var(--samba-fg-error); font-size: 12px; min-height: 16px;"></div>
         </div>
       </section>
 
