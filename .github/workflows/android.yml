@@ -148,17 +148,22 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────
-  # Release AAB — ONLY when signing is configured via GitHub Variables +
-  # Secrets. Keystores/passwords are never committed to the repository.
-  #   vars:   ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS
-  #   secrets: ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD
+  # Release AAB — ONLY when signing is configured.
+  # ALL signing material lives in SECRETS (the repository is public and
+  # `vars.*` are readable by anyone with read access — a keystore must
+  # NEVER be a var). The public variable ANDROID_SIGNING_ENABLED is a
+  # boolean toggle only: it enables the job, but every sensitive value
+  # comes from encrypted repository secrets:
+  #   secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS,
+  #            ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD
+  # Setup instructions: scripts/gen-release-keystore.sh + wiki (Android).
   # ─────────────────────────────────────────────────────────────────────
   release:
     name: Release AAB (if signing configured)
     runs-on: ubuntu-latest
     needs: build
     timeout-minutes: 30
-    if: ${{ vars.ANDROID_KEYSTORE_BASE64 != '' }}
+    if: ${{ vars.ANDROID_SIGNING_ENABLED == 'true' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -189,13 +194,24 @@ jobs:
       - name: Build signed release AAB (bundleRelease)
         working-directory: android
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ vars.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
           set -e
+          # Defensive gates — fail LOUDLY if the secrets are missing or
+          # malformed instead of producing an unsigned/broken AAB.
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "FAIL: secret ANDROID_KEYSTORE_BASE64 is empty"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS"        || { echo "FAIL: secret ANDROID_KEY_ALIAS is empty"; exit 1; }
+          test -n "$ANDROID_STORE_PASSWORD"   || { echo "FAIL: secret ANDROID_STORE_PASSWORD is empty"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD"     || { echo "FAIL: secret ANDROID_KEY_PASSWORD is empty"; exit 1; }
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
+          KS_SIZE=$(stat -c%s release.keystore)
+          if [ "$KS_SIZE" -lt 1000 ]; then
+            echo "FAIL: decoded keystore is only ${KS_SIZE} bytes — ANDROID_KEYSTORE_BASE64 is not a valid keystore"
+            exit 1
+          fi
           cat >> gradle.properties << EOF
           android.injected.signing.store.file=release.keystore
           android.injected.signing.store.password=$ANDROID_STORE_PASSWORD
@@ -203,6 +219,12 @@ jobs:
           android.injected.signing.key.password=$ANDROID_KEY_PASSWORD
           EOF
           ./gradlew bundleRelease --no-daemon --stacktrace
+          # The AAB MUST be actually signed — verify with jarsigner.
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          test -f "$AAB" || { echo "FAIL: AAB not found"; exit 1; }
+          jarsigner -verify -verbose:summary "$AAB" > /dev/null 2>&1 \
+            || { echo "FAIL: AAB is NOT signed — keystore/secrets are wrong"; exit 1; }
+          echo "OK: AAB is signed"
 
       - name: Verify AAB
         run: |

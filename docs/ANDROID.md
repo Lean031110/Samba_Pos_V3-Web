@@ -82,31 +82,50 @@ python3 scripts/generate-android-resources.py   # needs Pillow
 
 ## Build AAB (release — Play Store)
 
-Signing material is **never committed**. Configure GitHub
-Variables/Secrets and the release job builds automatically:
+Signing material is **never committed** and lives ONLY in GitHub
+**Secrets** (this repository is public: `vars.*` are readable by anyone
+with read access, so a keystore must never be a variable). A public
+variable acts as the on/off switch of the release job:
 
-| Where | Variable |
-|-------|----------|
-| Repo variable | `ANDROID_KEYSTORE_BASE64` (base64 of the keystore) |
-| Repo variable | `ANDROID_KEY_ALIAS` |
-| Repo secret | `ANDROID_STORE_PASSWORD` |
-| Repo secret | `ANDROID_KEY_PASSWORD` |
+| Where | Setting | Purpose |
+|-------|---------|---------|
+| Repo secret | `ANDROID_KEYSTORE_BASE64` | keystore file, base64 encoded |
+| Repo secret | `ANDROID_KEY_ALIAS` | key alias inside the keystore |
+| Repo secret | `ANDROID_STORE_PASSWORD` | keystore password |
+| Repo secret | `ANDROID_KEY_PASSWORD` | key password |
+| Repo variable | `ANDROID_SIGNING_ENABLED=true` | enables the release job |
+
+### One-shot setup (generates everything)
+
+```bash
+bash scripts/gen-release-keystore.sh release-signing/
+# → creates the keystore + passwords + setup instructions
+GITHUB_TOKEN=<PAT> python3 scripts/set-android-secrets.py \
+  --keystore-dir release-signing/
+# → uploads the 4 secrets + the toggle variable via the API
+```
+
+(or configure them by hand: Settings → Secrets and variables → Actions;
+the generated `github-secrets-setup.txt` has the exact values/commands).
 
 The `release` job in `.github/workflows/android.yml` then produces the
-`LBApos-release.aab` artifact. Without signing configuration, only the
-debug APK is built (the release job is skipped — it is never silently
-faked).
+signed `LBApos-release.aab` artifact (verified with `jarsigner`). With
+the toggle off/absent, only the debug APK is built (the release job is
+skipped — it is never silently faked).
+
+> ⚠️ Back up `lba-release.jks` + the passwords PERMANENTLY (password
+> manager / private vault). The SAME keystore must sign every future
+> version or Android will reject updates as a different app.
 
 Local release build:
 
 ```bash
-keytool -genkey -v -keystore release.keystore -alias sambapos \
-  -keyalg RSA -keysize 2048 -validity 10000
+bash scripts/gen-release-keystore.sh release-signing/   # only once
 cd android
 cat >> gradle.properties << EOF
-android.injected.signing.store.file=release.keystore
+android.injected.signing.store.file=../release-signing/lba-release.jks
 android.injected.signing.store.password=...
-android.injected.signing.key.alias=sambapos
+android.injected.signing.key.alias=lba-release
 android.injected.signing.key.password=...
 EOF
 ./gradlew bundleRelease
