@@ -2165,45 +2165,718 @@ document.addEventListener('DOMContentLoaded', () => {
   async _renderUsers() {
     this._loading('Cargando usuarios…');
     let users = [];
-    try { const res = await Api.request('GET', '/admin/users'); users = res.data || []; } catch { this._error('No se pueden cargar los usuarios'); return; }
-    const rows = users.map(u => `<tr><td>${this._escape(u.Name)}</td><td>${this._escape(u.RoleName || '—')}</td><td>${u.IsAdmin ? '<span class="ds-badge ds-badge--info">Sí</span>' : '<span class="ds-badge ds-badge--neutral">No</span>'}</td></tr>`).join('');
-    this._setContent(`<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Usuarios</span></div></div><div style="padding:16px;"><div class="ds-table-wrap"><table class="ds-table"><thead><tr><th>Nombre</th><th>Rol</th><th>Admin</th></tr></thead><tbody>${rows || '<tr><td colspan="3" style="text-align:center;color:var(--ds-gray-500);">Sin usuarios</td></tr>'}</tbody></table></div></div></div>`);
+    let roles = [];
+    try {
+      const [u, r] = await Promise.all([
+        Api.request('GET', '/admin/users'),
+        Api.request('GET', '/admin/roles'),
+      ]);
+      users = u.data || [];
+      roles = r.data || [];
+      this._rolesCache = roles;
+    } catch (err) {
+      this._error('No se pueden cargar los usuarios: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo usuario', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newUser()");
+    if (users.length === 0) {
+      this._setContent(this._header('Usuarios', newBtn) +
+        '<p class="admin-empty">No hay usuarios cargados.</p>');
+      return;
+    }
+    const rows = users.map(u => {
+      const adminBadge = u.IsAdmin
+        ? '<span class="admin-tag admin-tag--info">Sí</span>'
+        : '<span class="admin-tag">No</span>';
+      return `
+        <tr>
+          <td><strong>${this._escape(u.Name)}</strong></td>
+          <td>${this._escape(u.RoleName || '—')}</td>
+          <td>${adminBadge}</td>
+          <td class="admin-row-actions">
+            ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editUser(${u.Id})`)}
+            ${this._btn('Eliminar', 'kds-btn--void', 'fa-trash', `window.AdminView._deleteUser(${u.Id})`)}
+          </td>
+        </tr>`;
+    }).join('');
+    this._setContent(this._header('Usuarios', newBtn) +
+      this._table(['Nombre', 'Rol', 'Admin', 'Acciones'], rows));
+  },
+
+  _newUser() { this._userForm(null); },
+  _editUser(id) {
+    const u = (this._productsCache || []).find(x => x.Id === id);
+    // Users aren't in productsCache; fetch via API.
+    Api.request('GET', `/admin/users/${id}`).then(res => {
+      this._userForm(res.data);
+    }).catch(err => this._error('No se puede cargar el usuario: ' + (err.message || err)));
+  },
+
+  _userForm(user) {
+    const isEdit = !!user;
+    const roles = this._rolesCache || [];
+    const roleOpts = roles.map(r =>
+      `<option value="${r.Id}" ${user && user.UserRoleId === r.Id ? 'selected' : ''}>${this._escape(r.Name)}${r.IsAdmin ? ' (admin)' : ''}</option>`
+    ).join('');
+    this._showModal(isEdit ? 'Editar usuario' : 'Nuevo usuario', `
+      <div class="admin-field"><span>Nombre *</span><input id="uf-name" class="admin-input" value="${user ? this._escape(user.Name) : ''}" placeholder="Ej: Carlos Mesero"></div>
+      <div class="admin-field"><span>Rol *</span><select id="uf-role" class="admin-input">${roleOpts || '<option value="">— Sin roles —</option>'}</select></div>
+      <div class="admin-field"><span>PIN ${isEdit ? '(dejar vacío para mantener)' : '*'}</span><input id="uf-pin" type="password" inputmode="numeric" class="admin-input" placeholder="● ● ● ●" maxlength="8"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveUser(${isEdit ? user.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveUser(id) {
+    const name = document.getElementById('uf-name').value.trim();
+    const roleId = parseInt(document.getElementById('uf-role').value, 10);
+    const pin = document.getElementById('uf-pin').value;
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    if (!roleId) { this._toast('Rol requerido', 'error'); return; }
+    if (!id && !pin) { this._toast('PIN requerido', 'error'); return; }
+    const body = { name, roleId };
+    if (pin) body.pin = pin;
+    try {
+      if (id) {
+        await Api.request('PATCH', `/admin/users/${id}`, body);
+        this._toast('Usuario actualizado', 'success');
+      } else {
+        await Api.request('POST', '/admin/users', body);
+        this._toast('Usuario creado', 'success');
+      }
+      this._closeModal();
+      await this._renderUsers();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _deleteUser(id) {
+    if (!confirm('¿Desactivar este usuario? Se quitará su rol.')) return;
+    try {
+      await Api.request('DELETE', `/admin/users/${id}`);
+      this._toast('Usuario desactivado', 'success');
+      await this._renderUsers();
+    } catch (err) {
+      this._error('No se puede desactivar: ' + (err.message || err));
+    }
   },
 
   async _renderRoles() {
-    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Roles</span></div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Roles del sistema</h3><p class="ds-text-muted ds-text-sm">Gestiona roles y permisos.</p></div></div></div>');
+    this._loading('Cargando roles…');
+    let roles = [];
+    try {
+      const res = await Api.request('GET', '/admin/roles');
+      roles = res.data || [];
+      this._rolesCache = roles;
+    } catch (err) {
+      this._error('No se pueden cargar los roles: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo rol', 'kds-btn--primary', 'fa-shield-halved', "window.AdminView._newRole()");
+    if (roles.length === 0) {
+      this._setContent(this._header('Roles', newBtn) +
+        '<p class="admin-empty">No hay roles cargados.</p>');
+      return;
+    }
+    const rows = roles.map(r => `
+      <tr>
+        <td><strong>${this._escape(r.Name)}</strong></td>
+        <td>${r.IsAdmin ? '<span class="admin-tag admin-tag--info">Sí</span>' : '<span class="admin-tag">No</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Permisos', '', 'fa-key', `window.AdminView._editRolePerms(${r.Id})`)}
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Roles', newBtn) +
+      this._table(['Nombre', 'Admin', 'Acciones'], rows));
   },
+
+  _newRole() {
+    this._showModal('Nuevo rol', `
+      <div class="admin-field"><span>Nombre *</span><input id="rf-name" class="admin-input" placeholder="Ej: Supervisor"></div>
+      <div class="admin-field admin-field--inline"><input type="checkbox" id="rf-isadmin"><span>Es administrador (acceso total)</span></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveRole()")}
+      </div>
+    `);
+  },
+
+  async _saveRole() {
+    const name = document.getElementById('rf-name').value.trim();
+    const isAdmin = document.getElementById('rf-isadmin').checked;
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      await Api.request('POST', '/admin/roles', { name, isAdmin });
+      this._toast('Rol creado', 'success');
+      this._closeModal();
+      await this._renderRoles();
+    } catch (err) {
+      this._error('No se puede crear rol: ' + (err.message || err));
+    }
+  },
+
+  async _editRolePerms(roleId) {
+    this._loading('Cargando permisos…');
+    let perms = [];
+    let allPerms = [];
+    try {
+      const [assigned, all] = await Promise.all([
+        Api.request('GET', `/admin/roles/${roleId}/permissions`),
+        Api.request('GET', '/admin/permissions').catch(() => ({ data: [] })),
+      ]);
+      perms = assigned.data || [];
+      allPerms = all.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar permisos: ' + (err.message || err));
+      return;
+    }
+    const role = (this._rolesCache || []).find(r => r.Id === roleId);
+    const rows = allPerms.length > 0 ? allPerms.map(p => {
+      const has = perms.some(x => x.Code === p.Code);
+      return `
+        <tr>
+          <td>${this._escape(p.Name)}</td>
+          <td><code>${this._escape(p.Code)}</code></td>
+          <td>${this._escape(p.Category || '—')}</td>
+          <td>
+            <input type="checkbox" data-perm-id="${p.Id}" data-perm-code="${this._escape(p.Code)}" ${has ? 'checked' : ''} onchange="window.AdminView._togglePerm(${roleId}, ${p.Id}, this.checked)">
+          </td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="4" class="admin-empty">No hay permisos disponibles.</td></tr>';
+    this._setContent(this._header(`Permisos — ${role ? role.Name : 'Rol ' + roleId}`, '') +
+      this._table(['Permiso', 'Código', 'Categoría', 'Activo'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a roles', '', 'fa-arrow-left', "window.AdminView.showTab('roles')")}</div>`);
+  },
+
+  async _togglePerm(roleId, permId, checked) {
+    try {
+      if (checked) {
+        await Api.request('POST', `/admin/roles/${roleId}/permissions`, { permissionId: permId });
+        this._toast('Permiso asignado', 'success');
+      } else {
+        await Api.request('DELETE', `/admin/roles/${roleId}/permissions/${permId}`);
+        this._toast('Permiso revocado', 'info');
+      }
+    } catch (err) {
+      this._error('No se puede cambiar permiso: ' + (err.message || err));
+      // Re-render to revert checkbox
+      await this._editRolePerms(roleId);
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 4 — ESTACIONES (full CRUD)
+  // ===================================================================
 
   async _renderStations() {
-    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Estaciones</span></div><div class="ds-actions">' + this._btn('Nueva', 'kds-btn--primary', 'fa-plus', "window.AdminView._toast('Próximamente','info')") + '</div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Estaciones</h3><p class="ds-text-muted ds-text-sm">Dispositivos físicos (POS, KDS, Caja).</p></div><div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-desktop"></i></div><div class="ds-empty__title">Sin estaciones</div></div></div></div>');
+    this._loading('Cargando estaciones…');
+    let stations = [];
+    let areas = [];
+    try {
+      const [s, a] = await Promise.all([
+        Api.request('GET', '/stations'),
+        Api.request('GET', '/stations/areas'),
+      ]);
+      stations = s.data || [];
+      areas = a.data || [];
+      this._areasCache = areas;
+    } catch (err) {
+      this._error('No se pueden cargar estaciones: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nueva estación', 'kds-btn--primary', 'fa-desktop', "window.AdminView._newStation()");
+    if (stations.length === 0) {
+      this._setContent(this._header('Estaciones', newBtn) +
+        '<div class="admin-empty">No hay estaciones registradas.</div>');
+      return;
+    }
+    const typeIcon = { POS: 'fa-cash-register', KDS: 'fa-fire', CASHIER: 'fa-money-bill-wave', DISPLAY: 'fa-tv' };
+    const typeBadge = (t) => `<span class="admin-tag admin-tag--${t === 'POS' ? 'info' : t === 'KDS' ? 'warning' : t === 'CASHIER' ? 'success' : ''}">${t}</span>`;
+    const rows = stations.map(st => `
+      <tr>
+        <td><strong>${this._escape(st.Name)}</strong></td>
+        <td><code>${this._escape(st.Code)}</code></td>
+        <td><i class="fa-solid ${typeIcon[st.StationType] || 'fa-desktop'}" style="margin-right: 6px;"></i>${typeBadge(st.StationType)}</td>
+        <td>${this._escape(st.FormFactor || '—')}</td>
+        <td>${st.IpAddress ? '<code>' + this._escape(st.IpAddress) + '</code>' : '—'}</td>
+        <td>${st.IsActive ? '<span class="admin-tag admin-tag--success">Activa</span>' : '<span class="admin-tag admin-tag--danger">Inactiva</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editStation(${st.Id})`)}
+          ${this._btn('Áreas', '', 'fa-link', `window.AdminView._editStationAreas(${st.Id})`)}
+          ${this._btn('KDS', '', 'fa-fire', `window.AdminView._editStationKDS(${st.Id})`)}
+          ${st.IsActive
+            ? this._btn('Desactivar', 'kds-btn--void', 'fa-power-off', `window.AdminView._toggleStation(${st.Id}, false)`)
+            : this._btn('Activar', '', 'fa-power-off', `window.AdminView._toggleStation(${st.Id}, true)`)}
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Estaciones', newBtn) +
+      this._table(['Nombre', 'Código', 'Tipo', 'Factor', 'IP', 'Estado', 'Acciones'], rows));
   },
 
+  _newStation() { this._stationForm(null); },
+
+  async _editStation(id) {
+    try {
+      const res = await Api.request('GET', `/stations/${id}`);
+      this._stationForm(res.data);
+    } catch (err) {
+      this._error('No se puede cargar la estación: ' + (err.message || err));
+    }
+  },
+
+  _stationForm(station) {
+    const isEdit = !!station;
+    const st = station || { StationType: 'POS', FormFactor: 'DESKTOP', AutoLogoutSeconds: 300 };
+    this._showModal(isEdit ? `Editar estación — ${station.Name}` : 'Nueva estación', `
+      <div class="admin-row">
+        <div class="admin-field"><span>Nombre *</span><input id="sf-name" class="admin-input" value="${st.Name || ''}"></div>
+        <div class="admin-field"><span>Código *</span><input id="sf-code" class="admin-input" value="${st.Code || ''}" placeholder="Ej: POS-03"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field">
+          <span>Tipo *</span>
+          <select id="sf-type" class="admin-input">
+            ${['POS', 'KDS', 'CASHIER', 'DISPLAY'].map(t => `<option value="${t}" ${st.StationType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="admin-field">
+          <span>Form factor</span>
+          <select id="sf-form" class="admin-input">
+            ${['DESKTOP', 'TABLET', 'PHONE', 'KIOSK'].map(f => `<option value="${f}" ${st.FormFactor === f ? 'selected' : ''}>${f}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>IP</span><input id="sf-ip" class="admin-input" value="${st.IpAddress || ''}" placeholder="192.168.1.10"></div>
+        <div class="admin-field"><span>Hardware ID</span><input id="sf-hw" class="admin-input" value="${st.HardwareId || ''}" placeholder="HW-POS-XX"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Rol por defecto</span><input id="sf-role" class="admin-input" value="${st.DefaultRole || ''}" placeholder="mesero, cajero, cocinero"></div>
+        <div class="admin-field"><span>Auto-logout (s)</span><input id="sf-logout" type="number" min="0" class="admin-input" value="${st.AutoLogoutSeconds || 0}"></div>
+      </div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveStation(${isEdit ? station.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveStation(id) {
+    const body = {
+      name: document.getElementById('sf-name').value.trim(),
+      code: document.getElementById('sf-code').value.trim(),
+      stationType: document.getElementById('sf-type').value,
+      formFactor: document.getElementById('sf-form').value,
+      ipAddress: document.getElementById('sf-ip').value.trim() || null,
+      hardwareId: document.getElementById('sf-hw').value.trim() || null,
+      defaultRole: document.getElementById('sf-role').value.trim() || null,
+      autoLogoutSeconds: parseInt(document.getElementById('sf-logout').value, 10) || 0,
+    };
+    if (!body.name || !body.code) { this._toast('Nombre y código requeridos', 'error'); return; }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/stations/${id}`, body);
+        this._toast('Estación actualizada', 'success');
+      } else {
+        await Api.request('POST', '/stations', body);
+        this._toast('Estación creada', 'success');
+      }
+      this._closeModal();
+      await this._renderStations();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _toggleStation(id, activate) {
+    try {
+      await Api.request('PATCH', `/stations/${id}`, { isActive: activate });
+      this._toast(activate ? 'Estación activada' : 'Estación desactivada', 'success');
+      await this._renderStations();
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+    }
+  },
+
+  async _editStationAreas(stationId) {
+    this._loading('Cargando áreas…');
+    let bound = [];
+    let all = this._areasCache || [];
+    try {
+      if (all.length === 0) {
+        const a = await Api.request('GET', '/stations/areas');
+        all = a.data || [];
+        this._areasCache = all;
+      }
+      const res = await Api.request('GET', `/stations/${stationId}/areas`);
+      bound = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar áreas: ' + (err.message || err));
+      return;
+    }
+    const station = (await Api.request('GET', `/stations/${stationId}`)).data;
+    const rows = all.map(a => {
+      const isBound = bound.some(b => b.Id === a.Id);
+      return `
+        <tr>
+          <td><i class="fa-solid ${a.Icon || 'fa-utensils'}" style="color: ${a.Color || '#044392'}; margin-right: 6px;"></i><strong>${this._escape(a.Name)}</strong></td>
+          <td><code>${this._escape(a.Code)}</code></td>
+          <td>${this._escape(a.DisplayName || a.Name)}</td>
+          <td>
+            <input type="checkbox" data-area-id="${a.Id}" ${isBound ? 'checked' : ''} onchange="window.AdminView._toggleStationArea(${stationId}, ${a.Id}, this.checked)">
+          </td>
+        </tr>`;
+    }).join('');
+    this._setContent(this._header(`Áreas vinculadas — ${station.Name}`, '') +
+      this._table(['Área', 'Código', 'Display', 'Vinculada'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a estaciones', '', 'fa-arrow-left', "window.AdminView.showTab('stations')")}</div>`);
+  },
+
+  async _toggleStationArea(stationId, areaId, checked) {
+    try {
+      if (checked) {
+        await Api.request('POST', `/stations/${stationId}/areas`, { productionAreaId: areaId });
+        this._toast('Área vinculada', 'success');
+      } else {
+        await Api.request('DELETE', `/stations/${stationId}/areas/${areaId}`);
+        this._toast('Área desvinculada', 'info');
+      }
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+      await this._editStationAreas(stationId);
+    }
+  },
+
+  async _editStationKDS(stationId) {
+    this._loading('Cargando configuración KDS…');
+    let configs = [];
+    try {
+      const res = await Api.request('GET', `/stations/${stationId}/kds-config`);
+      configs = res.data || [];
+    } catch (err) {
+      this._error('No se puede cargar config KDS: ' + (err.message || err));
+      return;
+    }
+    const station = (await Api.request('GET', `/stations/${stationId}`)).data;
+    const cfg = configs.find(c => c.ProductionAreaId === null) || configs[0] || { ColumnCount: 4, RefreshIntervalMs: 5000, AutoBumpSeconds: 0, SoundEnabled: 1, ColorCodingEnabled: 1, FontScale: 'MD', ShowPrepTime: 1, ShowAllergens: 0 };
+    this._setContent(this._header(`Configuración KDS — ${station.Name}`, '') + `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-fire"></i> Layout</h3>
+        <div class="admin-card-grid">
+          <div><span>Columnas:</span> <input id="kds-cols" type="number" min="1" max="8" value="${cfg.ColumnCount || 4}" class="admin-input" style="width: 80px;"></div>
+          <div><span>Refresh (ms):</span> <input id="kds-refresh" type="number" min="1000" step="500" value="${cfg.RefreshIntervalMs || 5000}" class="admin-input" style="width: 100px;"></div>
+          <div><span>Auto-bump (s):</span> <input id="kds-bump" type="number" min="0" value="${cfg.AutoBumpSeconds || 0}" class="admin-input" style="width: 80px;"></div>
+          <div><span>Font scale:</span>
+            <select id="kds-font" class="admin-input">
+              ${['SM', 'MD', 'LG', 'XL'].map(f => `<option value="${f}" ${cfg.FontScale === f ? 'selected' : ''}>${f}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-bell"></i> Sonido y visual</h3>
+        <div class="admin-card-grid">
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-sound" ${cfg.SoundEnabled ? 'checked' : ''}><span>Sonido</span></div>
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-color" ${cfg.ColorCodingEnabled ? 'checked' : ''}><span>Colores por área</span></div>
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-prep" ${cfg.ShowPrepTime ? 'checked' : ''}><span>Mostrar tiempo prep.</span></div>
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-allergens" ${cfg.ShowAllergens ? 'checked' : ''}><span>Alérgenos</span></div>
+        </div>
+      </div>
+      <div style="margin-top: 14px;">
+        ${this._btn('Guardar config', 'kds-btn--primary', 'fa-check', `window.AdminView._saveStationKDS(${stationId})`)}
+        ${this._btn('Volver', '', 'fa-arrow-left', "window.AdminView.showTab('stations')")}
+      </div>
+    `);
+  },
+
+  async _saveStationKDS(stationId) {
+    const body = {
+      columnCount: parseInt(document.getElementById('kds-cols').value, 10),
+      refreshIntervalMs: parseInt(document.getElementById('kds-refresh').value, 10),
+      autoBumpSeconds: parseInt(document.getElementById('kds-bump').value, 10),
+      fontScale: document.getElementById('kds-font').value,
+      soundEnabled: document.getElementById('kds-sound').checked,
+      colorCodingEnabled: document.getElementById('kds-color').checked,
+      showPrepTime: document.getElementById('kds-prep').checked,
+      showAllergens: document.getElementById('kds-allergens').checked,
+    };
+    try {
+      await Api.request('PUT', `/stations/${stationId}/kds-config`, body);
+      this._toast('Configuración KDS guardada', 'success');
+      await this._renderStations();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 4 — ÁREAS DE PRODUCCIÓN (full CRUD)
+  // ===================================================================
+
   async _renderAreas() {
-    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Áreas</span></div><div class="ds-actions">' + this._btn('Nueva', 'kds-btn--primary', 'fa-plus', "window.AdminView._toast('Próximamente','info')") + '</div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Áreas de elaboración</h3><p class="ds-text-muted ds-text-sm">Cocina, Pizzería, Barra, Cafetería.</p></div><div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-utensils"></i></div><div class="ds-empty__title">Sin áreas</div></div></div></div>');
+    this._loading('Cargando áreas…');
+    let areas = [];
+    try {
+      const res = await Api.request('GET', '/stations/areas');
+      areas = res.data || [];
+      this._areasCache = areas;
+    } catch (err) {
+      this._error('No se pueden cargar áreas: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nueva área', 'kds-btn--primary', 'fa-utensils', "window.AdminView._newArea()");
+    if (areas.length === 0) {
+      this._setContent(this._header('Áreas de producción', newBtn) +
+        '<div class="admin-empty">No hay áreas cargadas.</div>');
+      return;
+    }
+    const rows = areas.map(a => `
+      <tr>
+        <td><span class="admin-color-swatch" style="background: ${a.Color || '#044392'};"></span> <strong>${this._escape(a.Name)}</strong></td>
+        <td><code>${this._escape(a.Code)}</code></td>
+        <td>${this._escape(a.DisplayName || a.Name)}</td>
+        <td>${this._escape(a.WarehouseName || '—')}</td>
+        <td>${a.IsActive ? '<span class="admin-tag admin-tag--success">Activa</span>' : '<span class="admin-tag admin-tag--danger">Inactiva</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editArea(${a.Id})`)}
+          ${this._btn('Productos', '', 'fa-box', `window.AdminView._editAreaProducts(${a.Id})`)}
+          ${this._btn('Eliminar', 'kds-btn--void', 'fa-trash', `window.AdminView._deleteArea(${a.Id})`)}
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Áreas de producción', newBtn) +
+      this._table(['Nombre', 'Código', 'Display', 'Almacén', 'Estado', 'Acciones'], rows));
+  },
+
+  _newArea() { this._areaForm(null); },
+
+  _areaForm(area) {
+    const isEdit = !!area;
+    const a = area || { Color: '#044392', Icon: 'fa-utensils', SortOrder: 0 };
+    this._showModal(isEdit ? `Editar área — ${area.Name}` : 'Nueva área de producción', `
+      <div class="admin-row">
+        <div class="admin-field"><span>Nombre *</span><input id="af-name" class="admin-input" value="${a.Name || ''}"></div>
+        <div class="admin-field"><span>Código *</span><input id="af-code" class="admin-input" value="${a.Code || ''}" placeholder="KITCHEN, PIZZA, BAR..."></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Display</span><input id="af-display" class="admin-input" value="${a.DisplayName || ''}"></div>
+        <div class="admin-field"><span>Color</span><input id="af-color" type="color" value="${a.Color || '#044392'}" style="height: 40px; padding: 4px;"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Icono (FA)</span><input id="af-icon" class="admin-input" value="${a.Icon || 'fa-utensils'}" placeholder="fa-utensils"></div>
+        <div class="admin-field"><span>Sort order</span><input id="af-sort" type="number" min="0" class="admin-input" value="${a.SortOrder || 0}"></div>
+      </div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveArea(${isEdit ? area.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveArea(id) {
+    const body = {
+      name: document.getElementById('af-name').value.trim(),
+      code: document.getElementById('af-code').value.trim(),
+      displayName: document.getElementById('af-display').value.trim(),
+      color: document.getElementById('af-color').value,
+      icon: document.getElementById('af-icon').value.trim(),
+      sortOrder: parseInt(document.getElementById('af-sort').value, 10) || 0,
+    };
+    if (!body.name || !body.code) { this._toast('Nombre y código requeridos', 'error'); return; }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/stations/areas/${id}`, body);
+        this._toast('Área actualizada', 'success');
+      } else {
+        await Api.request('POST', '/stations/areas', body);
+        this._toast('Área creada', 'success');
+      }
+      this._closeModal();
+      await this._renderAreas();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _deleteArea(id) {
+    if (!confirm('¿Eliminar esta área? Se quitarán todos los vínculos.')) return;
+    try {
+      await Api.request('DELETE', `/stations/areas/${id}`);
+      this._toast('Área eliminada', 'success');
+      await this._renderAreas();
+    } catch (err) {
+      this._error('No se puede eliminar: ' + (err.message || err));
+    }
+  },
+
+  async _editAreaProducts(areaId) {
+    this._loading('Cargando productos del área…');
+    let items = [];
+    let products = this._productsCache || [];
+    const area = (this._areasCache || []).find(a => a.Id === areaId);
+    try {
+      if (products.length === 0) {
+        const p = await Api.request('GET', '/products');
+        products = p.data || [];
+        this._productsCache = products;
+      }
+      const res = await Api.request('GET', `/stations/areas/${areaId}/products`);
+      items = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar productos: ' + (err.message || err));
+      return;
+    }
+    const bound = new Set(items.map(i => i.MenuItemId));
+    const rows = products.map(p => `
+      <tr>
+        <td><strong>${this._escape(p.Name)}</strong></td>
+        <td>${this._escape(p.GroupCode || '—')}</td>
+        <td>
+          <input type="checkbox" data-product-id="${p.Id}" ${bound.has(p.Id) ? 'checked' : ''} onchange="window.AdminView._toggleAreaProduct(${areaId}, ${p.Id}, this.checked)">
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header(`Productos — ${area ? area.Name : 'Área ' + areaId}`, '') +
+      this._table(['Producto', 'Grupo', 'Vinculado'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a áreas', '', 'fa-arrow-left', "window.AdminView.showTab('areas')")}</div>`);
+  },
+
+  async _toggleAreaProduct(areaId, productId, checked) {
+    try {
+      if (checked) {
+        await Api.request('POST', `/stations/areas/${areaId}/products`, { menuItemId: productId });
+        this._toast('Producto asignado', 'success');
+      } else {
+        await Api.request('DELETE', `/stations/areas/${areaId}/products/${productId}`);
+        this._toast('Producto desvinculado', 'info');
+      }
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+      await this._editAreaProducts(areaId);
+    }
   },
 
   async _renderCombos() {
     this._loading('Cargando combos…');
     let combos = [];
     try { const res = await Api.request('GET', '/combos'); combos = res.data || []; } catch {}
-    const rows = combos.length ? combos.map(c => `<tr><td>${this._escape(c.Name)}</td><td>${c.UseCustomPrice ? '$' + Number(c.ComboPrice).toFixed(2) : 'Suma'}</td><td>${c.IsActive ? '<span class="ds-badge ds-badge--success">Activo</span>' : '<span class="ds-badge ds-badge--neutral">Inactivo</span>'}</td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--ds-gray-500);">Sin combos</td></tr>';
-    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Combos</span></div></div><div style="padding:16px;"><div class="ds-table-wrap"><table class="ds-table"><thead><tr><th>Nombre</th><th>Precio</th><th>Estado</th></tr></thead><tbody>' + rows + '</tbody></table></div></div></div>');
+    const rows = combos.length ? combos.map(c => `<tr><td>${this._escape(c.Name)}</td><td>${c.UseCustomPrice ? '$' + Number(c.ComboPrice).toFixed(2) : 'Suma'}</td><td>${c.IsActive ? '<span class="admin-tag admin-tag--success">Activo</span>' : '<span class="admin-tag">Inactivo</span>'}</td></tr>`).join('') : '<tr><td colspan="3" class="admin-empty">Sin combos</td></tr>';
+    this._setContent(this._header('Combos', '') + this._table(['Nombre', 'Precio', 'Estado'], rows));
   },
+
+  // ===================================================================
+  // BLOQUE 5 — TRANSFERENCIAS (listado + crear)
+  // ===================================================================
 
   async _renderTransfers() {
     this._loading('Cargando transferencias…');
     let transfers = [];
     try { const res = await Api.request('GET', '/inventory/transfers'); transfers = res.data || []; } catch {}
-    const rows = transfers.length ? transfers.map(t => `<tr><td>${this._escape(t.TransferNumber)}</td><td>${this._escape(t.FromWarehouseName || '—')}</td><td>${this._escape(t.ToWarehouseName || '—')}</td><td><span class="ds-badge ds-badge--${t.Status === 'COMPLETED' ? 'success' : 'warning'}">${t.Status}</span></td></tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--ds-gray-500);">Sin transferencias</td></tr>';
-    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Transferencias</span></div><div class="ds-actions">' + this._btn('Nueva', 'kds-btn--primary', 'fa-arrow-right-arrow-left', "window.AdminView._toast('Usa /api/inventory/transfer','info')") + '</div></div><div style="padding:16px;"><div class="ds-table-wrap"><table class="ds-table"><thead><tr><th>N°</th><th>Origen</th><th>Destino</th><th>Estado</th></tr></thead><tbody>' + rows + '</tbody></table></div></div></div>');
+    const newBtn = this._btn('Nueva transferencia', 'kds-btn--primary', 'fa-arrow-right-arrow-left', "window.AdminView._newTransfer()");
+    const rows = transfers.length ? transfers.map(t => `
+      <tr>
+        <td><strong>${this._escape(t.TransferNumber)}</strong></td>
+        <td>${this._escape(t.FromWarehouseName || '—')}</td>
+        <td>${this._escape(t.ToWarehouseName || '—')}</td>
+        <td>${this._formatDate(t.CreatedAt)}</td>
+        <td>${t.Status === 'COMPLETED' ? '<span class="admin-tag admin-tag--success">Completada</span>' : '<span class="admin-tag admin-tag--warning">Pendiente</span>'}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5" class="admin-empty">Sin transferencias</td></tr>';
+    this._setContent(this._header('Transferencias entre almacenes', newBtn) +
+      this._table(['N°', 'Origen', 'Destino', 'Fecha', 'Estado'], rows));
   },
+
+  _newTransfer() {
+    // Form for transfer: select warehouses + items
+    Api.request('GET', '/inventory/warehouses').then(r => {
+      const warehouses = r.data || [];
+      const whOpts = warehouses.map(w => `<option value="${w.Id}">${this._escape(w.Name)}</option>`).join('');
+      this._showModal('Nueva transferencia', `
+        <div class="admin-row">
+          <div class="admin-field"><span>Origen *</span><select id="tf-from" class="admin-input">${whOpts}</select></div>
+          <div class="admin-field"><span>Destino *</span><select id="tf-to" class="admin-input">${whOpts}</select></div>
+        </div>
+        <div class="admin-field"><span>Notas</span><textarea id="tf-notes" class="admin-input" rows="2"></textarea></div>
+        <div class="admin-note"><i class="fa-solid fa-info-circle"></i> Los ítems se agregan via API: POST /api/inventory/transfer con array items[].</div>
+        <div class="admin-modal-actions">
+          ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+          ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveTransfer()")}
+        </div>
+      `);
+    }).catch(err => this._error('No se pueden cargar almacenes: ' + (err.message || err)));
+  },
+
+  async _saveTransfer() {
+    const fromWarehouseId = parseInt(document.getElementById('tf-from').value, 10);
+    const toWarehouseId = parseInt(document.getElementById('tf-to').value, 10);
+    const notes = document.getElementById('tf-notes').value.trim();
+    if (!fromWarehouseId || !toWarehouseId) { this._toast('Origen y destino requeridos', 'error'); return; }
+    if (fromWarehouseId === toWarehouseId) { this._toast('Origen y destino deben ser diferentes', 'error'); return; }
+    try {
+      // Empty transfer just creates the record; items get added later via stock movement
+      await Api.request('POST', '/inventory/transfer', { fromWarehouseId, toWarehouseId, items: [], notes });
+      this._toast('Transferencia creada', 'success');
+      this._closeModal();
+      await this._renderTransfers();
+    } catch (err) {
+      this._error('No se puede crear: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE — SISTEMA (información + estado)
+  // ===================================================================
 
   async _renderSystem() {
     this._loading('Cargando sistema…');
     let version = null;
-    try { const r = await fetch('/version'); if (r.ok) version = await r.json(); } catch {}
-    const wsStatus = window.store?.state?.wsConnected ? '<span class="ds-badge ds-badge--success">Conectado</span>' : '<span class="ds-badge ds-badge--danger">Desconectado</span>';
-    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Sistema</span></div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Información</h3><div class="ds-card__grid"><div><span>App:</span> <strong>' + (version?.name || 'SambaPos_LBA') + '</strong></div><div><span>Versión:</span> <strong>' + (version?.version || '0.5.0') + '</strong></div><div><span>Node:</span> <strong>' + (version?.node || '—') + '</strong></div><div><span>WebSocket:</span> <strong>' + wsStatus + '</strong></div></div></div></div></div>');
+    let health = null;
+    try {
+      const [v, h] = await Promise.all([
+        fetch('/version').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/health').then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+      version = v;
+      health = h;
+    } catch {}
+    const wsStatus = window.store?.state?.wsConnected
+      ? '<span class="admin-tag admin-tag--success">Conectado</span>'
+      : '<span class="admin-tag admin-tag--danger">Desconectado</span>';
+    const healthStatus = health?.status === 'ok'
+      ? '<span class="admin-tag admin-tag--success">OK</span>'
+      : '<span class="admin-tag admin-tag--warning">' + (health?.status || '—') + '</span>';
+    this._setContent(this._header('Sistema', '') + `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-circle-info"></i> Información de la aplicación</h3>
+        <div class="admin-card-grid">
+          <div><span>App:</span> <strong>${this._escape(version?.name || 'SambaPos_LBA')}</strong></div>
+          <div><span>Versión:</span> <strong>${this._escape(version?.version || '0.5.0')}</strong></div>
+          <div><span>Node:</span> <strong>${this._escape(version?.node || '—')}</strong></div>
+          <div><span>Uptime:</span> <strong>${this._formatUptime(version?.uptime || 0)}</strong></div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-heart-pulse"></i> Estado de servicios</h3>
+        <div class="admin-card-grid">
+          <div><span>Health:</span> ${healthStatus}</div>
+          <div><span>WebSocket:</span> ${wsStatus}</div>
+          <div><span>Offline queue:</span> <strong>${(window.offlineQueue?.queue?.length || 0)} pendientes</strong></div>
+          <div><span>Timestamp:</span> <strong>${this._formatDate(health?.timestamp || new Date().toISOString())}</strong></div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-database"></i> Base de datos</h3>
+        <div class="admin-card-grid">
+          <div><span>Tipo:</span> <strong>${this._escape(version?.dbType || (window.DEMO_MODE ? 'Demo' : 'SQLite/PostgreSQL'))}</strong></div>
+          <div><span>Migraciones:</span> <strong>${this._escape(version?.migrationsCount || '—')}</strong></div>
+        </div>
+      </div>
+    `);
   },
 };
 

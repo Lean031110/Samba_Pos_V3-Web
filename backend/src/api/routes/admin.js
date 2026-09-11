@@ -217,6 +217,17 @@ router.delete('/roles/:id/permissions/:permId', auditLog('admin.role.removePerm'
   } catch (err) { next(err); }
 });
 
+// GET /api/admin/permissions — list all available permissions
+router.get('/permissions', async (req, res, next) => {
+  try {
+    const perms = await db('Permissions')
+      .select('Id', 'Code', 'Name', 'Category')
+      .orderBy('Category')
+      .orderBy('Name');
+    res.json({ data: perms, count: perms.length });
+  } catch (err) { next(err); }
+});
+
 // =====================================================================
 // DEPARTMENTS CRUD
 // =====================================================================

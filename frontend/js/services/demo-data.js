@@ -122,6 +122,49 @@ window.DEMO_DATA = {
     { Id: 3, Name: 'Test print (default)', TemplateType: 'TEST', IsActive: 1, Description: 'Prueba de impresora' },
   ],
 
+  // Production Areas (Bloque 4)
+  productionAreas: [
+    { Id: 1, Name: 'Cocina',   Code: 'KITCHEN', DisplayName: 'Cocina',   Color: '#dc3545', Icon: 'fa-utensils',              SortOrder: 1, IsActive: 1, WarehouseId: 2, WarehouseName: 'Almacén Cocina' },
+    { Id: 2, Name: 'Pizzería', Code: 'PIZZA',   DisplayName: 'Pizzería', Color: '#fd7e14', Icon: 'fa-pizza-slice',           SortOrder: 2, IsActive: 1, WarehouseId: 3, WarehouseName: 'Almacén Pizzería' },
+    { Id: 3, Name: 'Barra',     Code: 'BAR',     DisplayName: 'Barra',    Color: '#198754', Icon: 'fa-martini-glass-citrus',  SortOrder: 3, IsActive: 1, WarehouseId: 4, WarehouseName: 'Almacén Barra' },
+    { Id: 4, Name: 'Salón',     Code: 'SALON',   DisplayName: 'Salón',    Color: '#0d6efd', Icon: 'fa-bell-concierge',        SortOrder: 4, IsActive: 1, WarehouseId: 1, WarehouseName: 'Almacén Principal' },
+    { Id: 5, Name: 'Cafetería', Code: 'CAFE',    DisplayName: 'Cafetería', Color: '#6610f2', Icon: 'fa-mug-hot',               SortOrder: 5, IsActive: 1, WarehouseId: 4, WarehouseName: 'Almacén Barra' },
+  ],
+
+  // Stations (Bloque 4)
+  stations: [
+    { Id: 1, Name: 'POS Mostrador 01', Code: 'POS-01',  StationType: 'POS',      FormFactor: 'DESKTOP', AutoLogoutSeconds: 300, IsActive: 1, IpAddress: '192.168.1.10', HardwareId: 'HW-POS-01', DefaultRole: 'mesero' },
+    { Id: 2, Name: 'POS Mesa 01',      Code: 'POS-02',   StationType: 'POS',      FormFactor: 'TABLET',  AutoLogoutSeconds: 600, IsActive: 1, IpAddress: '192.168.1.11', HardwareId: 'HW-POS-02', DefaultRole: 'mesero' },
+    { Id: 3, Name: 'KDS Cocina',       Code: 'KDS-01',   StationType: 'KDS',      FormFactor: 'DESKTOP', AutoLogoutSeconds: 0,   IsActive: 1, IpAddress: '192.168.1.20', HardwareId: 'HW-KDS-01', DefaultRole: 'cocinero' },
+    { Id: 4, Name: 'KDS Pizzería',     Code: 'KDS-02',   StationType: 'KDS',      FormFactor: 'TABLET',  AutoLogoutSeconds: 0,   IsActive: 1, IpAddress: '192.168.1.21', HardwareId: 'HW-KDS-02', DefaultRole: 'cocinero' },
+    { Id: 5, Name: 'Caja Principal',   Code: 'CAJA-01',  StationType: 'CASHIER', FormFactor: 'DESKTOP', AutoLogoutSeconds: 300, IsActive: 1, IpAddress: '192.168.1.30', HardwareId: 'HW-CAJ-01', DefaultRole: 'cajero' },
+  ],
+
+  // Warehouses (Bloque 5)
+  warehouses: [
+    { Id: 1, Name: 'Almacén Principal', Code: 'MAIN',    WarehouseTypeId: 1, SortOrder: 1 },
+    { Id: 2, Name: 'Almacén Cocina',    Code: 'KITCHEN', WarehouseTypeId: 2, SortOrder: 2 },
+    { Id: 3, Name: 'Almacén Pizzería',   Code: 'PIZZA',   WarehouseTypeId: 2, SortOrder: 3 },
+    { Id: 4, Name: 'Almacén Barra',      Code: 'BAR',     WarehouseTypeId: 2, SortOrder: 4 },
+  ],
+
+  // Users
+  users: [
+    { Id: 1, Name: 'Administrator', UserRoleId: 1, RoleName: 'Administrator', IsAdmin: 1 },
+    { Id: 2, Name: 'Carlos Mesero', UserRoleId: 2, RoleName: 'Mesero', IsAdmin: 0 },
+    { Id: 3, Name: 'Ana Cajera',    UserRoleId: 3, RoleName: 'Cajero', IsAdmin: 0 },
+    { Id: 4, Name: 'Luigi Cocina',  UserRoleId: 4, RoleName: 'Cocinero', IsAdmin: 0 },
+    { Id: 5, Name: 'María Pizzería',UserRoleId: 4, RoleName: 'Cocinero', IsAdmin: 0 },
+  ],
+
+  // Roles
+  roles: [
+    { Id: 1, Name: 'Administrator', IsAdmin: 1 },
+    { Id: 2, Name: 'Mesero',        IsAdmin: 0 },
+    { Id: 3, Name: 'Cajero',        IsAdmin: 0 },
+    { Id: 4, Name: 'Cocinero',      IsAdmin: 0 },
+  ],
+
   // Version info
   version: { name: 'sambapos-lba', version: '0.4.0-demo', node: 'browser', uptime: 0 },
 };
@@ -252,6 +295,44 @@ window.DEMO_API = {
     // Combos
     if (path === '/api/combos' && method === 'GET') {
       return { data: [], count: 0 };
+    }
+
+    // Stations (Bloque 4)
+    if (path === '/api/stations' && method === 'GET') {
+      return { data: data.stations, count: data.stations.length };
+    }
+    if (path === '/api/stations/areas' && method === 'GET') {
+      return { data: data.productionAreas, count: data.productionAreas.length };
+    }
+    if (path.match(/^\/api\/stations\/\d+\/areas$/) && method === 'GET') {
+      const id = parseInt(path.match(/\d+/)[0], 10);
+      const bound = id === 3 ? [data.productionAreas[0]] : (id === 4 ? [data.productionAreas[1]] : []);
+      return { data: bound, count: bound.length };
+    }
+    if (path.match(/^\/api\/stations\/\d+\/kds-config$/) && method === 'GET') {
+      return { data: [{ Id: 1, StationId: parseInt(path.match(/\d+/)[0], 10), ColumnCount: 4, RefreshIntervalMs: 5000, AutoBumpSeconds: 0, SoundEnabled: 1, ColorCodingEnabled: 1, FontScale: 'MD', ShowPrepTime: 1, ShowAllergens: 0 }], count: 1 };
+    }
+
+    // Admin Users (Bloque 4)
+    if (path === '/api/admin/users' && method === 'GET') {
+      return { data: data.users, count: data.users.length };
+    }
+    if (path === '/api/admin/roles' && method === 'GET') {
+      return { data: data.roles, count: data.roles.length };
+    }
+    if (path.match(/^\/api\/admin\/roles\/\d+\/permissions$/) && method === 'GET') {
+      return { data: [], count: 0 };
+    }
+
+    // Warehouses (Bloque 5)
+    if (path === '/api/inventory/warehouses' && method === 'GET') {
+      return { data: data.warehouses, count: data.warehouses.length };
+    }
+    if (path === '/api/inventory/transfers' && method === 'GET') {
+      return { data: [
+        { Id: 1, TransferNumber: 'TR-001', FromWarehouseId: 1, FromWarehouseName: 'Almacén Principal', ToWarehouseId: 2, ToWarehouseName: 'Almacén Cocina', Status: 'COMPLETED', CreatedAt: new Date(Date.now() - 86400000).toISOString(), ItemCount: 5 },
+        { Id: 2, TransferNumber: 'TR-002', FromWarehouseId: 1, FromWarehouseName: 'Almacén Principal', ToWarehouseId: 3, ToWarehouseName: 'Almacén Pizzería', Status: 'PENDING', CreatedAt: new Date().toISOString(), ItemCount: 3 },
+      ], count: 2 };
     }
 
     // Version

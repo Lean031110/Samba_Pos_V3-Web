@@ -196,6 +196,7 @@ function createApp() {
   app.use('/api/push', require('./routes/push'));                     // FASE 9
   app.use('/api/reports', require('./routes/reports'));               // FASE 14
   app.use('/api/admin', require('./routes/admin'));                  // FASE 3
+  app.use('/api/stations', require('./routes/stations'));            // BLOQUE 4 — Stations + Areas + KDS
   app.use('/api', require('./routes/cash-sessions'));                 // FASE 3 (work-periods + cash-sessions)
   app.use('/api', require('./routes/config'));
 
