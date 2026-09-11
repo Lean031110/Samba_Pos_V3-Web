@@ -208,6 +208,11 @@ const AdminView = {
       case 'transfers': await this._renderTransfers();  break;
       case 'system':    await this._renderSystem();     break;
       case 'errors':    await this._renderErrors();     break;
+      case 'audit':     await this._renderAuditLogs();  break;
+      case 'customers': await this._renderCustomers();  break;
+      case 'departments': await this._renderDepartments(); break;
+      case 'payment-types': await this._renderPaymentTypes(); break;
+      case 'settings': await this._renderSettings();   break;
       default:
         this._setContent('<div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-folder-open"></i></div><div class="ds-empty__title">Sección no disponible</div></div>');
     }
@@ -1618,14 +1623,24 @@ const AdminView = {
     const fromDate = this._reportFromDate || today;
     const toDate = this._reportToDate || today;
 
-    // Fetch summary report
-    let reportData = null;
+    // Fetch all reports in parallel (9 endpoints)
+    let summary = null, topProducts = [], byCategory = [], byUser = [], byPayment = [], voidsRefunds = null, inventory = null, cashSessions = null, dashboard = null;
     try {
-      const res = await Api.request('GET', `/reports/sales-summary?from=${fromDate}&to=${toDate}`);
-      reportData = res.data;
+      const qs = `from=${fromDate}&to=${toDate}`;
+      const [s, tp, cat, usr, pay, vr, inv, cs, db] = await Promise.all([
+        Api.request('GET', `/reports/sales?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/top-products?${qs}&limit=10`).catch(() => null),
+        Api.request('GET', `/reports/categories?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/users?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/payments?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/voids-refunds?${qs}`).catch(() => null),
+        Api.request('GET', '/reports/inventory').catch(() => null),
+        Api.request('GET', '/reports/cash-sessions').catch(() => null),
+        Api.request('GET', '/reports/dashboard').catch(() => null),
+      ]);
+      summary = s?.data; topProducts = tp?.data || []; byCategory = cat?.data || []; byUser = usr?.data || []; byPayment = pay?.data || []; voidsRefunds = vr?.data; inventory = inv?.data; cashSessions = cs?.data; dashboard = db?.data;
     } catch (err) {
-      // If endpoint not available, show placeholder
-      console.warn('[reports] No se pudo cargar el reporte:', err.message);
+      console.warn('[reports] Error:', err.message);
     }
 
     const dateSelector = `
@@ -1636,15 +1651,17 @@ const AdminView = {
       </div>
     `;
 
-    let reportCard;
-    if (reportData) {
-      const r = reportData;
-      reportCard = `
+    let html = this._header('Reportes', '') + `<div class="admin-section">${dateSelector}`;
+
+    // 1. Resumen de ventas (sales)
+    if (summary) {
+      const r = summary;
+      html += `
         <div class="admin-card">
           <h3><i class="fa-solid fa-chart-line"></i> Resumen de Ventas (${fromDate} → ${toDate})</h3>
           <div class="admin-stats-grid">
             <div class="admin-stat admin-stat--success">
-              <div class="admin-stat__num">$${Number(r.totalSales || 0).toFixed(2)}</div>
+              <div class="admin-stat__num">$${Number(r.totalSales || r.grossSales || 0).toFixed(2)}</div>
               <div class="admin-stat__label">Ventas totales</div>
             </div>
             <div class="admin-stat">
@@ -1657,50 +1674,195 @@ const AdminView = {
             </div>
             <div class="admin-stat admin-stat--danger">
               <div class="admin-stat__num">${r.voidedCount || 0}</div>
-              <div class="admin-stat__label">Tickets anulados</div>
+              <div class="admin-stat__label">Anulados</div>
             </div>
             <div class="admin-stat admin-stat--warn">
               <div class="admin-stat__num">${r.refundedCount || 0}</div>
-              <div class="admin-stat__label">Tickets reembolsados</div>
+              <div class="admin-stat__label">Reembolsados</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">$${Number(r.refundedAmount || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Monto reembolsado</div>
             </div>
           </div>
-        </div>
-      `;
-    } else {
-      reportCard = `
-        <div class="admin-card">
-          <h3><i class="fa-solid fa-chart-line"></i> Resumen de Ventas</h3>
-          <p class="admin-empty">Selecciona un rango de fechas y haz clic en "Generar" para ver el reporte.</p>
         </div>
       `;
     }
 
-    // Fetch top products
-    let topProductsCard = '';
-    try {
-      const res = await Api.request('GET', `/reports/top-products?from=${fromDate}&to=${toDate}&limit=10`);
-      const products = res.data || [];
-      if (products.length > 0) {
-        const rows = products.map(p => `
-          <tr>
-            <td data-label="Producto">${this._escape(p.name || p.Name || '—')}</td>
-            <td data-label="Cantidad">${p.quantity || p.Quantity || 0}</td>
-            <td data-label="Total">$${Number(p.total || p.Total || 0).toFixed(2)}</td>
-          </tr>
-        `).join('');
-        topProductsCard = `
-          <div class="admin-card">
-            <h3><i class="fa-solid fa-trophy"></i> Top 10 Productos</h3>
-            ${this._table(['Producto', 'Cantidad', 'Total'], rows)}
+    // 2. Dashboard (real-time metrics)
+    if (dashboard) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-gauge-high"></i> Dashboard en tiempo real</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--info">
+              <div class="admin-stat__num">${dashboard.openTickets || 0}</div>
+              <div class="admin-stat__label">Tickets abiertos</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${dashboard.activeTables || 0}</div>
+              <div class="admin-stat__label">Mesas activas</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${dashboard.kitchenOrders || 0}</div>
+              <div class="admin-stat__label">Pedidos en cocina</div>
+            </div>
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(dashboard.todaySales || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Ventas de hoy</div>
+            </div>
           </div>
-        `;
-      }
-    } catch {}
+        </div>
+      `;
+    }
 
-    this._setContent(
-      this._header('Reportes', '') +
-      `<div class="admin-section">${dateSelector}${reportCard}${topProductsCard}</div>`
-    );
+    // 3. Top products
+    if (topProducts.length > 0) {
+      const rows = topProducts.map(p => `
+        <tr>
+          <td data-label="Producto">${this._escape(p.name || p.Name || '—')}</td>
+          <td class="admin-num">${p.quantity || p.Quantity || 0}</td>
+          <td class="admin-num">$${Number(p.total || p.Total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-trophy"></i> Top 10 Productos</h3>
+          ${this._table(['Producto', 'Cantidad', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 4. Sales by category
+    if (byCategory.length > 0) {
+      const rows = byCategory.map(c => `
+        <tr>
+          <td>${this._escape(c.category || c.Category || '—')}</td>
+          <td class="admin-num">${c.quantity || c.count || 0}</td>
+          <td class="admin-num">$${Number(c.total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-tags"></i> Ventas por Categoría</h3>
+          ${this._table(['Categoría', 'Cantidad', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 5. Sales by user (mesero)
+    if (byUser.length > 0) {
+      const rows = byUser.map(u => `
+        <tr>
+          <td>${this._escape(u.userName || u.User || '—')}</td>
+          <td class="admin-num">${u.ticketCount || 0}</td>
+          <td class="admin-num">$${Number(u.total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-user-tie"></i> Ventas por Mesero</h3>
+          ${this._table(['Mesero', 'Tickets', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 6. Payments by type
+    if (byPayment.length > 0) {
+      const rows = byPayment.map(p => `
+        <tr>
+          <td>${this._escape(p.paymentType || p.PaymentType || '—')}</td>
+          <td class="admin-num">${p.count || 0}</td>
+          <td class="admin-num">$${Number(p.total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-money-bill-wave"></i> Pagos por Tipo</h3>
+          ${this._table(['Tipo de Pago', 'Transacciones', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 7. Voids and refunds
+    if (voidsRefunds) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-ban"></i> Anulaciones y Reembolsos</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">${voidsRefunds.voidsCount || 0}</div>
+              <div class="admin-stat__label">Anulaciones</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">${voidsRefunds.refundsCount || 0}</div>
+              <div class="admin-stat__label">Reembolsos</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">$${Number(voidsRefunds.voidsAmount || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Monto anulado</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">$${Number(voidsRefunds.refundsAmount || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Monto reembolsado</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 8. Inventory summary
+    if (inventory) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-warehouse"></i> Resumen de Inventario</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat">
+              <div class="admin-stat__num">${inventory.totalIngredients || 0}</div>
+              <div class="admin-stat__label">Ingredientes</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">${inventory.lowStockCount || 0}</div>
+              <div class="admin-stat__label">Stock bajo</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">${inventory.outOfStockCount || 0}</div>
+              <div class="admin-stat__label">Sin stock</div>
+            </div>
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(inventory.totalValue || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Valor total</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 9. Cash sessions summary
+    if (cashSessions) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-cash-register"></i> Sesiones de Caja</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">${cashSessions.openCount || 0}</div>
+              <div class="admin-stat__label">Sesiones abiertas</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${cashSessions.closedCount || 0}</div>
+              <div class="admin-stat__label">Sesiones cerradas</div>
+            </div>
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(cashSessions.totalCash || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Efectivo total</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    html += '</div>';
+    this._setContent(html);
   },
 
   _setReportDates() {
@@ -2137,32 +2299,12 @@ const AdminView = {
       cell.innerHTML = `<span class="admin-tag admin-tag--danger">Error</span>`;
     }
   },
+
+  // (Bootstrap is at the very end of this file, after all methods)
 };
 
-// =====================================================================
-// Bootstrap: inicializa AdminView al cargar el DOM y se registra en
-// window.App.views para que los onclick inline del HTML funcionen.
-// Usa setTimeout(0) para asegurarse de que App.init() ya haya corrido
-// (app.js se carga después de admin.js y reemplaza this.views).
-// =====================================================================
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(() => {
-    AdminView.init();
-    if (window.App) {
-      if (!window.App.views) window.App.views = {};
-      window.App.views.admin = AdminView;
-      // Auto-cargar la pestaña por defecto cuando se entra a la vista admin
-      if (window.store) {
-        window.store.subscribe((state, prev) => {
-          if (state.currentView === 'admin' && prev && prev.currentView !== 'admin') {
-            AdminView.load();
-          }
-        });
-      }
-    }
-  }, 0);
-});
-
+// Extend AdminView with additional methods (BLOQUE 3-11)
+Object.assign(AdminView, {
   async _renderUsers() {
     this._loading('Cargando usuarios…');
     let users = [];
@@ -2762,13 +2904,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   },
 
-  async _renderCombos() {
-    this._loading('Cargando combos…');
-    let combos = [];
-    try { const res = await Api.request('GET', '/combos'); combos = res.data || []; } catch {}
-    const rows = combos.length ? combos.map(c => `<tr><td>${this._escape(c.Name)}</td><td>${c.UseCustomPrice ? '$' + Number(c.ComboPrice).toFixed(2) : 'Suma'}</td><td>${c.IsActive ? '<span class="admin-tag admin-tag--success">Activo</span>' : '<span class="admin-tag">Inactivo</span>'}</td></tr>`).join('') : '<tr><td colspan="3" class="admin-empty">Sin combos</td></tr>';
-    this._setContent(this._header('Combos', '') + this._table(['Nombre', 'Precio', 'Estado'], rows));
-  },
 
   // ===================================================================
   // BLOQUE 5 — TRANSFERENCIAS (listado + crear)
@@ -3000,6 +3135,523 @@ document.addEventListener('DOMContentLoaded', () => {
       this._error('No se pueden borrar: ' + (err.message || err));
     }
   },
-};
+
+  // ===================================================================
+  // BLOQUE 11 — CLIENTES (CRUD completo: 8 endpoints)
+  // ===================================================================
+
+  async _renderCustomers() {
+    this._loading('Cargando clientes…');
+    let customers = [];
+    try {
+      const res = await Api.request('GET', '/customers');
+      customers = res.data || [];
+      this._customersCache = customers;
+    } catch (err) {
+      this._error('No se pueden cargar clientes: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo cliente', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newCustomer()");
+    if (customers.length === 0) {
+      this._setContent(this._header('Clientes', newBtn) +
+        '<div class="admin-empty">No hay clientes registrados.</div>');
+      return;
+    }
+    const rows = customers.map(c => {
+      const statusBadge = c.IsActive
+        ? '<span class="admin-tag admin-tag--success">Activo</span>'
+        : '<span class="admin-tag admin-tag--danger">Inactivo</span>';
+      return `
+        <tr>
+          <td><strong>${this._escape(c.Name)}</strong></td>
+          <td>${c.Phone ? '<code>' + this._escape(c.Phone) + '</code>' : '—'}</td>
+          <td>${c.Email ? this._escape(c.Email) : '—'}</td>
+          <td class="admin-num">${this._formatMoney(c.AccountBalance || 0)}</td>
+          <td>${statusBadge}</td>
+          <td class="admin-row-actions">
+            ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editCustomer(${c.Id})`)}
+            ${this._btn('Crédito', '', 'fa-plus-circle', `window.AdminView._customerCredit(${c.Id})`)}
+            ${this._btn('Débito', '', 'fa-minus-circle', `window.AdminView._customerDebit(${c.Id})`)}
+            ${c.IsActive
+              ? this._btn('Desactivar', 'kds-btn--void', 'fa-power-off', `window.AdminView._toggleCustomer(${c.Id}, false)`)
+              : this._btn('Activar', '', 'fa-power-off', `window.AdminView._toggleCustomer(${c.Id}, true)`)}
+          </td>
+        </tr>`;
+    }).join('');
+    this._setContent(this._header('Clientes', newBtn) +
+      this._table(['Nombre', 'Teléfono', 'Email', 'Saldo', 'Estado', 'Acciones'], rows));
+  },
+
+  _newCustomer() { this._customerForm(null); },
+
+  async _editCustomer(id) {
+    try {
+      const res = await Api.request('GET', `/customers/${id}`);
+      this._customerForm(res.data);
+    } catch (err) {
+      this._error('No se puede cargar el cliente: ' + (err.message || err));
+    }
+  },
+
+  _customerForm(customer) {
+    const isEdit = !!customer;
+    const c = customer || {};
+    this._showModal(isEdit ? `Editar cliente — ${customer.Name}` : 'Nuevo cliente', `
+      <div class="admin-row">
+        <div class="admin-field"><span>Nombre *</span><input id="cf-name" class="admin-input" value="${this._escape(c.Name || '')}"></div>
+        <div class="admin-field"><span>Teléfono</span><input id="cf-phone" class="admin-input" value="${this._escape(c.Phone || '')}"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Email</span><input id="cf-email" type="email" class="admin-input" value="${this._escape(c.Email || '')}"></div>
+        <div class="admin-field"><span>Saldo inicial</span><input id="cf-balance" type="number" step="0.01" class="admin-input" value="${c.AccountBalance || 0}"></div>
+      </div>
+      <div class="admin-field"><span>Dirección</span><textarea id="cf-address" class="admin-input" rows="2">${this._escape(c.Address || '')}</textarea></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveCustomer(${isEdit ? customer.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveCustomer(id) {
+    const body = {
+      name: document.getElementById('cf-name').value.trim(),
+      phone: document.getElementById('cf-phone').value.trim() || null,
+      email: document.getElementById('cf-email').value.trim() || null,
+      address: document.getElementById('cf-address').value.trim() || null,
+    };
+    if (!body.name) { this._toast('Nombre requerido', 'error'); return; }
+    if (!id) body.accountBalance = parseFloat(document.getElementById('cf-balance').value) || 0;
+    try {
+      if (id) {
+        await Api.request('PATCH', `/customers/${id}`, body);
+        this._toast('Cliente actualizado', 'success');
+      } else {
+        await Api.request('POST', '/customers', body);
+        this._toast('Cliente creado', 'success');
+      }
+      this._closeModal();
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _toggleCustomer(id, activate) {
+    try {
+      await Api.request('POST', `/customers/${id}/${activate ? 'reactivate' : 'deactivate'}`);
+      this._toast(activate ? 'Cliente activado' : 'Cliente desactivado', 'success');
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+    }
+  },
+
+  async _customerCredit(id) {
+    const amount = prompt('Monto de crédito a aplicar:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Nota (opcional):', '') || '';
+    try {
+      await Api.request('POST', `/customers/${id}/credit`, { amount: amt, note });
+      this._toast('Crédito aplicado', 'success');
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede aplicar crédito: ' + (err.message || err));
+    }
+  },
+
+  async _customerDebit(id) {
+    const amount = prompt('Monto de débito a aplicar:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Nota (opcional):', '') || '';
+    try {
+      await Api.request('POST', `/customers/${id}/debit`, { amount: amt, note });
+      this._toast('Débito aplicado', 'success');
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede aplicar débito: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — AUDIT LOGS (viewer)
+  // ===================================================================
+
+  async _renderAuditLogs() {
+    this._loading('Cargando auditoría…');
+    let logs = [];
+    let total = 0;
+    try {
+      const res = await Api.request('GET', '/admin/audit-logs?limit=100');
+      logs = res.data || [];
+      total = res.total || 0;
+    } catch (err) {
+      this._error('No se pueden cargar logs: ' + (err.message || err));
+      return;
+    }
+    const refreshBtn = this._btn('Actualizar', '', 'fa-rotate', "window.AdminView._renderAuditLogs()");
+    if (logs.length === 0) {
+      this._setContent(this._header('Auditoría', refreshBtn) +
+        '<div class="admin-empty">No hay eventos de auditoría.</div>');
+      return;
+    }
+    const rows = logs.map(l => {
+      const action = l.Action || '—';
+      const entity = l.EntityType || '—';
+      const entityId = l.EntityId || '';
+      const userId = l.UserId || '—';
+      const time = this._formatDate(l.CreatedAt);
+      const details = l.Details ? (typeof l.Details === 'string' ? l.Details : JSON.stringify(l.Details)) : '';
+      return `
+        <tr>
+          <td><code>${this._escape(action)}</code></td>
+          <td>${this._escape(entity)} ${entityId ? '#' + entityId : ''}</td>
+          <td>${userId}</td>
+          <td>${time}</td>
+          <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this._escape(details)}">${this._escape(details)}</td>
+        </tr>`;
+    }).join('');
+    this._setContent(this._header(`Auditoría (${total} eventos)`, refreshBtn) +
+      this._table(['Acción', 'Entidad', 'Usuario', 'Fecha', 'Detalles'], rows));
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — DEPARTMENTS CRUD (admin endpoints)
+  // ===================================================================
+
+  async _renderDepartments() {
+    this._loading('Cargando departamentos…');
+    let depts = [];
+    try {
+      const res = await Api.request('GET', '/admin/departments');
+      depts = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar departamentos: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo departamento', 'kds-btn--primary', 'fa-plus', "window.AdminView._newDepartment()");
+    if (depts.length === 0) {
+      this._setContent(this._header('Departamentos', newBtn) +
+        '<div class="admin-empty">No hay departamentos.</div>');
+      return;
+    }
+    const rows = depts.map(d => `
+      <tr>
+        <td><strong>${this._escape(d.Name)}</strong></td>
+        <td>${d.WarehouseId ? 'Almacén #' + d.WarehouseId : '—'}</td>
+        <td>${d.SortOrder || 0}</td>
+        <td>${d.PriceTag ? '<code>' + this._escape(d.PriceTag) + '</code>' : '—'}</td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Departamentos', newBtn) +
+      this._table(['Nombre', 'Almacén', 'Orden', 'Price Tag'], rows));
+  },
+
+  _newDepartment() {
+    this._showModal('Nuevo departamento', `
+      <div class="admin-field"><span>Nombre *</span><input id="df-name" class="admin-input" placeholder="Ej: Restaurante"></div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Warehouse ID</span><input id="df-wh" type="number" class="admin-input" value="0"></div>
+        <div class="admin-field"><span>Sort order</span><input id="df-sort" type="number" class="admin-input" value="0"></div>
+      </div>
+      <div class="admin-field"><span>Price tag</span><input id="df-tag" class="admin-input" placeholder="Ej: normal, vip"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveDepartment()")}
+      </div>
+    `);
+  },
+
+  async _saveDepartment() {
+    const body = {
+      name: document.getElementById('df-name').value.trim(),
+      warehouseId: parseInt(document.getElementById('df-wh').value, 10) || 0,
+      sortOrder: parseInt(document.getElementById('df-sort').value, 10) || 0,
+    };
+    if (!body.name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      await Api.request('POST', '/admin/departments', body);
+      this._toast('Departamento creado', 'success');
+      this._closeModal();
+      await this._renderDepartments();
+    } catch (err) {
+      this._error('No se puede crear: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — PAYMENT TYPES CRUD
+  // ===================================================================
+
+  async _renderPaymentTypes() {
+    this._loading('Cargando tipos de pago…');
+    let types = [];
+    try {
+      const res = await Api.request('GET', '/admin/payment-types');
+      types = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar tipos de pago: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo tipo', 'kds-btn--primary', 'fa-plus', "window.AdminView._newPaymentType()");
+    if (types.length === 0) {
+      this._setContent(this._header('Tipos de Pago', newBtn) +
+        '<div class="admin-empty">No hay tipos de pago configurados.</div>');
+      return;
+    }
+    const rows = types.map(t => `
+      <tr>
+        <td><strong>${this._escape(t.Name)}</strong></td>
+        <td>${t.AccountTransactionTypeId || '—'}</td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Tipos de Pago', newBtn) +
+      this._table(['Nombre', 'Tipo Transacción'], rows));
+  },
+
+  _newPaymentType() {
+    this._showModal('Nuevo tipo de pago', `
+      <div class="admin-field"><span>Nombre *</span><input id="ptf-name" class="admin-input" placeholder="Ej: Tarjeta de crédito"></div>
+      <div class="admin-field"><span>Tipo transacción (1-4)</span><input id="ptf-tt" type="number" min="1" max="4" class="admin-input" value="4"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._savePaymentType()")}
+      </div>
+    `);
+  },
+
+  async _savePaymentType() {
+    const name = document.getElementById('ptf-name').value.trim();
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    const accountTransactionTypeId = parseInt(document.getElementById('ptf-tt').value, 10) || 4;
+    try {
+      await Api.request('POST', '/admin/payment-types', { name, accountTransactionTypeId });
+      this._toast('Tipo creado', 'success');
+      this._closeModal();
+      await this._renderPaymentTypes();
+    } catch (err) {
+      this._error('No se puede crear: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — SETTINGS (ProgramSettings editor)
+  // ===================================================================
+
+  async _renderSettings() {
+    this._loading('Cargando settings…');
+    let settings = [];
+    try {
+      const res = await Api.request('GET', '/admin/settings');
+      settings = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar settings: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo setting', 'kds-btn--primary', 'fa-plus', "window.AdminView._newSetting()");
+    if (settings.length === 0) {
+      this._setContent(this._header('Configuración del Sistema', newBtn) +
+        '<div class="admin-empty">No hay settings.</div>');
+      return;
+    }
+    const rows = settings.map(s => `
+      <tr>
+        <td><code>${this._escape(s.Name)}</code></td>
+        <td>${this._escape(s.Value)}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editSetting('${this._escape(s.Name)}')`)}
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Configuración del Sistema', newBtn) +
+      this._table(['Clave', 'Valor', 'Acciones'], rows));
+  },
+
+  _newSetting() {
+    this._showModal('Nuevo setting', `
+      <div class="admin-field"><span>Nombre (clave) *</span><input id="stf-name" class="admin-input" placeholder="Ej: tax_rate"></div>
+      <div class="admin-field"><span>Valor *</span><input id="stf-value" class="admin-input" placeholder="Ej: 0.21"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveSetting()")}
+      </div>
+    `);
+  },
+
+  _editSetting(name) {
+    this._showModal(`Editar setting — ${name}`, `
+      <div class="admin-field"><span>Valor *</span><input id="stf-value" class="admin-input"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Guardar', 'kds-btn--primary', 'fa-check', `window.AdminView._updateSetting('${this._escape(name)}')`)}
+      </div>
+    `);
+  },
+
+  async _saveSetting() {
+    const name = document.getElementById('stf-name').value.trim();
+    const value = document.getElementById('stf-value').value;
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      await Api.request('PATCH', `/admin/settings/${name}`, { value });
+      this._toast('Setting creado', 'success');
+      this._closeModal();
+      await this._renderSettings();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _updateSetting(name) {
+    const value = document.getElementById('stf-value').value;
+    try {
+      await Api.request('PATCH', `/admin/settings/${name}`, { value });
+      this._toast('Setting actualizado', 'success');
+      this._closeModal();
+      await this._renderSettings();
+    } catch (err) {
+      this._error('No se puede actualizar: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — COMBOS CRUD completo (7 endpoints)
+  // ===================================================================
+
+  async _renderCombos() {
+    this._loading('Cargando combos…');
+    let combos = [];
+    try {
+      const res = await Api.request('GET', '/combos');
+      combos = res.data || [];
+      this._combosCache = combos;
+    } catch (err) {
+      this._error('No se pueden cargar combos: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo combo', 'kds-btn--primary', 'fa-layer-group', "window.AdminView._newCombo()");
+    if (combos.length === 0) {
+      this._setContent(this._header('Combos', newBtn) +
+        '<div class="admin-empty">No hay combos configurados.</div>');
+      return;
+    }
+    const rows = combos.map(c => `
+      <tr>
+        <td><strong>${this._escape(c.Name)}</strong></td>
+        <td>${c.UseCustomPrice ? '<span class="admin-tag admin-tag--info">$' + Number(c.ComboPrice || 0).toFixed(2) + '</span>' : '<span class="admin-tag">Suma</span>'}</td>
+        <td>${c.IsActive ? '<span class="admin-tag admin-tag--success">Activo</span>' : '<span class="admin-tag admin-tag--danger">Inactivo</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editCombo(${c.Id})`)}
+          ${this._btn('Eliminar', 'kds-btn--void', 'fa-trash', `window.AdminView._deleteCombo(${c.Id})`)}
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Combos', newBtn) +
+      this._table(['Nombre', 'Precio', 'Estado', 'Acciones'], rows));
+  },
+
+  _newCombo() { this._comboForm(null); },
+
+  async _editCombo(id) {
+    try {
+      const res = await Api.request('GET', `/combos/${id}`);
+      this._comboForm(res.data);
+    } catch (err) {
+      this._error('No se puede cargar el combo: ' + (err.message || err));
+    }
+  },
+
+  _comboForm(combo) {
+    const isEdit = !!combo;
+    const c = combo || { UseCustomPrice: false, ComboPrice: 0, IsActive: 1 };
+    this._showModal(isEdit ? `Editar combo — ${combo.Name}` : 'Nuevo combo', `
+      <div class="admin-field"><span>Nombre *</span><input id="cbf-name" class="admin-input" value="${this._escape(c.Name || '')}"></div>
+      <div class="admin-row">
+        <div class="admin-field admin-field--inline">
+          <input type="checkbox" id="cbf-customprice" ${c.UseCustomPrice ? 'checked' : ''}>
+          <span>Precio personalizado</span>
+        </div>
+        <div class="admin-field"><span>Precio</span><input id="cbf-price" type="number" step="0.01" class="admin-input" value="${c.ComboPrice || 0}" ${!c.UseCustomPrice ? 'disabled' : ''}></div>
+      </div>
+      <div class="admin-field admin-field--inline">
+        <input type="checkbox" id="cbf-active" ${c.IsActive ? 'checked' : ''}>
+        <span>Activo</span>
+      </div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveCombo(${isEdit ? combo.Id : 'null'})`)}
+      </div>
+    `);
+    // Toggle price field disabled state
+    const customChk = document.getElementById('cbf-customprice');
+    const priceInput = document.getElementById('cbf-price');
+    if (customChk && priceInput) {
+      customChk.addEventListener('change', () => {
+        priceInput.disabled = !customChk.checked;
+      });
+    }
+  },
+
+  async _saveCombo(id) {
+    const body = {
+      name: document.getElementById('cbf-name').value.trim(),
+      useCustomPrice: document.getElementById('cbf-customprice').checked,
+      comboPrice: parseFloat(document.getElementById('cbf-price').value) || 0,
+      isActive: document.getElementById('cbf-active').checked ? 1 : 0,
+    };
+    if (!body.name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/combos/${id}`, body);
+        this._toast('Combo actualizado', 'success');
+      } else {
+        await Api.request('POST', '/combos', body);
+        this._toast('Combo creado', 'success');
+      }
+      this._closeModal();
+      await this._renderCombos();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _deleteCombo(id) {
+    if (!confirm('¿Eliminar este combo?')) return;
+    try {
+      await Api.request('DELETE', `/combos/${id}`);
+      this._toast('Combo eliminado', 'success');
+      await this._renderCombos();
+    } catch (err) {
+      this._error('No se puede eliminar: ' + (err.message || err));
+    }
+  },
+});
 
 window.AdminView = AdminView;
+
+// =====================================================================
+// Bootstrap: inicializa AdminView al cargar el DOM y se registra en
+// window.App.views para que los onclick inline del HTML funcionen.
+// Usa setTimeout(0) para asegurarse de que App.init() ya haya corrido
+// (app.js se carga después de admin.js y reemplaza this.views).
+// =====================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    AdminView.init();
+    if (window.App) {
+      if (!window.App.views) window.App.views = {};
+      window.App.views.admin = AdminView;
+      if (window.store) {
+        window.store.subscribe((state, prev) => {
+          if (state.currentView === 'admin' && prev && prev.currentView !== 'admin') {
+            AdminView.load();
+          }
+        });
+      }
+    }
+  }, 0);
+});

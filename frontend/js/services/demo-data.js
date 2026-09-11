@@ -165,6 +165,87 @@ window.DEMO_DATA = {
     { Id: 4, Name: 'Cocinero',      IsAdmin: 0 },
   ],
 
+  // Customers (Bloque 11)
+  customers: [
+    { Id: 1, Name: 'Juan Pérez',     Phone: '+53555111100', Email: 'juan@example.com', AccountBalance: 25.50, IsActive: 1, Address: 'Calle 1 #2-3' },
+    { Id: 2, Name: 'María Gómez',    Phone: '+53555222200', Email: 'maria@example.com', AccountBalance: 0,    IsActive: 1, Address: 'Av 5 #6-7' },
+    { Id: 3, Name: 'Restaurante La Esquina', Phone: '+53555333300', Email: 'laesquina@example.com', AccountBalance: 150.00, IsActive: 1, Address: 'Calle 8 #9-10' },
+    { Id: 4, Name: 'Carlos Invitado', Phone: null, Email: null, AccountBalance: 0, IsActive: 0, Address: null },
+  ],
+
+  // Audit logs (Bloque 11)
+  auditLogs: [
+    { Id: 1, Action: 'ticket.open',     EntityType: 'Ticket',  EntityId: 10, UserId: 2, CreatedAt: new Date(Date.now() - 3600000).toISOString(), Details: '{"table":"Mesa 2"}' },
+    { Id: 2, Action: 'ticket.close',    EntityType: 'Ticket',  EntityId: 10, UserId: 3, CreatedAt: new Date(Date.now() - 1800000).toISOString(), Details: '{"total":22.50}' },
+    { Id: 3, Action: 'admin.user.create', EntityType: 'User',  EntityId: 5,  UserId: 1, CreatedAt: new Date(Date.now() - 7200000).toISOString(), Details: '{"name":"María Pizzería"}' },
+    { Id: 4, Action: 'inventory.transfer', EntityType: 'WarehouseTransfer', EntityId: 1, UserId: 1, CreatedAt: new Date(Date.now() - 86400000).toISOString(), Details: '{"from":1,"to":2}' },
+    { Id: 5, Action: 'print.job',       EntityType: 'PrintJob', EntityId: 12, UserId: 3, CreatedAt: new Date().toISOString(), Details: '{"printer":"Cocina"}' },
+  ],
+
+  // Departments (Bloque 11)
+  departments: [
+    { Id: 1, Name: 'Restaurante', WarehouseId: 1, SortOrder: 1, PriceTag: 'normal' },
+    { Id: 2, Name: 'Barra',       WarehouseId: 4, SortOrder: 2, PriceTag: 'bar' },
+    { Id: 3, Name: 'Delivery',    WarehouseId: 1, SortOrder: 3, PriceTag: 'delivery' },
+  ],
+
+  // Payment Types (Bloque 11)
+  paymentTypes: [
+    { Id: 1, Name: 'Efectivo',          AccountTransactionTypeId: 1 },
+    { Id: 2, Name: 'Tarjeta de Crédito',AccountTransactionTypeId: 2 },
+    { Id: 3, Name: 'Tarjeta de Débito', AccountTransactionTypeId: 2 },
+    { Id: 4, Name: 'Transferencia',     AccountTransactionTypeId: 3 },
+    { Id: 5, Name: 'Cuenta Corriente',  AccountTransactionTypeId: 4 },
+  ],
+
+  // Program Settings (Bloque 11)
+  settings: [
+    { Name: 'tax_rate',         Value: '0.21' },
+    { Name: 'currency',         Value: 'USD' },
+    { Name: 'service_charge',   Value: '0.10' },
+    { Name: 'max_open_tickets', Value: '20' },
+    { Name: 'auto_logout_min', Value: '5' },
+  ],
+
+  // Combos with full CRUD (Bloque 11)
+  combos: [
+    { Id: 1, Name: 'Combo Hamburguesa + Bebida', UseCustomPrice: true,  ComboPrice: 6.50, IsActive: 1 },
+    { Id: 2, Name: 'Combo Pizza Familiar',       UseCustomPrice: true,  ComboPrice: 15.00, IsActive: 1 },
+    { Id: 3, Name: 'Combo Café + Croissant',     UseCustomPrice: false, ComboPrice: 0,    IsActive: 1 },
+  ],
+
+  // Report data (Bloque 11 expanded)
+  reportData: {
+    sales: { totalSales: 1245.50, ticketCount: 47, averageTicket: 26.50, voidedCount: 2, refundedCount: 1, refundedAmount: 15.00, grossSales: 1245.50 },
+    topProducts: [
+      { name: 'Clásica', quantity: 28, total: 140.00 },
+      { name: 'Coca Cola 500ml', quantity: 35, total: 70.00 },
+      { name: 'Pepperoni', quantity: 15, total: 165.00 },
+      { name: 'Cappuccino', quantity: 22, total: 55.00 },
+      { name: 'Doble Cheese', quantity: 18, total: 135.00 },
+    ],
+    byCategory: [
+      { category: 'Hamburguesas', quantity: 50, total: 350.00 },
+      { category: 'Pizza',        quantity: 20, total: 220.00 },
+      { category: 'Bebidas',      quantity: 70, total: 140.00 },
+      { category: 'Cafeteria',    quantity: 35, total: 87.50 },
+    ],
+    byUser: [
+      { userName: 'Carlos Mesero', ticketCount: 25, total: 625.00 },
+      { userName: 'Ana Cajera',    ticketCount: 12, total: 380.50 },
+      { userName: 'Administrator', ticketCount: 10, total: 240.00 },
+    ],
+    byPayment: [
+      { paymentType: 'Efectivo',           count: 30, total: 750.00 },
+      { paymentType: 'Tarjeta de Crédito',  count: 12, total: 380.50 },
+      { paymentType: 'Tarjeta de Débito',   count: 5,  total: 115.00 },
+    ],
+    voidsRefunds: { voidsCount: 2, refundsCount: 1, voidsAmount: 45.00, refundsAmount: 15.00 },
+    inventory: { totalIngredients: 24, lowStockCount: 3, outOfStockCount: 1, totalValue: 1850.75 },
+    cashSessions: { openCount: 1, closedCount: 4, totalCash: 1245.50 },
+    dashboard: { openTickets: 3, activeTables: 4, kitchenOrders: 6, todaySales: 1245.50 },
+  },
+
   // Version info
   version: { name: 'sambapos-lba', version: '0.4.0-demo', node: 'browser', uptime: 0 },
 };
@@ -344,6 +425,67 @@ window.DEMO_API = {
     }
     if (path === '/api/errors/stats' && method === 'GET') {
       return { data: { last24h: 2, total: 5, byType: { uncaught: 1, 'console.error': 1 }, byPlatform: { android: 1, web: 1 } } };
+    }
+
+    // Customers (Bloque 11)
+    if (path === '/api/customers' && method === 'GET') {
+      return { data: data.customers, count: data.customers.length };
+    }
+    if (path.match(/^\/api\/customers\/\d+$/) && method === 'GET') {
+      const id = parseInt(path.match(/\d+/)[0], 10);
+      return { data: data.customers.find(c => c.Id === id) || data.customers[0] };
+    }
+
+    // Audit Logs (Bloque 11)
+    if (path.startsWith('/api/admin/audit-logs') && method === 'GET') {
+      return { data: data.auditLogs, count: data.auditLogs.length, total: data.auditLogs.length };
+    }
+
+    // Departments (Bloque 11)
+    if (path === '/api/admin/departments' && method === 'GET') {
+      return { data: data.departments, count: data.departments.length };
+    }
+
+    // Payment Types (Bloque 11)
+    if (path === '/api/admin/payment-types' && method === 'GET') {
+      return { data: data.paymentTypes, count: data.paymentTypes.length };
+    }
+
+    // Settings (Bloque 11)
+    if (path === '/api/admin/settings' && method === 'GET') {
+      return { data: data.settings, count: data.settings.length };
+    }
+
+    // Combos by ID (Bloque 11)
+    if (path.match(/^\/api\/combos\/\d+$/) && method === 'GET') {
+      const id = parseInt(path.match(/\d+/)[0], 10);
+      return { data: data.combos.find(c => c.Id === id) || data.combos[0] };
+    }
+
+    // Reports expanded (Bloque 11)
+    if (path.startsWith('/api/reports/sales') && method === 'GET') {
+      return { data: data.reportData.sales };
+    }
+    if (path.startsWith('/api/reports/categories') && method === 'GET') {
+      return { data: data.reportData.byCategory };
+    }
+    if (path.startsWith('/api/reports/users') && method === 'GET') {
+      return { data: data.reportData.byUser };
+    }
+    if (path.startsWith('/api/reports/payments') && method === 'GET') {
+      return { data: data.reportData.byPayment };
+    }
+    if (path.startsWith('/api/reports/voids-refunds') && method === 'GET') {
+      return { data: data.reportData.voidsRefunds };
+    }
+    if (path.startsWith('/api/reports/inventory') && method === 'GET') {
+      return { data: data.reportData.inventory };
+    }
+    if (path.startsWith('/api/reports/cash-sessions') && method === 'GET') {
+      return { data: data.reportData.cashSessions };
+    }
+    if (path.startsWith('/api/reports/dashboard') && method === 'GET') {
+      return { data: data.reportData.dashboard };
     }
 
     // Version
