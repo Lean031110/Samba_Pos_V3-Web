@@ -60,7 +60,7 @@ Etiquetas: **IMPLEMENTADO** (funciona y está verificado) · **CONFIGURADO**
 | Demo vs producción aislados | ✅ IMPLEMENTADO | `DEMO_MODE` config explícita; producción nunca usa Mock API |
 | Android APK (debug) | ✅ IMPLEMENTADO | CI obligatorio: gradle + aapt2 identity gates + artifact |
 | Android branding (LBApos) | ✅ IMPLEMENTADO | recursos versionados, verificados por `test:android:config` |
-| Android firma/Play Store | ⚙️ CONFIGURADO | keystore real en Secrets + job release con verificación `jarsigner` (ver wiki/Android) |
+| Android firma/Play Store | ✅ PROBADO | AAB firmado en CI (jarsigner verify) — secrets activos, ver wiki/Android |
 | Android emulator smoke | 🧪 EXPERIMENTAL | job best-effort (boot de emulator puede ser flaky) |
 | Impresión ESC/POS (transporte) | ✅ PROBADO | MockTcpServer + pipeline en CI; **impresora física** solo manual |
 | Push notifications (Web Push) | ✅ PROBADO | VAPID + suite 33; entrega real depende de servicio + permisos |
