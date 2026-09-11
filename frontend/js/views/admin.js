@@ -199,8 +199,16 @@ const AdminView = {
       case 'cash':      await this._renderCash();       break;
       case 'reports':   await this._renderReports();    break;
       case 'config':    await this._renderConfig();    break;
+      // BLOQUE 3 — Nuevos tabs modulares
+      case 'users':     await this._renderUsers();      break;
+      case 'roles':     await this._renderRoles();      break;
+      case 'stations':  await this._renderStations();   break;
+      case 'areas':     await this._renderAreas();      break;
+      case 'combos':    await this._renderCombos();     break;
+      case 'transfers': await this._renderTransfers();  break;
+      case 'system':    await this._renderSystem();     break;
       default:
-        this._setContent('<p class="admin-empty">Pestaña no reconocida</p>');
+        this._setContent('<div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-folder-open"></i></div><div class="ds-empty__title">Sección no disponible</div></div>');
     }
   },
 
@@ -2153,5 +2161,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 0);
 });
+
+  async _renderUsers() {
+    this._loading('Cargando usuarios…');
+    let users = [];
+    try { const res = await Api.request('GET', '/admin/users'); users = res.data || []; } catch { this._error('No se pueden cargar los usuarios'); return; }
+    const rows = users.map(u => `<tr><td>${this._escape(u.Name)}</td><td>${this._escape(u.RoleName || '—')}</td><td>${u.IsAdmin ? '<span class="ds-badge ds-badge--info">Sí</span>' : '<span class="ds-badge ds-badge--neutral">No</span>'}</td></tr>`).join('');
+    this._setContent(`<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Usuarios</span></div></div><div style="padding:16px;"><div class="ds-table-wrap"><table class="ds-table"><thead><tr><th>Nombre</th><th>Rol</th><th>Admin</th></tr></thead><tbody>${rows || '<tr><td colspan="3" style="text-align:center;color:var(--ds-gray-500);">Sin usuarios</td></tr>'}</tbody></table></div></div></div>`);
+  },
+
+  async _renderRoles() {
+    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Roles</span></div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Roles del sistema</h3><p class="ds-text-muted ds-text-sm">Gestiona roles y permisos.</p></div></div></div>');
+  },
+
+  async _renderStations() {
+    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Estaciones</span></div><div class="ds-actions">' + this._btn('Nueva', 'kds-btn--primary', 'fa-plus', "window.AdminView._toast('Próximamente','info')") + '</div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Estaciones</h3><p class="ds-text-muted ds-text-sm">Dispositivos físicos (POS, KDS, Caja).</p></div><div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-desktop"></i></div><div class="ds-empty__title">Sin estaciones</div></div></div></div>');
+  },
+
+  async _renderAreas() {
+    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Áreas</span></div><div class="ds-actions">' + this._btn('Nueva', 'kds-btn--primary', 'fa-plus', "window.AdminView._toast('Próximamente','info')") + '</div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Áreas de elaboración</h3><p class="ds-text-muted ds-text-sm">Cocina, Pizzería, Barra, Cafetería.</p></div><div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-utensils"></i></div><div class="ds-empty__title">Sin áreas</div></div></div></div>');
+  },
+
+  async _renderCombos() {
+    this._loading('Cargando combos…');
+    let combos = [];
+    try { const res = await Api.request('GET', '/combos'); combos = res.data || []; } catch {}
+    const rows = combos.length ? combos.map(c => `<tr><td>${this._escape(c.Name)}</td><td>${c.UseCustomPrice ? '$' + Number(c.ComboPrice).toFixed(2) : 'Suma'}</td><td>${c.IsActive ? '<span class="ds-badge ds-badge--success">Activo</span>' : '<span class="ds-badge ds-badge--neutral">Inactivo</span>'}</td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--ds-gray-500);">Sin combos</td></tr>';
+    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Combos</span></div></div><div style="padding:16px;"><div class="ds-table-wrap"><table class="ds-table"><thead><tr><th>Nombre</th><th>Precio</th><th>Estado</th></tr></thead><tbody>' + rows + '</tbody></table></div></div></div>');
+  },
+
+  async _renderTransfers() {
+    this._loading('Cargando transferencias…');
+    let transfers = [];
+    try { const res = await Api.request('GET', '/inventory/transfers'); transfers = res.data || []; } catch {}
+    const rows = transfers.length ? transfers.map(t => `<tr><td>${this._escape(t.TransferNumber)}</td><td>${this._escape(t.FromWarehouseName || '—')}</td><td>${this._escape(t.ToWarehouseName || '—')}</td><td><span class="ds-badge ds-badge--${t.Status === 'COMPLETED' ? 'success' : 'warning'}">${t.Status}</span></td></tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--ds-gray-500);">Sin transferencias</td></tr>';
+    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Transferencias</span></div><div class="ds-actions">' + this._btn('Nueva', 'kds-btn--primary', 'fa-arrow-right-arrow-left', "window.AdminView._toast('Usa /api/inventory/transfer','info')") + '</div></div><div style="padding:16px;"><div class="ds-table-wrap"><table class="ds-table"><thead><tr><th>N°</th><th>Origen</th><th>Destino</th><th>Estado</th></tr></thead><tbody>' + rows + '</tbody></table></div></div></div>');
+  },
+
+  async _renderSystem() {
+    this._loading('Cargando sistema…');
+    let version = null;
+    try { const r = await fetch('/version'); if (r.ok) version = await r.json(); } catch {}
+    const wsStatus = window.store?.state?.wsConnected ? '<span class="ds-badge ds-badge--success">Conectado</span>' : '<span class="ds-badge ds-badge--danger">Desconectado</span>';
+    this._setContent('<div class="admin-section"><div class="ds-control-panel"><div class="ds-breadcrumb"><span class="ds-breadcrumb__item--active">Sistema</span></div></div><div style="padding:16px;"><div class="ds-card"><h3 class="ds-card__title">Información</h3><div class="ds-card__grid"><div><span>App:</span> <strong>' + (version?.name || 'SambaPos_LBA') + '</strong></div><div><span>Versión:</span> <strong>' + (version?.version || '0.5.0') + '</strong></div><div><span>Node:</span> <strong>' + (version?.node || '—') + '</strong></div><div><span>WebSocket:</span> <strong>' + wsStatus + '</strong></div></div></div></div></div>');
+  },
+};
 
 window.AdminView = AdminView;
