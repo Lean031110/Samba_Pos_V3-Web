@@ -88,13 +88,20 @@ CLI: `gh secret set ANDROID_KEYSTORE_BASE64 < keystore-base64.txt` etc.
 bash scripts/gen-release-keystore.sh release-signing/   # solo la 1ª vez
 cd android
 cat >> gradle.properties << EOF
-android.injected.signing.store.file=../release-signing/lba-release.jks
+android.injected.signing.store.file=../../release-signing/lba-release.jks
 android.injected.signing.store.password=<store>
 android.injected.signing.key.alias=lba-release
 android.injected.signing.key.password=<key>
 EOF
 ./gradlew bundleRelease
 ```
+
+> ⚠️ El path inyectado de `store.file` se resuelve relativo al
+> **módulo app** (`android/app/`), NO al proyecto gradle raíz: desde
+> `android/`, el keystore en la raíz del repo queda en `../../<ruta>`.
+> Si lo pones mal, `signReleaseBundle` falla con
+> `storeFile ... doesn't exist` (bug real — ver
+> [Troubleshooting](Troubleshooting)).
 
 ### Publicar en Google Play
 

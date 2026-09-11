@@ -206,8 +206,13 @@ jobs:
           test -n "$ANDROID_KEY_ALIAS"        || { echo "FAIL: secret ANDROID_KEY_ALIAS is empty"; exit 1; }
           test -n "$ANDROID_STORE_PASSWORD"   || { echo "FAIL: secret ANDROID_STORE_PASSWORD is empty"; exit 1; }
           test -n "$ANDROID_KEY_PASSWORD"     || { echo "FAIL: secret ANDROID_KEY_PASSWORD is empty"; exit 1; }
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
-          KS_SIZE=$(stat -c%s release.keystore)
+          # ⚠️ The injected store.file path is resolved relative to the
+          # APP MODULE (android/app/), NOT to the gradle root project.
+          # Writing it to android/ was the bug that made signReleaseBundle
+          # fail with "storeFile ... doesn't exist" (caught by this gate
+          # the first time the release channel ran for real — PR #11).
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > app/release.keystore
+          KS_SIZE=$(stat -c%s app/release.keystore)
           if [ "$KS_SIZE" -lt 1000 ]; then
             echo "FAIL: decoded keystore is only ${KS_SIZE} bytes — ANDROID_KEYSTORE_BASE64 is not a valid keystore"
             exit 1

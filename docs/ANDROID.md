@@ -123,13 +123,18 @@ Local release build:
 bash scripts/gen-release-keystore.sh release-signing/   # only once
 cd android
 cat >> gradle.properties << EOF
-android.injected.signing.store.file=../release-signing/lba-release.jks
+android.injected.signing.store.file=../../release-signing/lba-release.jks
 android.injected.signing.store.password=...
 android.injected.signing.key.alias=lba-release
 android.injected.signing.key.password=...
 EOF
 ./gradlew bundleRelease
 ```
+
+> ⚠️ The injected `store.file` path is resolved relative to the **app
+> module** (`android/app/`), not to the gradle root: from `android/`
+> the keystore at the repo root is `../../<path>`. (Getting this wrong
+> fails `signReleaseBundle` with `storeFile ... doesn't exist`.)
 
 ## Server configuration (Android welcome screen)
 

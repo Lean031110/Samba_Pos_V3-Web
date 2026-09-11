@@ -16,6 +16,7 @@ Cada entrada documenta un problema REAL que ocurrió y cómo se cerró
 9. [API 404 en `actions/public-key` (secrets por API)](#9-api-404-en-actionspublic-key-secrets-por-api)
 10. [La demo de Pages muestra datos reales](#10-la-demo-de-pages-muestra-datos-reales)
 11. [El APK instala pero no conecta al servidor](#11-el-apk-instala-pero-no-conecta-al-servidor)
+12. [`signReleaseBundle`: "storeFile ... doesn't exist"](#12-signreleasebundle-storefile--doesnt-exist)
 
 ---
 
@@ -160,6 +161,28 @@ Checklist en orden:
 6. Backend en producción: `CORS_ORIGIN` correcto (el server no arranca
    con `*` en prod — revisa sus logs).
 7. Reinstaló tras cambiar `appId`? Es una app distinta: limpia datos.
+
+---
+
+### 12. `signReleaseBundle`: "storeFile ... doesn't exist"
+
+**Síntoma**: el job `Release AAB` falla en
+`:app:signReleaseBundle (FinalizeBundleTask)` con
+`storeFile specifies file '.../android/app/release.keystore' which doesn't exist`.
+
+**Causa**: la propiedad inyectada
+`android.injected.signing.store.file` se resuelve relativa al
+**módulo app** (`android/app/`), NO al proyecto gradle raíz. El
+workflow escribía el keystore en `android/` (cwd) y Gradle lo buscaba
+en `android/app/`. El bug existía desde el diseño del canal release
+pero **nunca se había visto** porque los secrets no estaban
+configurados (el job saltaba) — apareció la primera vez que el canal
+corrió de verdad (PR #11).
+
+**Fix**: escribir el keystore en `app/release.keystore` (o usar ruta
+`../../<repo-root>/<path>` en builds locales). El workflow ya está
+corregido; la lección: **un canal de release sin secrets configurados
+nunca ha sido probado**.
 
 ---
 
