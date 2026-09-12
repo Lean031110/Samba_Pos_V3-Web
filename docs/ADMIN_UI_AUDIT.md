@@ -1,7 +1,7 @@
 # ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
 > Generado por `scripts/audit-admin-ui-v2.js`
-> Fecha: 2026-09-12T13:57:06.043Z
+> Fecha: 2026-09-12T22:07:20.248Z
 > Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
 ## Capabilities verificadas
@@ -17,7 +17,7 @@ Para cada sección × capability, se clasifica como:
 
 | Sección | Prioridad | listar | buscar | filtrar | ordenar | paginar | crear | editar | eliminar | desactivar | ver_detalle | loading | empty | error | permisos |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Productos | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Productos | 🔴 Crítica | ✅ | ✅ | ⚠️ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Usuarios | 🔴 Crítica | ✅ | ✅ | ❌ | ❌ | ✅ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Roles | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Clientes | 🔴 Crítica | ✅ | ✅ | ❌ | ❌ | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
@@ -43,9 +43,9 @@ Para cada sección × capability, se clasifica como:
 
 | Estado | Cantidad | % |
 |---|---|---|
-| ✅ PASS | 88 | 29.9% |
-| ⚠️ PARTIAL | 31 | 10.5% |
-| ❌ MISSING | 135 | 45.9% |
+| ✅ PASS | 89 | 30.3% |
+| ⚠️ PARTIAL | 32 | 10.9% |
+| ❌ MISSING | 133 | 45.2% |
 | — NOT_APPLICABLE | 40 | — |
 | **Total** | 294 | 100% |
 
@@ -53,7 +53,7 @@ Para cada sección × capability, se clasifica como:
 
 ### Secciones críticas (prioridad 1) — deben estar PASS
 
-- **Productos**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Productos**: MISSING ordenar, paginar, ver_detalle
 - **Usuarios**: MISSING filtrar, ordenar, ver_detalle
 - **Roles**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
 - **Clientes**: MISSING filtrar, ordenar, eliminar, ver_detalle
@@ -76,6 +76,6 @@ Para cada sección × capability, se clasifica como:
 
 ## Recomendación
 
-- Coverage total PASS: 29.9%
-- Secciones críticas con MISSING: 60
+- Coverage total PASS: 30.3%
+- Secciones críticas con MISSING: 58
 - Próximo foco: implementar pagination + search en secciones críticas

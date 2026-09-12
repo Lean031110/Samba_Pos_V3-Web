@@ -381,6 +381,7 @@ const AdminView = {
 
   async _renderProducts() {
     this._loading('Cargando productos...');
+    if (this._productsSearch === undefined) this._productsSearch = '';
     let items = [];
     try {
       const res = await Api.request('GET', '/products');
@@ -392,13 +393,24 @@ const AdminView = {
         '<p class="admin-empty">Error al cargar productos.</p>');
       return;
     }
+    // Client-side filter (Bloque 12 FASE C — backend doesn't support server-side search)
+    const filtered = this._productsSearch
+      ? items.filter(it => (it.Name || '').toLowerCase().includes(this._productsSearch.toLowerCase()) ||
+                            (it.GroupCode || '').toLowerCase().includes(this._productsSearch.toLowerCase()))
+      : items;
     const newBtn = this._btn('Nuevo producto', 'kds-btn--primary', 'fa-plus', "window.AdminView._newProduct()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="products-search"
+        placeholder="Buscar producto o grupo..." value="${this._escape(this._productsSearch)}"
+        oninput="window.AdminView._productsSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (items.length === 0) {
       this._setContent(this._header('Productos', newBtn) +
         '<p class="admin-empty">No hay productos cargados. Hacé clic en "Nuevo producto" para crear el primero.</p>');
       return;
     }
-    const rows = items.map(it => {
+    const rows = filtered.map(it => {
       const price = Number(it.Portions?.[0]?.Prices?.[0]?.Price || 0);
       const group = it.GroupCode || '—';
       return `
@@ -413,11 +425,26 @@ const AdminView = {
         </tr>
       `;
     }).join('');
+    const countInfo = this._productsSearch
+      ? `${filtered.length} de ${items.length} productos`
+      : `${items.length} productos`;
     this._setContent(
-      this._header('Productos (' + items.length + ')', newBtn) +
+      this._header('Productos (' + countInfo + ')', newBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       this._table(['Nombre', 'Grupo', 'Precio', 'Acciones'], rows)
     );
   },
+
+  _productsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._productsSearch = value.trim();
+        AdminView._renderProducts();
+      }, 300);
+    };
+  })(),
 
   _btn(label, cls, icon, onclick, extraAttrs) {
     const clsAttr = cls ? (' ' + cls) : '';
@@ -1705,6 +1732,9 @@ const AdminView = {
         <label>Desde: <input type="date" id="rpt-from" value="${fromDate}" onchange="window.AdminView._setReportDates()"></label>
         <label>Hasta: <input type="date" id="rpt-to" value="${toDate}" onchange="window.AdminView._setReportDates()"></label>
         ${this._btn('Generar', 'kds-btn--primary', 'fa-magnifying-glass', "window.AdminView._renderReports()")}
+        ${this._btn('Exportar Top Productos', '', 'fa-file-csv', "window.AdminView._exportTopProducts()")}
+        ${this._btn('Exportar por Categoría', '', 'fa-file-csv', "window.AdminView._exportByCategory()")}
+        ${this._btn('Exportar por Mesero', '', 'fa-file-csv', "window.AdminView._exportByUser()")}
       </div>
     `;
 
@@ -1927,6 +1957,54 @@ const AdminView = {
     const toEl = document.getElementById('rpt-to');
     if (fromEl) this._reportFromDate = fromEl.value;
     if (toEl) this._reportToDate = toEl.value;
+  },
+
+  async _exportTopProducts() {
+    const fromDate = this._reportFromDate || new Date().toISOString().slice(0, 10);
+    const toDate = this._reportToDate || fromDate;
+    try {
+      const res = await Api.request('GET', `/reports/top-products?from=${fromDate}&to=${toDate}&limit=100`);
+      const products = res.data || [];
+      if (products.length === 0) { this._toast('No hay datos para exportar', 'info'); return; }
+      window.CSVExport.export(products, [
+        { key: 'name', label: 'Producto' },
+        { key: 'quantity', label: 'Cantidad' },
+        { key: 'total', label: 'Total' },
+      ], `top-productos-${fromDate}-a-${toDate}.csv`);
+      this._toast(`Exportados ${products.length} productos`, 'success');
+    } catch (err) { this._error('No se puede exportar: ' + (err.message || err)); }
+  },
+
+  async _exportByCategory() {
+    const fromDate = this._reportFromDate || new Date().toISOString().slice(0, 10);
+    const toDate = this._reportToDate || fromDate;
+    try {
+      const res = await Api.request('GET', `/reports/categories?from=${fromDate}&to=${toDate}`);
+      const cats = res.data || [];
+      if (cats.length === 0) { this._toast('No hay datos para exportar', 'info'); return; }
+      window.CSVExport.export(cats, [
+        { key: 'category', label: 'Categoría' },
+        { key: 'quantity', label: 'Cantidad' },
+        { key: 'total', label: 'Total' },
+      ], `ventas-categoria-${fromDate}-a-${toDate}.csv`);
+      this._toast(`Exportadas ${cats.length} categorías`, 'success');
+    } catch (err) { this._error('No se puede exportar: ' + (err.message || err)); }
+  },
+
+  async _exportByUser() {
+    const fromDate = this._reportFromDate || new Date().toISOString().slice(0, 10);
+    const toDate = this._reportToDate || fromDate;
+    try {
+      const res = await Api.request('GET', `/reports/users?from=${fromDate}&to=${toDate}`);
+      const users = res.data || [];
+      if (users.length === 0) { this._toast('No hay datos para exportar', 'info'); return; }
+      window.CSVExport.export(users, [
+        { key: 'userName', label: 'Mesero' },
+        { key: 'ticketCount', label: 'Tickets' },
+        { key: 'total', label: 'Total' },
+      ], `ventas-mesero-${fromDate}-a-${toDate}.csv`);
+      this._toast(`Exportados ${users.length} meseros`, 'success');
+    } catch (err) { this._error('No se puede exportar: ' + (err.message || err)); }
   },
 
   // ===================================================================
@@ -2367,6 +2445,8 @@ Object.assign(AdminView, {
     // Pagination + search state (Bloque 12 FASE C)
     if (this._usersPage === undefined) this._usersPage = 1;
     if (this._usersSearch === undefined) this._usersSearch = '';
+    if (this._usersSortCol === undefined) this._usersSortCol = 'Name';
+    if (this._usersSortDir === undefined) this._usersSortDir = 'asc';
     const pageSize = 20;
     let users = [];
     let roles = [];
@@ -2389,7 +2469,18 @@ Object.assign(AdminView, {
       this._error('No se pueden cargar los usuarios: ' + (err.message || err));
       return;
     }
+    // Client-side sort (Bloque 12 FASE C — backend doesn't support sort yet)
+    users.sort((a, b) => {
+      const av = String(a[this._usersSortCol] ?? '');
+      const bv = String(b[this._usersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._usersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._usersSortCol === col
+      ? (this._usersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo usuario', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newUser()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportUsers()");
     const searchInput = `
       <input type="text" class="admin-input" id="users-search"
         placeholder="Buscar usuario..." value="${this._escape(this._usersSearch)}"
@@ -2416,11 +2507,50 @@ Object.assign(AdminView, {
           </td>
         </tr>`;
     }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._usersSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._usersSort('RoleName')">Rol${sortIcon('RoleName')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._usersSort('IsAdmin')">Admin${sortIcon('IsAdmin')}</th>
+      <th>Acciones</th>
+    `;
     const paginationHtml = this._renderPagination(pagination, '_usersPage', '_renderUsers');
-    this._setContent(this._header('Usuarios', newBtn) +
+    // Use raw table HTML to inject sortable headers
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    this._setContent(this._header('Usuarios', newBtn + ' ' + exportBtn) +
       `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
-      this._table(['Nombre', 'Rol', 'Admin', 'Acciones'], rows) +
+      tableHtml +
       paginationHtml);
+  },
+
+  _usersSort(col) {
+    if (this._usersSortCol === col) {
+      this._usersSortDir = this._usersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._usersSortCol = col;
+      this._usersSortDir = 'asc';
+    }
+    this._renderUsers();
+  },
+
+  _exportUsers() {
+    if (!this._rolesCache) return;
+    // Fetch ALL users (without pagination) for export
+    Api.request('GET', '/admin/users?pageSize=10000').then(res => {
+      const users = res.data || [];
+      window.CSVExport.export(users, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'RoleName', label: 'Rol' },
+        { key: 'IsAdmin', label: 'Es Admin' },
+      ], `usuarios-${new Date().toISOString().slice(0,10)}.csv`);
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _usersSearchDebounced: (function () {
@@ -3275,6 +3405,7 @@ Object.assign(AdminView, {
       return;
     }
     const newBtn = this._btn('Nuevo cliente', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newCustomer()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportCustomers()");
     const searchInput = `
       <input type="text" class="admin-input" id="customers-search"
         placeholder="Buscar cliente..." value="${this._escape(this._customersSearch)}"
@@ -3308,10 +3439,25 @@ Object.assign(AdminView, {
         </tr>`;
     }).join('');
     const paginationHtml = this._renderPagination(pagination, '_customersPage', '_renderCustomers');
-    this._setContent(this._header('Clientes', newBtn) +
+    this._setContent(this._header('Clientes', newBtn + ' ' + exportBtn) +
       `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       this._table(['Nombre', 'Teléfono', 'Email', 'Saldo', 'Estado', 'Acciones'], rows) +
       paginationHtml);
+  },
+
+  _exportCustomers() {
+    // Fetch ALL customers for export (no pagination)
+    Api.request('GET', '/customers?limit=10000&offset=0&active=all').then(res => {
+      const customers = res.data || [];
+      window.CSVExport.export(customers, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'Phone', label: 'Teléfono' },
+        { key: 'Email', label: 'Email' },
+        { key: 'AccountBalance', label: 'Saldo' },
+        { key: 'IsActive', label: 'Activo' },
+      ], `clientes-${new Date().toISOString().slice(0,10)}.csv`);
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _customersSearchDebounced: (function () {

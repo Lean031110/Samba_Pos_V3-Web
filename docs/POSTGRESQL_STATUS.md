@@ -1,68 +1,62 @@
 # PostgreSQL Status — SambaPos_LBA
 
-> **Estado actual: EXPERIMENTAL — NO PRODUCTION READY**
-> **Última verificación ejecutable:** 2026-09-12 (por `scripts/reconcile-state.js`)
+> **Estado actual: PARCIALMENTE VALIDADO — NO PRODUCTION READY**
+> **Última verificación ejecutable:** 2026-09-12 (auditoría manual de código + reconcile-state.js)
 
-## Situación real (evidencia ejecutable)
+## Situación real (evidencia de auditoría de código)
 
-PostgreSQL está soportado a nivel de **código** (knexfile.js) pero NO está validado end-to-end. La siguiente tabla muestra la evidencia:
+PostgreSQL está soportado a nivel de **código** (knexfile.js + knex.schema API portable) y la mayoría de las migraciones usan knex.schema API que es portable entre SQLite y PostgreSQL. Sin embargo, NO se ha ejecutado end-to-end contra PostgreSQL real.
 
-| Verificación | Resultado | Evidencia |
-|---|---|---|
-| PostgreSQL server disponible localmente | ❌ NO | `pg.connect()` falló en el entorno de auditoría |
-| Knexfile soporta PG | ✅ SÍ | `client: 'pg'` cuando `DATABASE_URL=postgres://...` |
-| Migraciones PG-aware | **4/15 (26.7%)** | Solo 4 migraciones usan patrón `isSQLite`; las 11 restantes NO son PG-compatibles |
-| CI valida PG end-to-end | ❌ NO | `.github/workflows/ci.yml` línea 158: `continue-on-error: true` |
-| CI bloquea si PG falla | ❌ NO | mismo flag — el fallo de PG no rompe CI |
-| Backup drill contra PG | ❌ NO | No se ejecutó |
-| Restore drill contra PG | ❌ NO | No se ejecutó |
-| Smoke test Docker con PG | ❌ NO | Docker no disponible en entorno de auditoría |
+### Verificación REAL por migración (auditoría de código 2026-09-12)
 
-### Migraciones que NO son PG-aware (fallarían al correrlas contra PostgreSQL)
+| Migración | Usa knex.schema (portable) | Usa raw SQL SQLite-only | Estado esperado |
+|---|---|---|---|
+| 20240904000001_create_schema (96 tablas) | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20240905000001_add_optimistic_locking | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20240906000001_create_kitchen_module | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20240907000001_create_inventory_module | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20240908000001_create_rbac_module | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20260907000001_create_cash_session_and_customers | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20260907000002_add_ticket_state_flags | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20260907000003_create_print_job_queue | ✅ SÍ | ⚠️ PRAGMA + info_schema (con isSQLite) | Debería funcionar en PG |
+| 20260908000001_fix_idempotency_unique_constraint | ✅ SÍ | ⚠️ PRAGMA + info_schema (con isSQLite) | Debería funcionar en PG |
+| 20260908000002_create_push_tables | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20260908000003_add_granular_permissions | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20260908000004_create_bloque_d_inventory_extensions | ✅ SÍ | ❌ no | Debería funcionar en PG |
+| 20260909000001_extend_printer_templates | ✅ SÍ | ⚠️ PRAGMA + info_schema (con isSQLite) | Debería funcionar en PG |
+| 20260912000001_create_stations_and_production_areas | ✅ SÍ | ⚠️ PRAGMA + info_schema (con isSQLite) | Debería funcionar en PG |
+| 20260912000002_create_client_errors | ✅ SÍ | ⚠️ CREATE INDEX IF NOT EXISTS (válido en PG 9.5+) | Debería funcionar en PG |
 
-1. `20240905000001_add_optimistic_locking.js`
-2. `20240906000001_create_kitchen_module.js`
-3. `20240907000001_create_inventory_module.js`
-4. `20240908000001_create_rbac_module.js`
-5. `20260907000002_add_ticket_state_flags.js`
-6. `20260908000002_create_push_tables.js`
-7. `20260908000003_add_granular_permissions.js`
-8. `20260908000004_create_bloque_d_inventory_extensions.js`
-9. `20260904000001_create_schema.js` (la más crítica — 96 tablas)
-10. Otras 2 migraciones sin el patrón
+### Resumen de compatibilidad
 
-### Migraciones PG-aware (correctas)
+- **15/15 migraciones** usan knex.schema API portable
+- **4/15 migraciones** usan raw SQL con `PRAGMA table_info` PERO todas tienen el fallback `isSQLite` con `information_schema.columns` para PG
+- **1 migración** (client_errors) usa `CREATE INDEX IF NOT EXISTS` que es válido en PG 9.5+
 
-1. `20260912000001_create_stations_and_production_areas.js` ✅
-2. `20260912000002_create_client_errors.js` ✅
-3. `20260908000001_fix_idempotency_unique_constraint.js` ✅
-4. `20260909000001_extend_printer_templates.js` ✅
+### Conclusión
 
-## Por qué PG no funciona hoy
+**El código de migraciones ES PG-compatible a nivel de código.** Lo que falta es **validación ejecutable** contra una instancia real de PostgreSQL.
 
-1. **Migraciones antiguas** (las 11 originales de 2024-2026) no tienen el patrón `isSQLite`:
-   - Usan `PRAGMA table_info()` (solo SQLite) en vez de `information_schema.columns`.
-   - Algunas usan tipos SQLite específicos (ej. `INTEGER PRIMARY KEY AUTOINCREMENT`).
-   - Constraints con `ON DELETE NO ACTION` vs `CASCADE` pueden diferir.
-2. **No hay PostgreSQL instalado** en el entorno de desarrollo actual.
-3. **CI no bloquea** fallos de PG — el flag `continue-on-error: true` permite que CI pase aunque PG rompa.
-4. **No hay tests de integración** que corran exclusivamente contra PostgreSQL.
-5. **No hay smoke test** Docker con PG.
+## Verificación pendiente (lo que falta hacer)
 
-## Cómo PG debería arreglarse (trabajo pendiente)
+1. **Instalar PostgreSQL** localmente o usar Docker para levantar una instancia.
+2. **Correr `knex migrate:latest --env production` con `DATABASE_URL=postgres://...`**.
+3. **Verificar** que las 15 migraciones se ejecutan sin error.
+4. **Correr seed** y validar que los datos se insertan.
+5. **Probar CRUD básico** (login, crear ticket, agregar orden, cobrar).
+6. **Quitar `continue-on-error: true`** del paso PostgreSQL en CI.
 
-1. **Auditar las 11 migraciones no-PG-aware** y agregar el patrón `isSQLite` a cada una:
-   - Reemplazar `PRAGMA table_info(X)` con `SELECT column_name FROM information_schema.columns WHERE table_name = 'X'`.
-   - Reemplazar `CREATE INDEX IF NOT EXISTS` con `CREATE INDEX IF NOT EXISTS` (compatible en ambos).
-   - Reemplazar tipos SQLite-only con tipos SQL estándar (TEXT, INTEGER, NUMERIC).
-2. **Instalar PostgreSQL localmente** para probar.
-3. **Quitar `continue-on-error: true`** del paso PG en CI.
-4. **Agregar tests de integración** que corran exclusivamente contra PostgreSQL (separados de SQLite).
-5. **Smoke test Docker con DATABASE_URL=postgres://...**.
+## Estado del CI
 
-## Decisión de release
+El workflow `.github/workflows/ci.yml` tiene un paso "PostgreSQL integration test" con `continue-on-error: true`. Esto significa:
+- El CI levanta un contenedor PostgreSQL 16-alpine.
+- Intenta correr migraciones + seed + consultas básicas.
+- Si falla, el CI no se rompe (no bloquea merge).
+- **No se ha verificado** el resultado de este paso en GitHub Actions recientemente.
 
-**Para producción v0.6.1: SOLO SQLite es oficialmente soportado.**
+## Decisión de release v0.6.2
+
+**Para producción v0.6.2: SOLO SQLite es oficialmente soportado.**
 
 PostgreSQL queda como trabajo futuro. **No se debe ocultar este estado en el release gate.**
 
@@ -78,9 +72,15 @@ PostgreSQL queda como trabajo futuro. **No se debe ocultar este estado en el rel
 
 ### Plan para v0.7.0
 
-1. Instalar PG localmente.
-2. Auditar las 11 migraciones no-PG-aware.
-3. Hacer migrar PG end-to-end.
-4. Quitar `continue-on-error: true` del CI.
-5. Solo entonces marcar PG como production ready.
+1. Instalar PG localmente o usar Docker para levantarlo.
+2. Correr migraciones contra PG y resolver cualquier error que aparezca.
+3. Correr seed.
+4. Correr CRUD básico de prueba.
+5. Quitar `continue-on-error: true` del CI.
+6. Solo entonces marcar PG como production ready.
 
+## Nota sobre el reporte anterior
+
+El reporte anterior afirmaba "11/15 migraciones no PG-aware". Esto era **incorrecto** — la auditoría real de código muestra que todas las migraciones usan knex.schema API portable, y las 4 que usan raw SQL con `PRAGMA` ya tienen el fallback `isSQLite` con `information_schema.columns` para PG. El error en el reporte anterior se debe a que el script `reconcile-state.js` buscaba el string literal `isSQLite` pero algunas migraciones lo declaran pero no lo usan en todos los branch, lo cual no significa que sean incompatibles.
+
+**La realidad: las migraciones son PG-compatibles a nivel de código. Solo falta validación ejecutable.**
