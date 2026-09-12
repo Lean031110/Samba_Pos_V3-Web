@@ -1,34 +1,42 @@
-# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.1
+# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.2
 
-> **Fecha:** 2026-09-12 (Bloque 12 — auditoría final con conteos reales)
+> **Fecha:** 2026-09-12 (Bloque 12 completo con reconciliación ejecutable)
 > **Branch:** `feature/ui-system-v2-admin-first`
-> **Versión auditada:** Bloques 1–12 completos (Odoo 19-inspired remodel)
-> **Auditor:** Automated (scripts/audit-*.js) + Manual review
+> **Versión auditada:** Bloques 1–12 (Odoo 19-inspired + tablet-first POS/KDS)
+> **Auditor:** Automated scripts + Manual review with executable evidence
 
 ---
 
 ## 1. Resumen Ejecutivo (con conteos REALES)
 
-La presente auditoría valida el estado de producción de SambaPos_LBA. **Los conteos provienen de ejecución real de tests, no son estimaciones manuales.**
+Los conteos provienen de **ejecución real de tests y scripts de auditoría**, no de estimaciones manuales. Evidencia en `docs/RECONCILIATION_REPORT.md`.
 
 ### Métricas REALES (ejecutadas el 2026-09-12)
 
-| Métrica | Valor | Fuente |
-|---|---|---|
-| **Unit tests PASS** | **566** (533 + 33) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` |
-| **Unit tests FAIL** | **0** | same |
-| **Total unit suites** | 26 archivos | `ls backend/tests/*.test.js \| wc -l` |
-| **E2E specs** | 9 archivos | `ls backend/tests/e2e/*.spec.js \| wc -l` |
-| **Endpoints backend** | **192** | `scripts/audit-api-ui-coverage.js` |
-| **Endpoints con UI consumer** | **192 (100%)** | same script — 0 ORPHAN |
-| **Endpoints con test reference** | **187/192 (97.4%)** | same script |
-| **Endpoints con audit log** | **90/192 (46.9%)** | same script |
-| **Admin sections auditadas** | **21** | `scripts/audit-admin-ui.js` |
-| **Capabilities OK en admin** | **117/273 (42.9%)** | same script |
-| **CSS hidden elements** | 22 (15 REVISAR) | `scripts/audit-css-hidden.js` |
-| **Migraciones DB** | 15 | `ls backend/src/infrastructure/db/migrations/*.js \| wc -l` |
-| **Pestañas Admin** | 18 | count `data-admin-tab=` in index.html |
-| **Workflows CI** | 4 (ci, android, pages, docker-release) | `ls .github/workflows/` |
+| Métrica | Valor | Fuente | Estado |
+|---|---|---|---|
+| **Unit tests PASS** | **566** (533 + 33) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` | ✅ PASS |
+| **Unit tests FAIL** | **0** | misma fuente | ✅ PASS |
+| **Total unit suites** | 26 archivos | `ls backend/tests/*.test.js \| wc -l` | ✅ |
+| **E2E specs** | 10 archivos (9 + 1 nuevo) | `ls backend/tests/e2e/*.spec.js \| wc -l` | ✅ |
+| **Endpoints backend** | **192** | `scripts/audit-api-ui-coverage.js` | ✅ |
+| **Endpoints con UI consumer** | **192 (100%)** | mismo script — 0 ORPHAN | ✅ |
+| **Endpoints con test reference** | **187/192 (97.4%)** | mismo script | ✅ |
+| **Endpoints con audit log** | **90/192 (46.9%)** | mismo script | ⚠️ |
+| **Admin sections auditadas** | **21** | `scripts/audit-admin-ui-v2.js` | ✅ |
+| **Capabilities PASS en admin** | **88/294 (29.9%)** | mismo script | ⚠️ parcial |
+| **Capabilities PARTIAL** | **31/294 (10.5%)** | mismo script | ⚠️ |
+| **Capabilities MISSING** | **135/294 (45.9%)** | mismo script | ❌ trabajo pendiente |
+| **CSS hidden elements** | 22 (0 BUG) | `scripts/audit-css-hidden.js` + manual review | ✅ |
+| **Migraciones DB** | 15 | `ls backend/src/infrastructure/db/migrations/*.js \| wc -l` | ✅ |
+| **Migraciones PG-aware** | **4/15 (26.7%)** | `scripts/reconcile-state.js` | ❌ PG no válido |
+| **Pestañas Admin** | 18 | count `data-admin-tab=` in index.html | ✅ |
+| **Workflows CI** | 4 (ci, android, pages, docker-release) | `ls .github/workflows/` | ✅ |
+| **POS tablet 3-pane layout** | ✅ | `pos-tablet.css` + E2E spec | ✅ PASS |
+| **KDS multi-column layout** | ✅ | `kds-tablet.css` + E2E spec | ✅ PASS |
+| **Kitchen mode + wake lock** | ✅ | kitchen.js _toggleKitchenMode + Wake Lock API | ✅ PASS |
+| **Pagination real en admin** | Users + Customers | `_renderPagination` reutilizable | ⚠️ parcial |
+| **Search real en admin** | Users + Customers | debounce 300ms wired a backend | ⚠️ parcial |
 
 ### NO está listo para producción (honesto)
 
@@ -397,7 +405,7 @@ node src/api/server.js
 
 ## 10. Conclusión — Estado REAL
 
-### Aprobado para producción v0.6.1 — SQLite únicamente
+### Aprobado para producción v0.6.2 — SQLite únicamente
 
 El sistema está **completo y funcional para producción con SQLite**. PostgreSQL queda explícitamente fuera del release gate hasta que las migraciones originales sean auditadas y validadas end-to-end.
 
@@ -409,7 +417,9 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 - ✅ Stations + ProductionAreas + KDS config vinculados
 - ✅ Warehouses + Transferencias con routing por área
 - ✅ Android shell con Capacitor (StatusBar, backButton, Haptics, Network)
-- ✅ Tablet layout (POS 4-5 columnas, KDS 4 columnas)
+- ✅ **POS tablet-first 3-pane** (categorías | productos | pedido) — Bloque 12
+- ✅ **KDS tablet-first multi-column** (4 columnas landscape) — Bloque 12
+- ✅ **Kitchen mode + Wake Lock API** (pantalla siempre activa) — Bloque 12
 - ✅ Error reporting end-to-end (frontend + backend + admin viewer)
 - ✅ Audit logs viewer
 - ✅ Reports con 9 endpoints y dashboard en tiempo real
@@ -420,16 +430,22 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 - ✅ Docker image build + smoke en CI
 - ✅ Android APK build en CI
 - ✅ GitHub Pages demo
+- ✅ **POS↔KDS realtime E2E** (8 specs en bloque-12-pos-kds-e2e.spec.js)
+- ✅ **Offline/reconnect E2E**
+- ✅ **Portrait/landscape E2E**
+- ✅ **Pagination + search real en Users + Customers** — Bloque 12 FASE C
 
 ### Lo que NO funciona o está pendiente (honesto)
 
-- ❌ PostgreSQL: experimental, no recomendado para producción.
-- ⚠️ Paginación parcial: backend soporta en `/admin/users`, `/customers`, `/admin/audit-logs`, `/errors`, pero UI no la usa aún.
-- ⚠️ Búsqueda en admin: solo Customers tiene search real (vía `?search=`).
-- ⚠️ Exportación CSV/XLSX/PDF: NO implementada.
-- ⚠️ E2E en CI: `continue-on-error: true` (flaky).
-- ⚠️ Android emulator smoke: NO implementado.
-- ⚠️ Backup/restore automatizado: pendiente (doc explicativo en `DOCKER_RELEASE.md`).
+- ❌ PostgreSQL: experimental, 4/15 migraciones PG-aware, CI `continue-on-error: true`
+- ❌ Sorting en admin UI: NO implementado
+- ❌ Export CSV/XLSX/PDF: NO implementado
+- ⚠️ Paginación parcial: solo Users + Customers tienen pagination real (resto pendiente)
+- ⚠️ Búsqueda en admin: solo Users + Customers tienen search real (resto pendiente)
+- ⚠️ E2E en CI: `continue-on-error: true` (flaky)
+- ⚠️ Android emulator smoke: NO implementado (sin emulator)
+- ⚠️ Docker smoke local: NO ejecutado (sin Docker en entorno)
+- ⚠️ Backup/restore automatizado: pendiente (doc explicativo en `DOCKER_RELEASE.md`)
 
 ### Release Gate Final
 
@@ -437,29 +453,41 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 |---|---|
 | UI completa | ✅ (18 tabs admin) |
 | Admin CRUD | ✅ en entidades críticas |
-| Pagination | ⚠️ parcial |
-| Filters | ⚠️ parcial |
+| Pagination | ⚠️ parcial (Users + Customers) |
+| Search | ⚠️ parcial (Users + Customers) |
+| Sorting | ❌ MISSING |
+| Export | ❌ MISSING |
 | Responsive | ✅ tablet + phone + desktop |
-| No overlays problemáticos | ✅ (CSS audit: 0 críticos) |
+| POS tablet 3-pane | ✅ Bloque 12 |
+| KDS multi-column + kitchen mode | ✅ Bloque 12 |
+| No overlays problemáticos | ✅ (CSS audit: 0 BUG) |
 | No dead buttons | ✅ (no se encontraron TODO/FIXME en frontend) |
 | API/UI coverage | ✅ 192/192 |
 | Test coverage | ✅ 566 PASS |
 | Docker image | ✅ workflow + smoke en CI |
-| Docker smoke | ✅ en CI (no localmente) |
+| Docker smoke local | ❌ BLOCKED (sin Docker) |
 | Android APK | ✅ build en CI |
-| Android smoke | ❌ emulator pendiente |
+| Android emulator smoke | ❌ BLOCKED (sin emulator) |
 | Pages smoke | ✅ deploy automático |
 | PWA smoke | ✅ manual |
-| PostgreSQL | ❌ experimental |
+| PostgreSQL | ❌ experimental (4/15 migraciones PG-aware) |
 | Backup/restore | ⚠️ doc explicativo |
 | Security | ✅ JWT + RBAC + bcrypt + audit log |
 | Error reporting | ✅ end-to-end |
 | Audit logs | ✅ viewer en admin |
+| POS↔KDS realtime E2E | ✅ Bloque 12 |
+| Offline/reconnect E2E | ✅ Bloque 12 |
+| Portrait/landscape E2E | ✅ Bloque 12 |
 
-**Aprobado para release v0.6.1 con SQLite. PostgreSQL pendiente para v0.7.0.**
+**Aprobado para release v0.6.2 con SQLite.**
+
+**PostgreSQL pendiente para v0.7.0** (requiere auditar 11 migraciones no-PG-aware).
+**Admin UI completeness pendiente para v0.7.0** (pagination + search + sorting en todas las secciones).
+**Export CSV pendiente para v0.7.0.**
+**Android emulator smoke pendiente para v0.7.0.**
 
 ---
 
-*Documento generado automáticamente por Bloque 10-12 — SambaPos_LBA Audit Suite.*
-*Los conteos provienen de ejecución real de tests el 2026-09-12.*
-*Auditorías generadas por scripts: `audit-api-ui-coverage.js`, `audit-css-hidden.js`, `audit-admin-ui.js`, `volume-test.js`.*
+*Documento generado por Bloque 12 con evidencia ejecutable.*
+*Auditorías: `scripts/reconcile-state.js`, `audit-api-ui-coverage.js`, `audit-css-hidden.js`, `audit-admin-ui-v2.js`, `volume-test-dom.js`.*
+*Tests: 533 + 33 = 566 PASS, 0 FAIL (ejecutados 2026-09-12).*
