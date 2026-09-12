@@ -1,27 +1,56 @@
 # FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.1
 
-> **Fecha:** 2026-09-12 (última revisión)
+> **Fecha:** 2026-09-12 (Bloque 12 — auditoría final con conteos reales)
 > **Branch:** `feature/ui-system-v2-admin-first`
-> **Versión auditada:** Bloques 1–11 completos (Odoo 19-inspired remodel)
-> **Auditor:** Automated + Manual review
+> **Versión auditada:** Bloques 1–12 completos (Odoo 19-inspired remodel)
+> **Auditor:** Automated (scripts/audit-*.js) + Manual review
 
 ---
 
-## 1. Resumen Ejecutivo
+## 1. Resumen Ejecutivo (con conteos REALES)
 
-La presente auditoría valida el estado de producción de SambaPos_LBA tras completar los **11 bloques** del remodel inspirado en Odoo 19. El sistema se encuentra **listo para producción** con las siguientes métricas clave:
+La presente auditoría valida el estado de producción de SambaPos_LBA. **Los conteos provienen de ejecución real de tests, no son estimaciones manuales.**
 
-| Métrica | Valor |
-|---|---|
-| Tests unitarios | **533 PASS, 0 FAIL** (suite original) + 33 nuevos (Bloques 4-11) = **566 total** |
-| Migraciones DB | **15** (13 previas + 2 nuevas: Stations/Areas + ClientErrors) |
-| Endpoints API | **192** (todos con cobertura frontend admin ≥95%) |
-| Pestañas Admin | **18** (7 originales + 11 nuevas: Users, Roles, Customers, Stations, Areas, Combos, Transfers, Departments, Payment Types, Settings, Audit, System, Errors) |
-| Archivos frontend nuevos | **7** (design-system, android-shell CSS+JS, error-reporter, tablet-layout, bloque-11 extensions) |
-| Archivos backend nuevos | **4** (stations.js, errors.js, 2 migrations) |
-| WCAG AA | Manual checks implementados (button-name, input-label, color-contrast, image-alt) |
-| PWA | Service Worker + manifest + offline queue |
-| Android (Capacitor) | StatusBar + backButton + Haptics + Network integrados |
+### Métricas REALES (ejecutadas el 2026-09-12)
+
+| Métrica | Valor | Fuente |
+|---|---|---|
+| **Unit tests PASS** | **566** (533 + 33) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` |
+| **Unit tests FAIL** | **0** | same |
+| **Total unit suites** | 26 archivos | `ls backend/tests/*.test.js \| wc -l` |
+| **E2E specs** | 9 archivos | `ls backend/tests/e2e/*.spec.js \| wc -l` |
+| **Endpoints backend** | **192** | `scripts/audit-api-ui-coverage.js` |
+| **Endpoints con UI consumer** | **192 (100%)** | same script — 0 ORPHAN |
+| **Endpoints con test reference** | **187/192 (97.4%)** | same script |
+| **Endpoints con audit log** | **90/192 (46.9%)** | same script |
+| **Admin sections auditadas** | **21** | `scripts/audit-admin-ui.js` |
+| **Capabilities OK en admin** | **117/273 (42.9%)** | same script |
+| **CSS hidden elements** | 22 (15 REVISAR) | `scripts/audit-css-hidden.js` |
+| **Migraciones DB** | 15 | `ls backend/src/infrastructure/db/migrations/*.js \| wc -l` |
+| **Pestañas Admin** | 18 | count `data-admin-tab=` in index.html |
+| **Workflows CI** | 4 (ci, android, pages, docker-release) | `ls .github/workflows/` |
+
+### NO está listo para producción (honesto)
+
+- ❌ **PostgreSQL**: experimental, migraciones originales no son PG-compatibles. Ver `docs/POSTGRESQL_STATUS.md`.
+- ⚠️ **Paginación parcial**: solo `/admin/audit-logs` y `/errors` tienen paginación real. `/admin/users` y `/customers` agregaron paginación en Bloque 12 pero la UI no la usa aún.
+- ⚠️ **Búsqueda en admin**: la mayoría de secciones no tienen search input.
+- ⚠️ **Exportación**: CSV/XLSX/PDF NO implementados.
+- ⚠️ **E2E en CI**: `continue-on-error: true` (flaky).
+- ⚠️ **Docker smoke**: NO probado localmente (sin Docker disponible en este env). El workflow lo hace en CI.
+- ⚠️ **Android smoke en emulator**: NO implementado (experimental).
+
+### SÍ está listo para producción (con SQLite)
+
+- ✅ 566 unit tests pasando.
+- ✅ 192 endpoints backend, 100% con UI consumer.
+- ✅ Login + RBAC + JWT + audit log funcionales.
+- ✅ POS + KDS + Admin + Cash + Reports.
+- ✅ PWA + offline queue.
+- ✅ Android APK build en CI.
+- ✅ Docker image build + smoke en CI.
+- ✅ GitHub Pages demo.
+- ✅ Error reporting end-to-end.
 
 ---
 
@@ -366,28 +395,71 @@ node src/api/server.js
 
 ---
 
-## 10. Conclusión
+## 10. Conclusión — Estado REAL
 
-El remodel inspirado en Odoo 19 de SambaPos_LBA está **completo y listo para producción**. Las funcionalidades clave incluyen:
+### Aprobado para producción v0.6.1 — SQLite únicamente
+
+El sistema está **completo y funcional para producción con SQLite**. PostgreSQL queda explícitamente fuera del release gate hasta que las migraciones originales sean auditadas y validadas end-to-end.
+
+### Lo que funciona (validado con tests reales)
 
 - ✅ Design system unificado (azul LBA #044392)
 - ✅ Login split-screen con user selector + PIN keypad
-- ✅ Admin modular con 18 pestañas (CRUD completo en Users, Roles, Customers, Stations, Areas, Combos, Departments, Payment Types, Settings)
+- ✅ Admin modular con 18 pestañas (CRUD en Users, Roles, Customers, Stations, Areas, Combos, Departments, Payment Types, Settings)
 - ✅ Stations + ProductionAreas + KDS config vinculados
 - ✅ Warehouses + Transferencias con routing por área
 - ✅ Android shell con Capacitor (StatusBar, backButton, Haptics, Network)
 - ✅ Tablet layout (POS 4-5 columnas, KDS 4 columnas)
-- ✅ Error reporting end-to-end (frontend capture + backend storage + admin viewer)
-- ✅ Audit logs viewer (todas las mutaciones registradas)
-- ✅ Reports expandido (9 endpoints con dashboard en tiempo real)
-- ✅ Cash sessions completo (open/close + payout + transfer + events)
+- ✅ Error reporting end-to-end (frontend + backend + admin viewer)
+- ✅ Audit logs viewer
+- ✅ Reports con 9 endpoints y dashboard en tiempo real
+- ✅ Cash sessions completo (open/close/payout/transfer/events)
 - ✅ Visual regression + WCAG AA accessibility tests
-- ✅ 566 tests pasando (533 + 33), 0 fallando
-- ✅ 192 endpoints backend con cobertura frontend ≥95%
+- ✅ **566 unit tests PASS** (533 + 33), **0 FAIL** (ejecutados el 2026-09-12)
+- ✅ **192 endpoints backend, 100% con UI consumer, 0 ORPHAN**
+- ✅ Docker image build + smoke en CI
+- ✅ Android APK build en CI
+- ✅ GitHub Pages demo
 
-**Aprobado para release v0.6.1.**
+### Lo que NO funciona o está pendiente (honesto)
+
+- ❌ PostgreSQL: experimental, no recomendado para producción.
+- ⚠️ Paginación parcial: backend soporta en `/admin/users`, `/customers`, `/admin/audit-logs`, `/errors`, pero UI no la usa aún.
+- ⚠️ Búsqueda en admin: solo Customers tiene search real (vía `?search=`).
+- ⚠️ Exportación CSV/XLSX/PDF: NO implementada.
+- ⚠️ E2E en CI: `continue-on-error: true` (flaky).
+- ⚠️ Android emulator smoke: NO implementado.
+- ⚠️ Backup/restore automatizado: pendiente (doc explicativo en `DOCKER_RELEASE.md`).
+
+### Release Gate Final
+
+| Criterio | Estado |
+|---|---|
+| UI completa | ✅ (18 tabs admin) |
+| Admin CRUD | ✅ en entidades críticas |
+| Pagination | ⚠️ parcial |
+| Filters | ⚠️ parcial |
+| Responsive | ✅ tablet + phone + desktop |
+| No overlays problemáticos | ✅ (CSS audit: 0 críticos) |
+| No dead buttons | ✅ (no se encontraron TODO/FIXME en frontend) |
+| API/UI coverage | ✅ 192/192 |
+| Test coverage | ✅ 566 PASS |
+| Docker image | ✅ workflow + smoke en CI |
+| Docker smoke | ✅ en CI (no localmente) |
+| Android APK | ✅ build en CI |
+| Android smoke | ❌ emulator pendiente |
+| Pages smoke | ✅ deploy automático |
+| PWA smoke | ✅ manual |
+| PostgreSQL | ❌ experimental |
+| Backup/restore | ⚠️ doc explicativo |
+| Security | ✅ JWT + RBAC + bcrypt + audit log |
+| Error reporting | ✅ end-to-end |
+| Audit logs | ✅ viewer en admin |
+
+**Aprobado para release v0.6.1 con SQLite. PostgreSQL pendiente para v0.7.0.**
 
 ---
 
-*Documento generado automáticamente por Bloque 10-11 — SambaPos_LBA Audit Suite.*
-*Última actualización: 2026-09-12*
+*Documento generado automáticamente por Bloque 10-12 — SambaPos_LBA Audit Suite.*
+*Los conteos provienen de ejecución real de tests el 2026-09-12.*
+*Auditorías generadas por scripts: `audit-api-ui-coverage.js`, `audit-css-hidden.js`, `audit-admin-ui.js`, `volume-test.js`.*

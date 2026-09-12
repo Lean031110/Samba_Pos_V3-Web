@@ -18,6 +18,7 @@ const customerService = require('../services/CustomerService');
 const { requirePermission } = require('../middleware/rbac');
 const { auditLog } = require('../middleware/auditLog');
 const { ValidationError } = require('../middleware/errorHandler');
+const { db } = require('../../infrastructure/db/db');
 
 function parseOrThrow(schema, value) {
   const result = schema.safeParse(value);
@@ -76,7 +77,25 @@ router.get('/', requirePermission('customers.manage'), async (req, res, next) =>
       limit: parsed.limit,
       offset: parsed.offset,
     });
-    res.json({ data: customers.map(c => c.toRow()), count: customers.length });
+    // Compute total for pagination (Bloque 12)
+    let totalQuery = db('Customers');
+    if (parsed.search) totalQuery = totalQuery.where('Name', 'like', `%${parsed.search}%`);
+    if (parsed.active === 'true') totalQuery = totalQuery.where('IsActive', 1);
+    else if (parsed.active === 'false') totalQuery = totalQuery.where('IsActive', 0);
+    const totalRes = await totalQuery.count('* as c').first();
+    const total = totalRes?.c || 0;
+    res.json({
+      data: customers.map(c => c.toRow()),
+      count: customers.length,
+      pagination: {
+        page: Math.floor(parsed.offset / parsed.limit) + 1,
+        pageSize: parsed.limit,
+        total,
+        totalPages: Math.ceil(total / parsed.limit),
+        hasNext: parsed.offset + customers.length < total,
+        hasPrev: parsed.offset > 0,
+      },
+    });
   } catch (err) { next(err); }
 });
 

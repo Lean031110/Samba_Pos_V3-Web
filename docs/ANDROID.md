@@ -1,70 +1,126 @@
-# ANDROID.md — Android (Capacitor) Build Guide
+# ANDROID.md — Build & Install Guide
 
-**SambaPos_LBA — Android APK/AAB via Capacitor**
+> Guía oficial para compilar e instalar la APK de SambaPos_LBA.
 
-## Prerequisites
+## Requisitos
 
-| Component | Version |
-|-----------|---------|
-| Android Studio | Hedgehog+ |
-| JDK | 17 |
-| Node.js | 20+ |
-| Capacitor CLI | 6.x |
+- Node.js 20+
+- Java 17 (JDK Temurin recomendado)
+- Android SDK (Platform 34, Build-tools 34.0.0)
+- Android Studio (recomendado para edición y debugging nativo)
+- Capacitor (incluido en dependencies)
 
-## Setup (one-time)
+## Build local
 
 ```bash
-# 1. Install Capacitor dependencies
-cd backend
-npm install @capacitor/core @capacitor/cli @capacitor/android
-npm install -D @capacitor/splash-screen
+# En la raíz del repo
+npm install
 
-# 2. Initialize Android project
+# Agregar plataforma Android (si no existe)
 npx cap add android
 
-# 3. Copy web assets to native project
-npx cap copy
-
-# 4. Open Android Studio
-npx cap open android
-```
-
-## Build APK (debug)
-
-```bash
-# From repo root
-cd backend
+# Copiar assets web a android/
 npx cap copy android
+
+# Sincronizar plugins nativos
+npx cap sync android
+
+# Compilar APK debug
 cd android
-./gradlew assembleDebug
-# APK: android/app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleDebug --no-daemon
+
+# APK generada en:
+# android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Build AAB (release — for Play Store)
+## APK Release (firmada)
+
+Requiere configurar secrets en GitHub Actions:
+
+- `ANDROID_KEYSTORE_BASE64` — keystore en base64
+- `ANDROID_KEY_ALIAS` — alias de la key
+- `ANDROID_KEY_PASSWORD` (secret) — password de la key
+- `ANDROID_STORE_PASSWORD` (secret) — password del keystore
+
+Si los secrets están configurados, el workflow genera automáticamente `SambaPos-LBA-release.aab` (Android App Bundle) listo para subir a Google Play.
+
+## CI Workflow
+
+`.github/workflows/android.yml`:
+
+1. Setup Node + Java + Android SDK
+2. Install dependencies
+3. `npx cap add android` (si no existe)
+4. `npx cap copy android` + `npx cap sync android`
+5. `./gradlew assembleDebug`
+6. Upload APK como artifact (30 días retención)
+7. Si signing secrets existen: `./gradlew bundleRelease` + upload AAB
+
+## Descargar APK
+
+Desde GitHub Actions:
+
+1. Ir a la pestaña **Actions** del repo
+2. Seleccionar el workflow **Android Build**
+3. Última run exitosa → **Artifacts**
+4. Descargar `SambaPos-LBA-debug.apk`
+
+## Instalación en dispositivo
 
 ```bash
-# 1. Generate keystore (one-time)
-keytool -genkey -v -keystore sambapos-release.keystore -alias sambapos -keyalg RSA -keysize 2048 -validity 10000
+# Habilitar ADB debugging en Android (Settings → Developer options)
 
-# 2. Configure signing in android/app/build.gradle
-# 3. Build AAB
-cd android
-./gradlew bundleRelease
-# AAB: android/app/build/outputs/bundle/release/app-release.aab
+# Instalar APK
+adb install SambaPos-LBA-debug.apk
+
+# Lanzar app
+adb shell am start -n com.sambapos.lba/.MainActivity
 ```
 
-## Configuration
+O manualmente: copiar APK al dispositivo y abrir el archivo.
 
-The `capacitor.config.json` at repo root defines:
-- `appId`: `com.sambapos.lba` (unique Android package ID)
-- `appName`: `SambaPos LBA`
-- `webDir`: `../frontend` (the SPA web assets)
-- `server.androidScheme`: `https` (secure scheme for PWA features)
-- `SplashScreen`: 2s launch with brand blue (#044392)
+## Configuración inicial
 
-## Notes
+Al abrir la app por primera vez:
 
-- The Android app wraps the existing PWA — no code changes needed
-- WebSocket + Push notifications work via Capacitor's HTTP/WebSocket bridge
-- For production builds, configure signing in `android/app/build.gradle`
-- The backend server URL must be configured via env var `SAMBA_API_URL`
+1. **Server config screen** aparece si no hay servidor configurado
+2. Ingresar URL del servidor (ej: `http://192.168.1.10:3001`)
+3. Click "Probar conexión" → debe mostrar ✓ verde
+4. (Opcional) Escanear QR del servidor
+5. Seleccionar modo: POS / KDS / Admin
+6. Click "Guardar"
+
+Después del login, el usuario aterriza en la vista según su rol.
+
+## Capacitor plugins integrados
+
+| Plugin | Uso |
+|---|---|
+| `@capacitor/status-bar` | Color azul LBA en status bar |
+| `@capacitor/app` | Back button nativo |
+| `@capacitor/haptics` | Vibración en acciones POS |
+| `@capacitor/network` | Estado online/offline |
+
+## Iconos y splash
+
+- `frontend/assets/logo-symbol.png` — adaptive icon foreground
+- `frontend/assets/splash-512.png` — splash screen
+- `frontend/icons/icon-192-maskable.png` — launcher icon (máscara)
+- `frontend/icons/icon-512-maskable.png` — launcher icon alta resolución
+
+Los iconos no se deforman porque usan el formato **maskable** de Android (adaptive icons).
+
+## Estado actual (v0.6.1)
+
+- ✅ APK debug se compila correctamente en CI.
+- ⚠️ APK release (firmada) requiere configurar secrets — el workflow está listo pero no se ejecuta hasta que se agreguen.
+- ⚠️ Smoke test en emulator NO implementado (experimental, pendiente).
+- ✅ Plugin Capacitor integrados (StatusBar, App, Haptics, Network).
+- ✅ Server config screen con QR scanner.
+
+## Pendiente
+
+- [ ] Emulator smoke test en CI
+- [ ] Firma release con keystore real
+- [ ] Publicación en Google Play Store
+- [ ] Soporte offline (IndexedDB) ya implementado, falta smoke test en emulator
