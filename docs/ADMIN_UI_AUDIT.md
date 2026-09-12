@@ -1,7 +1,7 @@
 # ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
 > Generado por `scripts/audit-admin-ui-v2.js`
-> Fecha: 2026-09-12T22:12:01.265Z
+> Fecha: 2026-09-12T22:16:17.791Z
 > Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
 ## Capabilities verificadas
@@ -17,7 +17,7 @@ Para cada sección × capability, se clasifica como:
 
 | Sección | Prioridad | listar | buscar | filtrar | ordenar | paginar | crear | editar | eliminar | desactivar | ver_detalle | loading | empty | error | permisos |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Productos | 🔴 Crítica | ✅ | ✅ | ⚠️ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Productos | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Usuarios | 🔴 Crítica | ✅ | ✅ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Roles | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Clientes | 🔴 Crítica | ✅ | ✅ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
@@ -43,9 +43,9 @@ Para cada sección × capability, se clasifica como:
 
 | Estado | Cantidad | % |
 |---|---|---|
-| ✅ PASS | 91 | 31.0% |
+| ✅ PASS | 93 | 31.6% |
 | ⚠️ PARTIAL | 32 | 10.9% |
-| ❌ MISSING | 131 | 44.6% |
+| ❌ MISSING | 129 | 43.9% |
 | — NOT_APPLICABLE | 40 | — |
 | **Total** | 294 | 100% |
 
@@ -53,7 +53,7 @@ Para cada sección × capability, se clasifica como:
 
 ### Secciones críticas (prioridad 1) — deben estar PASS
 
-- **Productos**: MISSING ordenar, paginar, ver_detalle
+- **Productos**: MISSING ver_detalle
 - **Usuarios**: MISSING filtrar, ver_detalle
 - **Roles**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
 - **Clientes**: MISSING filtrar, eliminar, ver_detalle
@@ -76,6 +76,6 @@ Para cada sección × capability, se clasifica como:
 
 ## Recomendación
 
-- Coverage total PASS: 31.0%
-- Secciones críticas con MISSING: 56
+- Coverage total PASS: 31.6%
+- Secciones críticas con MISSING: 54
 - Próximo foco: implementar pagination + search en secciones críticas

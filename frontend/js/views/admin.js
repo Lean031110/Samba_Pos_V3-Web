@@ -382,6 +382,10 @@ const AdminView = {
   async _renderProducts() {
     this._loading('Cargando productos...');
     if (this._productsSearch === undefined) this._productsSearch = '';
+    if (this._productsPage === undefined) this._productsPage = 1;
+    if (this._productsSortCol === undefined) this._productsSortCol = 'Name';
+    if (this._productsSortDir === undefined) this._productsSortDir = 'asc';
+    const pageSize = 50;
     let items = [];
     try {
       const res = await Api.request('GET', '/products');
@@ -393,12 +397,37 @@ const AdminView = {
         '<p class="admin-empty">Error al cargar productos.</p>');
       return;
     }
-    // Client-side filter (Bloque 12 FASE C — backend doesn't support server-side search)
+    // Client-side filter
     const filtered = this._productsSearch
       ? items.filter(it => (it.Name || '').toLowerCase().includes(this._productsSearch.toLowerCase()) ||
                             (it.GroupCode || '').toLowerCase().includes(this._productsSearch.toLowerCase()))
       : items;
+    // Client-side sort
+    filtered.sort((a, b) => {
+      const av = String(a[this._productsSortCol] ?? '');
+      const bv = String(b[this._productsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._productsSortDir === 'asc' ? cmp : -cmp;
+    });
+    // Client-side pagination (backend /products doesn't support server-side)
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (this._productsPage > totalPages) this._productsPage = 1;
+    const start = (this._productsPage - 1) * pageSize;
+    const paged = filtered.slice(start, start + pageSize);
+    const pagination = {
+      page: this._productsPage,
+      pageSize,
+      total,
+      totalPages,
+      hasNext: this._productsPage < totalPages,
+      hasPrev: this._productsPage > 1,
+    };
+    const sortIcon = (col) => this._productsSortCol === col
+      ? (this._productsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo producto', 'kds-btn--primary', 'fa-plus', "window.AdminView._newProduct()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportProducts()");
     const searchInput = `
       <input type="text" class="admin-input" id="products-search"
         placeholder="Buscar producto o grupo..." value="${this._escape(this._productsSearch)}"
@@ -410,7 +439,7 @@ const AdminView = {
         '<p class="admin-empty">No hay productos cargados. Hacé clic en "Nuevo producto" para crear el primero.</p>');
       return;
     }
-    const rows = filtered.map(it => {
+    const rows = paged.map(it => {
       const price = Number(it.Portions?.[0]?.Prices?.[0]?.Price || 0);
       const group = it.GroupCode || '—';
       return `
@@ -428,11 +457,59 @@ const AdminView = {
     const countInfo = this._productsSearch
       ? `${filtered.length} de ${items.length} productos`
       : `${items.length} productos`;
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._productsSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._productsSort('GroupCode')">Grupo${sortIcon('GroupCode')}</th>
+      <th>Precio</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const paginationHtml = this._renderPagination(pagination, '_productsPage', '_renderProducts');
     this._setContent(
-      this._header('Productos (' + countInfo + ')', newBtn) +
+      this._header('Productos (' + countInfo + ')', newBtn + ' ' + exportBtn) +
       `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
-      this._table(['Nombre', 'Grupo', 'Precio', 'Acciones'], rows)
+      tableHtml +
+      paginationHtml
     );
+  },
+
+  _productsSort(col) {
+    if (this._productsSortCol === col) {
+      this._productsSortDir = this._productsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._productsSortCol = col;
+      this._productsSortDir = 'asc';
+    }
+    this._renderProducts();
+  },
+
+  _exportProducts() {
+    if (!this._productsCache || this._productsCache.length === 0) {
+      this._toast('No hay productos para exportar', 'info');
+      return;
+    }
+    const rows = this._productsCache.map(it => ({
+      Id: it.Id,
+      Name: it.Name,
+      GroupCode: it.GroupCode || '',
+      Price: Number(it.Portions?.[0]?.Prices?.[0]?.Price || 0),
+      Barcode: it.Barcode || '',
+    }));
+    window.CSVExport.export(rows, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Nombre' },
+      { key: 'GroupCode', label: 'Grupo' },
+      { key: 'Price', label: 'Precio' },
+      { key: 'Barcode', label: 'Código de Barras' },
+    ], `productos-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${rows.length} productos`, 'success');
   },
 
   _productsSearchDebounced: (function () {
