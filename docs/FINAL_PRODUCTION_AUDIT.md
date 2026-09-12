@@ -1,56 +1,60 @@
-# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.2
+# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.3
 
-> **Fecha:** 2026-09-12 (Bloque 12 completo con reconciliación ejecutable)
+> **Fecha:** 2026-09-12 (Bloque 12 final — todas las fases)
 > **Branch:** `feature/ui-system-v2-admin-first`
-> **Versión auditada:** Bloques 1–12 (Odoo 19-inspired + tablet-first POS/KDS)
-> **Auditor:** Automated scripts + Manual review with executable evidence
+> **Versión auditada:** Bloques 1–12 (Odoo 19-inspired + tablet-first POS/KDS + admin completeness)
+> **Auditor:** Automated scripts + Manual review with executable evidence + server smoke test
 
 ---
 
 ## 1. Resumen Ejecutivo (con conteos REALES)
 
-Los conteos provienen de **ejecución real de tests y scripts de auditoría**, no de estimaciones manuales. Evidencia en `docs/RECONCILIATION_REPORT.md`.
+Los conteos provienen de **ejecución real de tests y scripts de auditoría**, no de estimaciones manuales. Evidencia en `docs/RECONCILIATION_REPORT.md` y `docs/PG_COMPATIBILITY_AUDIT.md`.
 
 ### Métricas REALES (ejecutadas el 2026-09-12)
 
 | Métrica | Valor | Fuente | Estado |
 |---|---|---|---|
-| **Unit tests PASS** | **566** (533 + 33) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` | ✅ PASS |
+| **Unit tests PASS** | **577** (533 + 44) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` | ✅ PASS |
 | **Unit tests FAIL** | **0** | misma fuente | ✅ PASS |
-| **Total unit suites** | 26 archivos | `ls backend/tests/*.test.js \| wc -l` | ✅ |
-| **E2E specs** | 10 archivos (9 + 1 nuevo) | `ls backend/tests/e2e/*.spec.js \| wc -l` | ✅ |
+| **Total unit suites** | 27 archivos (26 + 1 nuevo) | `ls backend/tests/*.test.js \| wc -l` | ✅ |
+| **E2E specs** | 10 archivos | `ls backend/tests/e2e/*.spec.js \| wc -l` | ✅ |
 | **Endpoints backend** | **192** | `scripts/audit-api-ui-coverage.js` | ✅ |
 | **Endpoints con UI consumer** | **192 (100%)** | mismo script — 0 ORPHAN | ✅ |
 | **Endpoints con test reference** | **187/192 (97.4%)** | mismo script | ✅ |
 | **Endpoints con audit log** | **90/192 (46.9%)** | mismo script | ⚠️ |
 | **Admin sections auditadas** | **21** | `scripts/audit-admin-ui-v2.js` | ✅ |
-| **Capabilities PASS en admin** | **88/294 (29.9%)** | mismo script | ⚠️ parcial |
-| **Capabilities PARTIAL** | **31/294 (10.5%)** | mismo script | ⚠️ |
-| **Capabilities MISSING** | **135/294 (45.9%)** | mismo script | ❌ trabajo pendiente |
+| **Capabilities PASS en admin** | **93/294 (31.6%)** | mismo script | ✅ mejorado |
+| **Capabilities PARTIAL** | **32/294 (10.9%)** | mismo script | ⚠️ |
+| **Capabilities MISSING** | **129/294 (43.9%)** | mismo script | ⚠️ parcial |
 | **CSS hidden elements** | 22 (0 BUG) | `scripts/audit-css-hidden.js` + manual review | ✅ |
 | **Migraciones DB** | 15 | `ls backend/src/infrastructure/db/migrations/*.js \| wc -l` | ✅ |
-| **Migraciones PG-aware** | **4/15 (26.7%)** | `scripts/reconcile-state.js` | ❌ PG no válido |
+| **Migraciones PG-compatible (código)** | **15/15 (100%)** | `scripts/audit-pg-compat.js` | ✅ código |
+| **PG validation ejecutable** | **0/15** | sin PG disponible | ❌ pendiente |
 | **Pestañas Admin** | 18 | count `data-admin-tab=` in index.html | ✅ |
-| **Workflows CI** | 4 (ci, android, pages, docker-release) | `ls .github/workflows/` | ✅ |
+| **Workflows CI** | 4 | `ls .github/workflows/` | ✅ |
 | **POS tablet 3-pane layout** | ✅ | `pos-tablet.css` + E2E spec | ✅ PASS |
 | **KDS multi-column layout** | ✅ | `kds-tablet.css` + E2E spec | ✅ PASS |
 | **Kitchen mode + wake lock** | ✅ | kitchen.js _toggleKitchenMode + Wake Lock API | ✅ PASS |
-| **Pagination real en admin** | Users + Customers | `_renderPagination` reutilizable | ⚠️ parcial |
-| **Search real en admin** | Users + Customers | debounce 300ms wired a backend | ⚠️ parcial |
+| **Pagination real en admin** | Users + Customers (server) + Products (client) | `_renderPagination` reutilizable | ✅ PASS |
+| **Search real en admin** | Users + Customers (server) + Products (client) | debounce 300ms | ✅ PASS |
+| **Sorting en admin** | Users + Customers + Products | click headers con ▲▼ icons | ✅ PASS |
+| **Export CSV** | Users + Customers + Products + 3 Reportes | `csv-export.js` reutilizable | ✅ PASS |
+| **Server smoke test local** | ✅ | curl /health /ready /version + login + pagination | ✅ PASS |
+| **Docker smoke local** | ❌ | sin Docker en entorno | ❌ BLOCKED |
+| **Android emulator smoke** | ❌ | sin emulator | ❌ BLOCKED |
 
 ### NO está listo para producción (honesto)
 
-- ❌ **PostgreSQL**: experimental, migraciones originales no son PG-compatibles. Ver `docs/POSTGRESQL_STATUS.md`.
-- ⚠️ **Paginación parcial**: solo `/admin/audit-logs` y `/errors` tienen paginación real. `/admin/users` y `/customers` agregaron paginación en Bloque 12 pero la UI no la usa aún.
-- ⚠️ **Búsqueda en admin**: la mayoría de secciones no tienen search input.
-- ⚠️ **Exportación**: CSV/XLSX/PDF NO implementados.
+- ❌ **PostgreSQL ejecutable**: sin PG disponible en entorno para validar migraciones. **Código PG-compatible (15/15 migraciones auditadas)** pero falta validación ejecutable. Ver `docs/POSTGRESQL_STATUS.md`.
+- ⚠️ **Admin UI completeness**: 93/294 capabilities PASS (31.6%). Search/sort/pagination/export en Users/Customers/Products/Reportes. Otras secciones aún parciales.
 - ⚠️ **E2E en CI**: `continue-on-error: true` (flaky).
 - ⚠️ **Docker smoke**: NO probado localmente (sin Docker disponible en este env). El workflow lo hace en CI.
 - ⚠️ **Android smoke en emulator**: NO implementado (experimental).
 
 ### SÍ está listo para producción (con SQLite)
 
-- ✅ 566 unit tests pasando.
+- ✅ 577 unit tests pasando.
 - ✅ 192 endpoints backend, 100% con UI consumer.
 - ✅ Login + RBAC + JWT + audit log funcionales.
 - ✅ POS + KDS + Admin + Cash + Reports.
@@ -425,7 +429,7 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 - ✅ Reports con 9 endpoints y dashboard en tiempo real
 - ✅ Cash sessions completo (open/close/payout/transfer/events)
 - ✅ Visual regression + WCAG AA accessibility tests
-- ✅ **566 unit tests PASS** (533 + 33), **0 FAIL** (ejecutados el 2026-09-12)
+- ✅ **577 unit tests PASS** (533 + 44), **0 FAIL** (ejecutados el 2026-09-12)
 - ✅ **192 endpoints backend, 100% con UI consumer, 0 ORPHAN**
 - ✅ Docker image build + smoke en CI
 - ✅ Android APK build en CI
@@ -463,7 +467,7 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 | No overlays problemáticos | ✅ (CSS audit: 0 BUG) |
 | No dead buttons | ✅ (no se encontraron TODO/FIXME en frontend) |
 | API/UI coverage | ✅ 192/192 |
-| Test coverage | ✅ 566 PASS |
+| Test coverage | ✅ 577 PASS |
 | Docker image | ✅ workflow + smoke en CI |
 | Docker smoke local | ❌ BLOCKED (sin Docker) |
 | Android APK | ✅ build en CI |
@@ -490,4 +494,4 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 
 *Documento generado por Bloque 12 con evidencia ejecutable.*
 *Auditorías: `scripts/reconcile-state.js`, `audit-api-ui-coverage.js`, `audit-css-hidden.js`, `audit-admin-ui-v2.js`, `volume-test-dom.js`.*
-*Tests: 533 + 33 = 566 PASS, 0 FAIL (ejecutados 2026-09-12).*
+*Tests: 533 + 44 = 577 PASS, 0 FAIL (ejecutados 2026-09-12).*
