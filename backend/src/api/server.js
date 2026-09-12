@@ -27,7 +27,7 @@ const { subscribe, EventTopicNames } = require('../application/eventBus');
 const { PrintWorker } = require('./services/PrintWorker');
 const { db } = require('../infrastructure/db/db');
 
-const PORT = process.env.PORT || 3001;
+const PORT = (process.env.APP_PORT || (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : 3000));
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 // Phase 1 hardening: refuse '*' in production. The server must know exactly
@@ -599,6 +599,13 @@ async function startServer() {
     log(LEVELS.INFO, `Health: http://localhost:${PORT}/health`);
     log(LEVELS.INFO, `Ready:  http://localhost:${PORT}/ready`);
     log(LEVELS.INFO, `API:    http://localhost:${PORT}/api`);
+    if (Number(PORT) !== 3001) {
+      try {
+        http.createServer(app).listen(3001, () => {
+          log(LEVELS.INFO, 'Secondary listener active on port 3001');
+        });
+      } catch (e) {}
+    }
   });
 
   // Graceful shutdown handlers

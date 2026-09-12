@@ -1,0 +1,6 @@
+{
+  "name": "LBApos",
+  "description": "POS de restaurante moderno, táctil, instalable y offline-capable — UI estilo Odoo 19",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,13 @@
+rootProject.name = "sambapos-lba"
+
+include ':app'
+project(':app').projectDir = new File('./android/app')
+
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./android/capacitor-cordova-android-plugins')
+
+include ':capacitor-android'
+project(':capacitor-android').projectDir = new File('./node_modules/@capacitor/android/capacitor')
+
+include ':capacitor-splash-screen'
+project(':capacitor-splash-screen').projectDir = new File('./node_modules/@capacitor/splash-screen/android')
