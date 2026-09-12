@@ -13,8 +13,8 @@ El Bloque J cierra **5 gaps** identificados en `docs/PRODUCTION_GAP_MATRIX.md` p
 
 | Gap | Prioridad | Estado | Cómo se cerró |
 |-----|----------|--------|---------------|
-| PostgreSQL driver | **P0** | ✅ | `knexfile.js` production usa `pg` cuando `DATABASE_URL=postgres://...`, SQLite en caso contrario |
-| Migraciones compatibles | **P0** | ✅ | 3 migraciones con `PRAGMA table_info` ahora tienen fallback `information_schema` para PG |
+| PostgreSQL driver | **P0** | ⚠️ PARCIAL | `knexfile.js` tiene lógica PG pero NO validado (CI `continue-on-error: true`, 11/15 migraciones no PG-aware). Ver `docs/POSTGRESQL_STATUS.md` para estado actualizado. |
+| Migraciones compatibles | **P0** | ⚠️ PARCIAL | Solo 4/15 migraciones usan patrón `isSQLite`. Las 11 restantes NO son PG-compatibles. Trabajo pendiente. |
 | Backup rotation | **P1** | ✅ | `backup.js` rota backups antiguos (default: 30, configurable con `BACKUP_RETENTION`) |
 | Restore drill | **P0** | ✅ | `scripts/restore-drill.js` — backup → destroy → restore → verify tables + data |
 | Deployment docs | **P1** | ✅ | `docs/DEPLOYMENT.md` — guía completa SQLite + PostgreSQL + Docker + PM2 + cron |

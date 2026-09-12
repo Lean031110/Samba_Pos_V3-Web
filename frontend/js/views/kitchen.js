@@ -120,8 +120,47 @@ const KitchenView = {
     // Apply state filter
     const filteredOrders = this._applyStateFilter(this._orders);
 
+    // KDS topbar — station name, clock, connection status (Bloque 12 FASE G)
+    const stationName = this._selectedStationId
+      ? (this._stations.find(s => s.Id === this._selectedStationId)?.DisplayName || 'KDS')
+      : 'Todas las estaciones';
+    const wsConnected = !!(window.store?.state?.wsConnected);
+    const clock = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    let html = `
+      <div class="kds-topbar">
+        <div class="kds-topbar__station">
+          <i class="fa-solid fa-fire"></i>
+          <span>${this._escape(stationName)}</span>
+        </div>
+        <div class="kds-topbar__clock" id="kds-clock">${clock}</div>
+        <div class="kds-topbar__conn">
+          <span class="kds-topbar__conn-dot ${wsConnected ? '' : 'offline'}"></span>
+          <span>${wsConnected ? 'Online' : 'Offline'}</span>
+        </div>
+        <button class="kds-kitchen-toggle" onclick="window.App.views.kitchen._toggleKitchenMode()">
+          <i class="fa-solid fa-expand"></i> Kitchen Mode
+        </button>
+      </div>
+    `;
+
+    // Stats bar — counts by state
+    const stats = {
+      active: this._orders.filter(o => o.State === 'NEW' || o.State === 'ACCEPTED' || o.State === 'PREPARING').length,
+      ready: this._orders.filter(o => o.State === 'READY').length,
+      urgent: this._orders.filter(o => this._isUrgent(o)).length,
+      late: this._orders.filter(o => this._isLate(o)).length,
+    };
+    html += `
+      <div class="kds-stats">
+        <div class="kds-stat"><i class="fa-solid fa-utensils"></i> <span class="kds-stat__num">${stats.active}</span> Activos</div>
+        ${stats.urgent > 0 ? `<div class="kds-stat kds-stat--urgent"><i class="fa-solid fa-exclamation-triangle"></i> <span class="kds-stat__num">${stats.urgent}</span> Urgentes</div>` : ''}
+        ${stats.late > 0 ? `<div class="kds-stat kds-stat--late"><i class="fa-solid fa-clock"></i> <span class="kds-stat__num">${stats.late}</span> Tarde</div>` : ''}
+        ${stats.ready > 0 ? `<div class="kds-stat kds-stat--ready"><i class="fa-solid fa-check-circle"></i> <span class="kds-stat__num">${stats.ready}</span> Listos</div>` : ''}
+      </div>
+    `;
+
     // Station filter bar + state filter
-    let html = '<div class="kds-toolbar">';
+    html += '<div class="kds-toolbar">';
     html += '<div class="kds-toolbar__stations">';
     html += `<button class="kds-station-tab ${!this._selectedStationId ? 'is-active' : ''}" onclick="window.App.views.kitchen._filterStation(null)">Todas</button>`;
     for (const s of this._stations) {
@@ -146,16 +185,22 @@ const KitchenView = {
     html += '</div>';
     html += '</div>';
 
-    // Orders grid
+    // Orders grid — uses .kds-board (responsive columns from kds-tablet.css)
     if (filteredOrders.length === 0) {
-      html += '<div class="kds-empty">Sin pedidos activos 🎉</div>';
+      html += `
+        <div class="kds-empty">
+          <i class="fa-solid fa-circle-check"></i>
+          <div class="kds-empty__title">Sin pedidos activos</div>
+          <div class="kds-empty__subtitle">Cuando entre un nuevo pedido aparecerá aquí</div>
+        </div>
+      `;
     } else {
       // Sort by priority (desc) then by CreatedAt (asc)
       const sorted = [...filteredOrders].sort((a, b) => {
         if (b.Priority !== a.Priority) return (b.Priority || 0) - (a.Priority || 0);
         return new Date(a.CreatedAt) - new Date(b.CreatedAt);
       });
-      html += '<div class="kds-orders-grid">';
+      html += '<div class="kds-board">';
       for (const order of sorted) {
         html += this._renderOrderCard(order);
       }
@@ -163,6 +208,47 @@ const KitchenView = {
     }
 
     this.containerEl.innerHTML = html;
+  },
+
+  _toggleKitchenMode() {
+    document.documentElement.classList.toggle('is-kitchen-mode');
+    const isOn = document.documentElement.classList.contains('is-kitchen-mode');
+    // Wake lock — keep screen on while in kitchen mode (Bloque 12 #19)
+    if (isOn) {
+      this._requestWakeLock();
+    } else {
+      this._releaseWakeLock();
+    }
+    window.App?.toast(isOn ? 'Modo cocina activado' : 'Modo cocina desactivado', 'info');
+  },
+
+  async _requestWakeLock() {
+    // Use the Screen Wake Lock API (Android Capacitor supports it)
+    try {
+      if ('wakeLock' in navigator) {
+        this._wakeLock = await navigator.wakeLock.request('screen');
+        console.log('[KDS] Wake lock acquired');
+      }
+    } catch (e) {
+      console.warn('[KDS] Wake lock not available:', e.message);
+    }
+  },
+
+  async _releaseWakeLock() {
+    if (this._wakeLock) {
+      try {
+        await this._wakeLock.release();
+        this._wakeLock = null;
+        console.log('[KDS] Wake lock released');
+      } catch (e) {
+        console.warn('[KDS] Wake lock release failed:', e.message);
+      }
+    }
+  },
+
+  _isLate(order) {
+    const elapsedMin = (Date.now() - new Date(order.CreatedAt).getTime()) / 60000;
+    return elapsedMin > 15 && order.State !== 'READY' && order.State !== 'SERVED';
   },
 
   _applyStateFilter(orders) {

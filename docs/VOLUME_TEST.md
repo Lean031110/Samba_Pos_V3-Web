@@ -1,47 +1,55 @@
-# VOLUME_TEST.md — Performance with large datasets
+# VOLUME_TEST.md — Performance real con DOM rendering
 
-> Generado por `scripts/volume-test.js`
-> Fecha: 2026-09-12T12:16:15.738Z
+> Generado por `scripts/volume-test-dom.js` usando jsdom para simular DOM real.
+> Fecha: 2026-09-12T13:47:03.436Z
 
 ## Resultados
 
-| Escenario | Registros | Tiempo render (ms) | Tamaño HTML |
-|---|---|---|---|
-| 100 products | 100 | 0ms | 8.5KB |
-| 1000 products | 1000 | 1ms | 85.8KB |
-| 10000 products | 10000 | 6ms | 868.1KB |
-| 100 customers | 100 | 0ms | 12.2KB |
-| 1000 customers | 1000 | 3ms | 123.8KB |
-| 10000 customers | 10000 | 8ms | 1257.6KB |
+| Escenario | Build HTML | DOM Insert | Total | Filas | HTML Size |
+|---|---|---|---|---|---|
+| Products 100 | 0ms | 4ms | 4ms | 100 | 7.0KB |
+| Products 1000 | 2ms | 36ms | 38ms | 1000 | 71.1KB |
+| Products 10000 | 11ms | 365ms | 376ms | 10000 | 729.4KB |
+| Customers 100 | 0ms | 6ms | 6ms | 100 | 11.3KB |
+| Customers 1000 | 1ms | 57ms | 58ms | 1000 | 114.4KB |
+| Customers 10000 | 12ms | 586ms | 598ms | 10000 | 1171.3KB |
 
 ## Análisis
 
-- **100 registros**: HTML 8.5KB, render JS <1ms. Aceptable.
-- **1000 registros**: HTML 85KB, render JS 1ms. Lag visible al insertar DOM (~100-500ms según navegador).
-- **10000 registros**: HTML 868KB, render JS 5ms. El navegador se congela al insertar (1-3s) y consume mucha memoria.
+- **Build HTML**: tiempo para generar el string HTML con `map().join('')`.
+- **DOM Insert**: tiempo para que el browser parsee e inserte el HTML en el DOM.
+- **Total**: tiempo total percibido por el usuario.
+
+## Umbrales de UX
+
+| Volumen | Tiempo total | UX |
+|---|---|---|
+| 100 | < 50ms | ✅ Instantáneo |
+| 1000 | 50-300ms | ⚠️ Aceptable pero con lag leve |
+| 10000 | 1-5s | ❌ Inaceptable — el navegador se congela |
 
 ## Recomendación
 
-Sin paginación real:
-- 100 registros: OK.
-- 1000 registros: lag pero usable en desktop moderno.
-- **10000+ registros: NO recomendado** — el navegador se congelará al insertar el HTML.
+- **Hasta 500 registros**: renderizar todos sin paginación es aceptable.
+- **500-2000 registros**: implementar paginación (50-100 por página).
+- **2000+ registros**: paginación obligatoria + búsqueda server-side.
 
-Con paginación real (50 por página):
-- Backend: SQL devuelve solo 50 filas (rápido sin importar el total).
-- Frontend: render constante de 50 filas, sin lag, sin importar el volumen.
-- Memoria: solo 50 objetos en JS, no 10000.
+## Estado actual del admin UI
 
-## Estado actual
+- Admin.js renderiza todos los registros sin paginación.
+- Backend tiene paginación en `/admin/users` (page/pageSize) y `/customers` (limit/offset/search).
+- Frontend no usa los parámetros de paginación todavía.
 
-- **Admin.js renderiza TODOS los registros sin paginar**.
-- Esto es aceptable para volumen inicial (< 1000 registros).
-- **Para producción con volumen > 1000**: implementar paginación en UI.
+## Trabajo pendiente
 
-## Endpoint con paginación real (post Bloque 12)
+1. Agregar componente `Pagination` reutilizable en admin.js.
+2. Modificar `_renderUsers`, `_renderCustomers` para usar paginación.
+3. Agregar search input en cada sección.
+4. Test de scroll con 1000+ registros en tabla con paginación.
 
-- `GET /api/admin/users?page=1&pageSize=50&search=...` → devuelve `pagination.hasNext`.
-- `GET /api/customers?limit=50&offset=0&search=...` → devuelve `pagination`.
-- `GET /api/admin/audit-logs?limit=50&offset=0` → ya tenía paginación.
+## Cómo reproducir
 
-Frontend aún no usa estos campos de paginación. Trabajo pendiente.
+```bash
+cd /home/z/my-project/work/Samba_Pos_V3-Web
+node scripts/volume-test-dom.js
+```

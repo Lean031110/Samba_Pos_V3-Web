@@ -1,78 +1,81 @@
-# ADMIN_UI_AUDIT.md — Auditoría de secciones administrativas
+# ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
-> Generado automáticamente por `scripts/audit-admin-ui.js`
-> Fecha: 2026-09-12T12:15:31.159Z
+> Generado por `scripts/audit-admin-ui-v2.js`
+> Fecha: 2026-09-12T13:49:21.323Z
+> Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
-## Capabilities verificadas por sección
+## Capabilities verificadas
 
-Para cada sección se verifica la presencia de:
-- **Listar** — tabla de datos
-- **Buscar** — input de búsqueda
-- **Filtrar** — filtros por estado/tipo
-- **Ordenar** — ordenamiento de columnas
-- **Crear** — botón "Nuevo"
-- **Editar** — edición de registros
-- **Eliminar/Desactivar** — eliminación o desactivación
-- **Ver detalle** — modal de detalle
-- **Paginación** — controles de paginación
-- **Loading state** — estado de carga
-- **Empty state** — estado vacío
-- **Error handling** — manejo de errores
+Para cada sección × capability, se clasifica como:
 
-| Sección | Listar | Buscar | Filtrar | Ordenar | Crear | Editar | Eliminar | Desactivar | Ver detalle | Paginación | Loading state | Empty state | Error handling |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Productos | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Inventario | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Recetas | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Impresoras | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Plantillas | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Caja | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Reportes | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ |
-| Configuración | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ |
-| Usuarios | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Roles | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Clientes | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Estaciones | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Áreas | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Combos | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Transferencias | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Sistema | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Errores | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Auditoría | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Departamentos | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Tipos de Pago | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Settings | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+- **PASS**: funcionalidad completa implementada y wired a backend.
+- **PARTIAL**: funcionalidad existe pero incompleta (ej: search input pero no wired).
+- **MISSING**: no implementado.
+- **NOT_APPLICABLE**: no aplica para esta sección (ej: paginar en "Sistema").
 
-## Resumen de completitud
+## Matriz por sección
 
-- Secciones auditadas: 21
-- Capabilities verificadas: 13 por sección
-- Total checks: 273
-- ✅ Pasados: 117 (42.9%)
-- ❌ Faltantes: 156
+| Sección | Prioridad | listar | buscar | filtrar | ordenar | paginar | crear | editar | eliminar | desactivar | ver_detalle | loading | empty | error | permisos |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Productos | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Usuarios | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Roles | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Clientes | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
+| Estaciones | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Áreas | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Tipos de Pago | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Settings | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Caja | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Inventario | 🔴 Crítica | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Impresoras | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Departamentos | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Combos | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Recetas | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Transferencias | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Plantillas | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Reportes | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ❌ | — |
+| Auditoría | 🟢 Opcional | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Errores | 🟢 Opcional | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ | — | ✅ | ✅ | ✅ | ✅ | — |
+| Sistema | 🟢 Opcional | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ❌ | ❌ | — |
+| Configuración | 🟢 Opcional | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ❌ | — |
 
-## Sections sin paginación real
+## Resumen
 
-Las siguientes secciones NO implementan paginación en la UI (aunque el backend la soporte parcialmente):
+| Estado | Cantidad | % |
+|---|---|---|
+| ✅ PASS | 84 | 28.6% |
+| ⚠️ PARTIAL | 31 | 10.5% |
+| ❌ MISSING | 139 | 47.3% |
+| — NOT_APPLICABLE | 40 | — |
+| **Total** | 294 | 100% |
 
-- Productos: ❌ sin paginación
-- Inventario: ❌ sin paginación
-- Recetas: ❌ sin paginación
-- Impresoras: ❌ sin paginación
-- Plantillas: ❌ sin paginación
-- Caja: ❌ sin paginación
-- Reportes: ❌ sin paginación
-- Configuración: ❌ sin paginación
-- Usuarios: ❌ sin paginación
-- Roles: ❌ sin paginación
-- Clientes: ❌ sin paginación
-- Estaciones: ❌ sin paginación
-- Áreas: ❌ sin paginación
-- Combos: ❌ sin paginación
-- Transferencias: ❌ sin paginación
-- Sistema: ❌ sin paginación
-- Errores: ❌ sin paginación
-- Auditoría: ❌ sin paginación
-- Departamentos: ❌ sin paginación
-- Tipos de Pago: ❌ sin paginación
-- Settings: ❌ sin paginación
+## Priorización para hardening
+
+### Secciones críticas (prioridad 1) — deben estar PASS
+
+- **Productos**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Usuarios**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Roles**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Clientes**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
+- **Estaciones**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
+- **Áreas**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Tipos de Pago**: MISSING buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle
+- **Settings**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
+- **Caja**: MISSING buscar, filtrar, ordenar, paginar, crear, editar, eliminar, ver_detalle
+- **Inventario**: MISSING ordenar, paginar, editar, eliminar, ver_detalle
+- **Impresoras**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
+
+### Secciones importantes (prioridad 2)
+
+- **Departamentos**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle PARTIAL: crear
+- **Combos**: MISSING: buscar, filtrar, ordenar, paginar, ver_detalle PARTIAL: crear, editar, eliminar
+- **Recetas**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle 
+- **Transferencias**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle PARTIAL: crear
+- **Plantillas**: MISSING: buscar, filtrar, ordenar, paginar, eliminar, ver_detalle PARTIAL: crear, editar
+- **Reportes**: MISSING: buscar, filtrar, ordenar, paginar, crear, editar, eliminar, ver_detalle, error 
+
+## Recomendación
+
+- Coverage total PASS: 28.6%
+- Secciones críticas con MISSING: 64
+- Próximo foco: implementar pagination + search en secciones críticas
