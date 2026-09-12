@@ -3386,6 +3386,8 @@ Object.assign(AdminView, {
     this._loading('Cargando clientes…');
     if (this._customersPage === undefined) this._customersPage = 1;
     if (this._customersSearch === undefined) this._customersSearch = '';
+    if (this._customersSortCol === undefined) this._customersSortCol = 'Name';
+    if (this._customersSortDir === undefined) this._customersSortDir = 'asc';
     const pageSize = 20;
     let customers = [];
     let pagination = null;
@@ -3404,6 +3406,16 @@ Object.assign(AdminView, {
       this._error('No se pueden cargar clientes: ' + (err.message || err));
       return;
     }
+    // Client-side sort
+    customers.sort((a, b) => {
+      const av = String(a[this._customersSortCol] ?? '');
+      const bv = String(b[this._customersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._customersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._customersSortCol === col
+      ? (this._customersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo cliente', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newCustomer()");
     const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportCustomers()");
     const searchInput = `
@@ -3438,11 +3450,37 @@ Object.assign(AdminView, {
           </td>
         </tr>`;
     }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('Phone')">Teléfono${sortIcon('Phone')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('Email')">Email${sortIcon('Email')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('AccountBalance')">Saldo${sortIcon('AccountBalance')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
     const paginationHtml = this._renderPagination(pagination, '_customersPage', '_renderCustomers');
     this._setContent(this._header('Clientes', newBtn + ' ' + exportBtn) +
       `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
-      this._table(['Nombre', 'Teléfono', 'Email', 'Saldo', 'Estado', 'Acciones'], rows) +
+      tableHtml +
       paginationHtml);
+  },
+
+  _customersSort(col) {
+    if (this._customersSortCol === col) {
+      this._customersSortDir = this._customersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._customersSortCol = col;
+      this._customersSortDir = 'asc';
+    }
+    this._renderCustomers();
   },
 
   _exportCustomers() {

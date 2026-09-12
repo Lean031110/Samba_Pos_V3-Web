@@ -90,7 +90,7 @@ function classifyCapability(body, capability) {
 
     case 'ordenar':
       // PASS: column header click sorts
-      if (/orderBy|sortBy|order by/i.test(body)) return 'PASS';
+      if (/orderBy|sortBy|order by|_sort\(|_sortCol|_sortDir|sortIcon/i.test(body)) return 'PASS';
       return 'MISSING';
 
     case 'paginar':

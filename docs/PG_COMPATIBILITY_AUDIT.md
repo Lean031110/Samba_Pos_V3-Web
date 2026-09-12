@@ -1,7 +1,7 @@
 # PG_COMPATIBILITY_AUDIT.md — Auditoría estática de compatibilidad PostgreSQL
 
 > Generado por `scripts/audit-pg-compat.js`
-> Fecha: 2026-09-12T22:10:26.330Z
+> Fecha: 2026-09-12T22:12:58.040Z
 > Auditoría estática (sin ejecución contra PG real).
 
 ## Resumen
