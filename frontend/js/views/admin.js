@@ -2364,14 +2364,25 @@ const AdminView = {
 Object.assign(AdminView, {
   async _renderUsers() {
     this._loading('Cargando usuarios…');
+    // Pagination + search state (Bloque 12 FASE C)
+    if (this._usersPage === undefined) this._usersPage = 1;
+    if (this._usersSearch === undefined) this._usersSearch = '';
+    const pageSize = 20;
     let users = [];
     let roles = [];
+    let pagination = null;
     try {
+      const params = new URLSearchParams({
+        page: String(this._usersPage),
+        pageSize: String(pageSize),
+      });
+      if (this._usersSearch) params.set('search', this._usersSearch);
       const [u, r] = await Promise.all([
-        Api.request('GET', '/admin/users'),
+        Api.request('GET', `/admin/users?${params.toString()}`),
         Api.request('GET', '/admin/roles'),
       ]);
       users = u.data || [];
+      pagination = u.pagination;
       roles = r.data || [];
       this._rolesCache = roles;
     } catch (err) {
@@ -2379,7 +2390,13 @@ Object.assign(AdminView, {
       return;
     }
     const newBtn = this._btn('Nuevo usuario', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newUser()");
-    if (users.length === 0) {
+    const searchInput = `
+      <input type="text" class="admin-input" id="users-search"
+        placeholder="Buscar usuario..." value="${this._escape(this._usersSearch)}"
+        oninput="window.AdminView._usersSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (users.length === 0 && !this._usersSearch) {
       this._setContent(this._header('Usuarios', newBtn) +
         '<p class="admin-empty">No hay usuarios cargados.</p>');
       return;
@@ -2399,8 +2416,46 @@ Object.assign(AdminView, {
           </td>
         </tr>`;
     }).join('');
+    const paginationHtml = this._renderPagination(pagination, '_usersPage', '_renderUsers');
     this._setContent(this._header('Usuarios', newBtn) +
-      this._table(['Nombre', 'Rol', 'Admin', 'Acciones'], rows));
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      this._table(['Nombre', 'Rol', 'Admin', 'Acciones'], rows) +
+      paginationHtml);
+  },
+
+  _usersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._usersSearch = value.trim();
+        AdminView._usersPage = 1;
+        AdminView._renderUsers();
+      }, 300);
+    };
+  })(),
+
+  _renderPagination(pagination, pageProp, renderMethod) {
+    if (!pagination || !pagination.totalPages || pagination.totalPages <= 1) {
+      return pagination ? `<div style="text-align:center; color:var(--lba-fg-muted, #6b7280); font-size:12px; padding:8px;">Total: ${pagination.total || 0} registros</div>` : '';
+    }
+    const prev = pagination.hasPrev
+      ? `<button class="kds-btn" onclick="window.AdminView.${pageProp}--; window.AdminView.${renderMethod}()" style="min-height:36px; padding:6px 12px;">← Anterior</button>`
+      : '<button class="kds-btn" disabled style="min-height:36px; padding:6px 12px; opacity:0.4;">← Anterior</button>';
+    const next = pagination.hasNext
+      ? `<button class="kds-btn" onclick="window.AdminView.${pageProp}++; window.AdminView.${renderMethod}()" style="min-height:36px; padding:6px 12px;">Siguiente →</button>`
+      : '<button class="kds-btn" disabled style="min-height:36px; padding:6px 12px; opacity:0.4;">Siguiente →</button>';
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; gap:8px; flex-wrap:wrap;">
+        <div style="font-size:12px; color:var(--lba-fg-muted, #6b7280);">
+          Página ${pagination.page} de ${pagination.totalPages} — Total: ${pagination.total} registros
+        </div>
+        <div style="display:flex; gap:4px;">
+          ${prev}
+          ${next}
+        </div>
+      </div>
+    `;
   },
 
   _newUser() { this._userForm(null); },
@@ -3199,17 +3254,34 @@ Object.assign(AdminView, {
 
   async _renderCustomers() {
     this._loading('Cargando clientes…');
+    if (this._customersPage === undefined) this._customersPage = 1;
+    if (this._customersSearch === undefined) this._customersSearch = '';
+    const pageSize = 20;
     let customers = [];
+    let pagination = null;
     try {
-      const res = await Api.request('GET', '/customers');
+      const params = new URLSearchParams({
+        limit: String(pageSize),
+        offset: String((this._customersPage - 1) * pageSize),
+        active: 'all',
+      });
+      if (this._customersSearch) params.set('search', this._customersSearch);
+      const res = await Api.request('GET', `/customers?${params.toString()}`);
       customers = res.data || [];
+      pagination = res.pagination;
       this._customersCache = customers;
     } catch (err) {
       this._error('No se pueden cargar clientes: ' + (err.message || err));
       return;
     }
     const newBtn = this._btn('Nuevo cliente', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newCustomer()");
-    if (customers.length === 0) {
+    const searchInput = `
+      <input type="text" class="admin-input" id="customers-search"
+        placeholder="Buscar cliente..." value="${this._escape(this._customersSearch)}"
+        oninput="window.AdminView._customersSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (customers.length === 0 && !this._customersSearch) {
       this._setContent(this._header('Clientes', newBtn) +
         '<div class="admin-empty">No hay clientes registrados.</div>');
       return;
@@ -3235,9 +3307,24 @@ Object.assign(AdminView, {
           </td>
         </tr>`;
     }).join('');
+    const paginationHtml = this._renderPagination(pagination, '_customersPage', '_renderCustomers');
     this._setContent(this._header('Clientes', newBtn) +
-      this._table(['Nombre', 'Teléfono', 'Email', 'Saldo', 'Estado', 'Acciones'], rows));
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      this._table(['Nombre', 'Teléfono', 'Email', 'Saldo', 'Estado', 'Acciones'], rows) +
+      paginationHtml);
   },
+
+  _customersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._customersSearch = value.trim();
+        AdminView._customersPage = 1;
+        AdminView._renderCustomers();
+      }, 300);
+    };
+  })(),
 
   _newCustomer() { this._customerForm(null); },
 

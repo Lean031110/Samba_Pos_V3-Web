@@ -252,8 +252,11 @@ window.DEMO_DATA = {
 
 // Mock API handler — intercepts fetch calls when DEMO_MODE is true
 window.DEMO_API = {
-  handle(method, path, body) {
+  handle(method, pathIn, body) {
     const data = window.DEMO_DATA;
+    // Normalize path: api.js passes paths like '/admin/users' but handlers expect '/api/admin/users'.
+    // Add '/api' prefix if missing so both forms work.
+    const path = pathIn.startsWith('/api/') ? pathIn : ('/api' + pathIn);
 
     // Auth
     if (path === '/api/auth/login' && method === 'POST') {
@@ -402,9 +405,29 @@ window.DEMO_API = {
       return { data: [{ Id: 1, StationId: parseInt(path.match(/\d+/)[0], 10), ColumnCount: 4, RefreshIntervalMs: 5000, AutoBumpSeconds: 0, SoundEnabled: 1, ColorCodingEnabled: 1, FontScale: 'MD', ShowPrepTime: 1, ShowAllergens: 0 }], count: 1 };
     }
 
-    // Admin Users (Bloque 4)
-    if (path === '/api/admin/users' && method === 'GET') {
-      return { data: data.users, count: data.users.length };
+    // Admin Users (Bloque 4) — supports pagination + search (Bloque 12)
+    if (path.startsWith('/api/admin/users') && method === 'GET') {
+      const qs = path.split('?')[1];
+      let users = data.users;
+      let pagination = null;
+      if (qs) {
+        const params = new URLSearchParams(qs);
+        const s = params.get('search');
+        const p = parseInt(params.get('page') || '1', 10);
+        const ps = parseInt(params.get('pageSize') || '50', 10);
+        let filtered = s ? data.users.filter(u => u.Name.toLowerCase().includes(s.toLowerCase())) : data.users;
+        const total = filtered.length;
+        const start = (p - 1) * ps;
+        const paged = filtered.slice(start, start + ps);
+        pagination = {
+          page: p, pageSize: ps, total,
+          totalPages: Math.ceil(total / ps),
+          hasNext: start + paged.length < total,
+          hasPrev: p > 1,
+        };
+        return { data: paged, count: paged.length, pagination };
+      }
+      return { data: users, count: users.length };
     }
     if (path === '/api/admin/roles' && method === 'GET') {
       return { data: data.roles, count: data.roles.length };
@@ -436,8 +459,29 @@ window.DEMO_API = {
     }
 
     // Customers (Bloque 11)
-    if (path === '/api/customers' && method === 'GET') {
-      return { data: data.customers, count: data.customers.length };
+    if (path.startsWith('/api/customers') && !path.includes('/customers/') && method === 'GET') {
+      const qs = path.split('?')[1];
+      let customers = data.customers;
+      let pagination = null;
+      if (qs) {
+        const params = new URLSearchParams(qs);
+        const s = params.get('search');
+        const limit = parseInt(params.get('limit') || '50', 10);
+        const offset = parseInt(params.get('offset') || '0', 10);
+        let filtered = s ? data.customers.filter(c => c.Name.toLowerCase().includes(s.toLowerCase())) : data.customers;
+        const total = filtered.length;
+        const paged = filtered.slice(offset, offset + limit);
+        pagination = {
+          page: Math.floor(offset / limit) + 1,
+          pageSize: limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: offset + paged.length < total,
+          hasPrev: offset > 0,
+        };
+        return { data: paged, count: paged.length, pagination };
+      }
+      return { data: customers, count: customers.length };
     }
     if (path.match(/^\/api\/customers\/\d+$/) && method === 'GET') {
       const id = parseInt(path.match(/\d+/)[0], 10);

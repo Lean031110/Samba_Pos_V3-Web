@@ -1,7 +1,7 @@
 # ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
 > Generado por `scripts/audit-admin-ui-v2.js`
-> Fecha: 2026-09-12T13:49:21.323Z
+> Fecha: 2026-09-12T13:57:06.043Z
 > Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
 ## Capabilities verificadas
@@ -18,9 +18,9 @@ Para cada sección × capability, se clasifica como:
 | Sección | Prioridad | listar | buscar | filtrar | ordenar | paginar | crear | editar | eliminar | desactivar | ver_detalle | loading | empty | error | permisos |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Productos | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Usuarios | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Usuarios | 🔴 Crítica | ✅ | ✅ | ❌ | ❌ | ✅ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Roles | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Clientes | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
+| Clientes | 🔴 Crítica | ✅ | ✅ | ❌ | ❌ | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
 | Estaciones | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Áreas | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Tipos de Pago | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
@@ -43,9 +43,9 @@ Para cada sección × capability, se clasifica como:
 
 | Estado | Cantidad | % |
 |---|---|---|
-| ✅ PASS | 84 | 28.6% |
+| ✅ PASS | 88 | 29.9% |
 | ⚠️ PARTIAL | 31 | 10.5% |
-| ❌ MISSING | 139 | 47.3% |
+| ❌ MISSING | 135 | 45.9% |
 | — NOT_APPLICABLE | 40 | — |
 | **Total** | 294 | 100% |
 
@@ -54,9 +54,9 @@ Para cada sección × capability, se clasifica como:
 ### Secciones críticas (prioridad 1) — deben estar PASS
 
 - **Productos**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
-- **Usuarios**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Usuarios**: MISSING filtrar, ordenar, ver_detalle
 - **Roles**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
-- **Clientes**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
+- **Clientes**: MISSING filtrar, ordenar, eliminar, ver_detalle
 - **Estaciones**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
 - **Áreas**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
 - **Tipos de Pago**: MISSING buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle
@@ -76,6 +76,6 @@ Para cada sección × capability, se clasifica como:
 
 ## Recomendación
 
-- Coverage total PASS: 28.6%
-- Secciones críticas con MISSING: 64
+- Coverage total PASS: 29.9%
+- Secciones críticas con MISSING: 60
 - Próximo foco: implementar pagination + search en secciones críticas
