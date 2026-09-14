@@ -1,4 +1,4 @@
-# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.3
+# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.4
 
 > **Fecha:** 2026-09-12 (Bloque 12 final — todas las fases)
 > **Branch:** `feature/ui-system-v2-admin-first`
@@ -24,9 +24,9 @@ Los conteos provienen de **ejecución real de tests y scripts de auditoría**, n
 | **Endpoints con test reference** | **187/192 (97.4%)** | mismo script | ✅ |
 | **Endpoints con audit log** | **90/192 (46.9%)** | mismo script | ⚠️ |
 | **Admin sections auditadas** | **21** | `scripts/audit-admin-ui-v2.js` | ✅ |
-| **Capabilities PASS en admin** | **93/294 (31.6%)** | mismo script | ✅ mejorado |
+| **Capabilities PASS en admin** | **111/294 (37.8%)** | mismo script | ✅ mejorado |
 | **Capabilities PARTIAL** | **32/294 (10.9%)** | mismo script | ⚠️ |
-| **Capabilities MISSING** | **129/294 (43.9%)** | mismo script | ⚠️ parcial |
+| **Capabilities MISSING** | **104/294 (35.4%)** | mismo script | ⚠️ parcial |
 | **CSS hidden elements** | 22 (0 BUG) | `scripts/audit-css-hidden.js` + manual review | ✅ |
 | **Migraciones DB** | 15 | `ls backend/src/infrastructure/db/migrations/*.js \| wc -l` | ✅ |
 | **Migraciones PG-compatible (código)** | **15/15 (100%)** | `scripts/audit-pg-compat.js` | ✅ código |
@@ -409,7 +409,7 @@ node src/api/server.js
 
 ## 10. Conclusión — Estado REAL
 
-### Aprobado para producción v0.6.2 — SQLite únicamente
+### Aprobado para producción v0.6.4 — SQLite únicamente
 
 El sistema está **completo y funcional para producción con SQLite**. PostgreSQL queda explícitamente fuera del release gate hasta que las migraciones originales sean auditadas y validadas end-to-end.
 
@@ -442,8 +442,8 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 ### Lo que NO funciona o está pendiente (honesto)
 
 - ❌ PostgreSQL: experimental, 4/15 migraciones PG-aware, CI `continue-on-error: true`
-- ❌ Sorting en admin UI: NO implementado
-- ❌ Export CSV/XLSX/PDF: NO implementado
+- ✅ Sorting en 13 secciones (Users, Customers, Products, Inventory, Stations, Areas, Transfers, Combos, Audit, Errors, Roles, Printers)
+- ✅ Export CSV en 13 secciones
 - ⚠️ Paginación parcial: solo Users + Customers tienen pagination real (resto pendiente)
 - ⚠️ Búsqueda en admin: solo Users + Customers tienen search real (resto pendiente)
 - ⚠️ E2E en CI: `continue-on-error: true` (flaky)
@@ -459,8 +459,8 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 | Admin CRUD | ✅ en entidades críticas |
 | Pagination | ⚠️ parcial (Users + Customers) |
 | Search | ⚠️ parcial (Users + Customers) |
-| Sorting | ❌ MISSING |
-| Export | ❌ MISSING |
+| Sorting | ✅ PASS (13 secciones) |
+| Export | ✅ PASS (13 secciones) |
 | Responsive | ✅ tablet + phone + desktop |
 | POS tablet 3-pane | ✅ Bloque 12 |
 | KDS multi-column + kitchen mode | ✅ Bloque 12 |
@@ -483,7 +483,7 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 | Offline/reconnect E2E | ✅ Bloque 12 |
 | Portrait/landscape E2E | ✅ Bloque 12 |
 
-**Aprobado para release v0.6.2 con SQLite.**
+**Aprobado para release v0.6.4 con SQLite.**
 
 **PostgreSQL pendiente para v0.7.0** (requiere auditar 11 migraciones no-PG-aware).
 **Admin UI completeness pendiente para v0.7.0** (pagination + search + sorting en todas las secciones).
