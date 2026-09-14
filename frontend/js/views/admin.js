@@ -1349,6 +1349,9 @@ const AdminView = {
 
   async _renderPrinters() {
     this._loading('Cargando impresoras...');
+    if (this._printersSearch === undefined) this._printersSearch = '';
+    if (this._printersSortCol === undefined) this._printersSortCol = 'Name';
+    if (this._printersSortDir === undefined) this._printersSortDir = 'asc';
     let printers = [], areas = [], rules = [];
     try {
       const [pRes, aRes, rRes] = await Promise.all([
@@ -1362,7 +1365,28 @@ const AdminView = {
     } catch (err) {
       this._error('No se pueden cargar las impresoras: ' + (err.message || err));
     }
+    // Client-side search + sort on printers
+    const filtered = this._printersSearch
+      ? printers.filter(p => (p.Name || '').toLowerCase().includes(this._printersSearch.toLowerCase()) ||
+                              (p.ShareName || '').toLowerCase().includes(this._printersSearch.toLowerCase()))
+      : printers;
+    filtered.sort((a, b) => {
+      const av = String(a[this._printersSortCol] ?? '');
+      const bv = String(b[this._printersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._printersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._printersSortCol === col
+      ? (this._printersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nueva impresora', 'kds-btn--primary', 'fa-plus', "window.AdminView._newPrinter()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportPrinters()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="printers-search"
+        placeholder="Buscar impresora o conexión..." value="${this._escape(this._printersSearch)}"
+        oninput="window.AdminView._printersSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
     const areaName = (id) => {
       const a = areas.find(x => x.Id === id);
       return a ? (a.DisplayName || a.Name) : '—';
@@ -1372,7 +1396,7 @@ const AdminView = {
     if (printers.length === 0) {
       printersHtml = '<p class="admin-empty">No hay impresoras configuradas. Hacé clic en "Nueva impresora" para crear una.</p>';
     } else {
-      const rows = printers.map(pr => {
+      const rows = filtered.map(pr => {
         const isActive = pr.IsActive === 1 || pr.IsActive === true;
         const statusTag = isActive
           ? '<span class="admin-tag admin-tag--success">Activa</span>'
@@ -1394,7 +1418,21 @@ const AdminView = {
           </tr>
         `;
       }).join('');
-      printersHtml = this._table(['Nombre', 'Conexión (IP:puerto)', 'Área', 'Estado', 'Acciones'], rows);
+      const sortableHeaders = `
+        <th style="cursor:pointer;" onclick="window.AdminView._printersSort('Name')">Nombre${sortIcon('Name')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._printersSort('ShareName')">Conexión (IP:puerto)${sortIcon('ShareName')}</th>
+        <th>Área</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._printersSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+        <th>Acciones</th>
+      `;
+      printersHtml = `
+        <div class="admin-table-wrap is-scrollable">
+          <table class="admin-table">
+            <thead><tr>${sortableHeaders}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     }
 
     // Áreas de impresión
@@ -1431,8 +1469,12 @@ const AdminView = {
       rulesHtml = this._table(['Tipo de regla', 'Match', 'Área destino', 'Impresora', 'Prioridad'], rrows);
     }
 
+    const countInfo = this._printersSearch
+      ? `${filtered.length} de ${printers.length} impresoras`
+      : `${printers.length} impresoras`;
     this._setContent(
-      this._header('Impresoras', newBtn) +
+      this._header(`Impresoras (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       '<h3 class="admin-section-title">Impresoras configuradas</h3>' +
       printersHtml +
       '<h3 class="admin-section-title">Áreas de impresión</h3>' +
@@ -1440,6 +1482,41 @@ const AdminView = {
       '<h3 class="admin-section-title">Reglas de routing</h3>' +
       rulesHtml
     );
+  },
+
+  _printersSort(col) {
+    if (this._printersSortCol === col) {
+      this._printersSortDir = this._printersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._printersSortCol = col;
+      this._printersSortDir = 'asc';
+    }
+    this._renderPrinters();
+  },
+
+  _printersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._printersSearch = value.trim();
+        AdminView._renderPrinters();
+      }, 300);
+    };
+  })(),
+
+  _exportPrinters() {
+    Api.request('GET', '/printers').then(res => {
+      const printers = res.data || [];
+      if (printers.length === 0) { this._toast('No hay impresoras para exportar', 'info'); return; }
+      window.CSVExport.export(printers, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'ShareName', label: 'Conexión' },
+        { key: 'IsActive', label: 'Activa' },
+      ], `impresoras-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${printers.length} impresoras`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newPrinter() {
@@ -2819,6 +2896,9 @@ Object.assign(AdminView, {
 
   async _renderRoles() {
     this._loading('Cargando roles…');
+    if (this._rolesSearch === undefined) this._rolesSearch = '';
+    if (this._rolesSortCol === undefined) this._rolesSortCol = 'Name';
+    if (this._rolesSortDir === undefined) this._rolesSortDir = 'asc';
     let roles = [];
     try {
       const res = await Api.request('GET', '/admin/roles');
@@ -2828,13 +2908,33 @@ Object.assign(AdminView, {
       this._error('No se pueden cargar los roles: ' + (err.message || err));
       return;
     }
+    // Client-side search + sort
+    const filtered = this._rolesSearch
+      ? roles.filter(r => (r.Name || '').toLowerCase().includes(this._rolesSearch.toLowerCase()))
+      : roles;
+    filtered.sort((a, b) => {
+      const av = String(a[this._rolesSortCol] ?? '');
+      const bv = String(b[this._rolesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._rolesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._rolesSortCol === col
+      ? (this._rolesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo rol', 'kds-btn--primary', 'fa-shield-halved', "window.AdminView._newRole()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportRoles()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="roles-search"
+        placeholder="Buscar rol..." value="${this._escape(this._rolesSearch)}"
+        oninput="window.AdminView._rolesSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (roles.length === 0) {
       this._setContent(this._header('Roles', newBtn) +
         '<p class="admin-empty">No hay roles cargados.</p>');
       return;
     }
-    const rows = roles.map(r => `
+    const rows = filtered.map(r => `
       <tr>
         <td><strong>${this._escape(r.Name)}</strong></td>
         <td>${r.IsAdmin ? '<span class="admin-tag admin-tag--info">Sí</span>' : '<span class="admin-tag">No</span>'}</td>
@@ -2843,8 +2943,59 @@ Object.assign(AdminView, {
         </td>
       </tr>
     `).join('');
-    this._setContent(this._header('Roles', newBtn) +
-      this._table(['Nombre', 'Admin', 'Acciones'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._rolesSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._rolesSort('IsAdmin')">Admin${sortIcon('IsAdmin')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._rolesSearch
+      ? `${filtered.length} de ${roles.length} roles`
+      : `${roles.length} roles`;
+    this._setContent(this._header(`Roles (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _rolesSort(col) {
+    if (this._rolesSortCol === col) {
+      this._rolesSortDir = this._rolesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._rolesSortCol = col;
+      this._rolesSortDir = 'asc';
+    }
+    this._renderRoles();
+  },
+
+  _rolesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._rolesSearch = value.trim();
+        AdminView._renderRoles();
+      }, 300);
+    };
+  })(),
+
+  _exportRoles() {
+    if (!this._rolesCache || this._rolesCache.length === 0) {
+      this._toast('No hay roles para exportar', 'info');
+      return;
+    }
+    window.CSVExport.export(this._rolesCache, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Nombre' },
+      { key: 'IsAdmin', label: 'Es Admin' },
+    ], `roles-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${this._rolesCache.length} roles`, 'success');
   },
 
   _newRole() {
@@ -3642,22 +3793,47 @@ Object.assign(AdminView, {
 
   async _renderErrors() {
     this._loading('Cargando errores…');
+    if (this._errorsSearch === undefined) this._errorsSearch = '';
+    if (this._errorsSortCol === undefined) this._errorsSortCol = 'ServerTimestamp';
+    if (this._errorsSortDir === undefined) this._errorsSortDir = 'desc';
     let errors = [];
     let stats = null;
     try {
       const [e, s] = await Promise.all([
-        Api.request('GET', '/errors?limit=100'),
+        Api.request('GET', '/errors?limit=200'),
         Api.request('GET', '/errors/stats').catch(() => ({ data: null })),
       ]);
       errors = e.data || [];
       stats = s.data;
     } catch (err) {
-      // Fall back to demo data if endpoint not available
       this._error('No se pueden cargar errores: ' + (err.message || err));
       return;
     }
+    // Client-side search + sort
+    const filtered = this._errorsSearch
+      ? errors.filter(e => (e.Type || '').toLowerCase().includes(this._errorsSearch.toLowerCase()) ||
+                            (e.Message || '').toLowerCase().includes(this._errorsSearch.toLowerCase()) ||
+                            (e.View || '').toLowerCase().includes(this._errorsSearch.toLowerCase()) ||
+                            (e.Platform || '').toLowerCase().includes(this._errorsSearch.toLowerCase()))
+      : errors;
+    filtered.sort((a, b) => {
+      const av = String(a[this._errorsSortCol] ?? '');
+      const bv = String(b[this._errorsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._errorsSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._errorsSortCol === col
+      ? (this._errorsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const clearBtn = this._btn('Limpiar logs', 'kds-btn--void', 'fa-trash', "window.AdminView._clearErrors()");
     const refreshBtn = this._btn('Actualizar', '', 'fa-rotate', "window.AdminView._renderErrors()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportErrors()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="errors-search"
+        placeholder="Buscar tipo, mensaje, vista..." value="${this._escape(this._errorsSearch)}"
+        oninput="window.AdminView._errorsSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (errors.length === 0) {
       this._setContent(this._header('Errores de cliente', refreshBtn + clearBtn) +
         '<div class="admin-empty"><i class="fa-solid fa-circle-check" style="font-size: 36px; color: var(--lba-success, #198754);"></i><br>No hay errores reportados. ¡Excelente!</div>');
@@ -3685,7 +3861,7 @@ Object.assign(AdminView, {
         </div>
       </div>
     ` : '';
-    const rows = errors.map(e => {
+    const rows = filtered.map(e => {
       const typeColor = {
         uncaught: 'admin-tag--danger',
         unhandledrejection: 'admin-tag--danger',
@@ -3704,8 +3880,67 @@ Object.assign(AdminView, {
           </td>
         </tr>`;
     }).join('');
-    this._setContent(this._header('Errores de cliente', refreshBtn + clearBtn) +
-      statsHtml + this._table(['Tipo', 'Mensaje', 'Vista', 'Plataforma', 'Fecha', 'Acciones'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('Type')">Tipo${sortIcon('Type')}</th>
+      <th>Mensaje</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('View')">Vista${sortIcon('View')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('Platform')">Plataforma${sortIcon('Platform')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('ServerTimestamp')">Fecha${sortIcon('ServerTimestamp')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._errorsSearch
+      ? `${filtered.length} de ${errors.length} errores (filtrados)`
+      : `${errors.length} errores`;
+    this._setContent(this._header(`Errores de cliente (${countInfo})`, refreshBtn + clearBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      statsHtml + tableHtml);
+  },
+
+  _errorsSort(col) {
+    if (this._errorsSortCol === col) {
+      this._errorsSortDir = this._errorsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._errorsSortCol = col;
+      this._errorsSortDir = 'asc';
+    }
+    this._renderErrors();
+  },
+
+  _errorsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._errorsSearch = value.trim();
+        AdminView._renderErrors();
+      }, 300);
+    };
+  })(),
+
+  _exportErrors() {
+    Api.request('GET', '/errors?limit=10000').then(res => {
+      const errors = res.data || [];
+      if (errors.length === 0) { this._toast('No hay errores para exportar', 'info'); return; }
+      window.CSVExport.export(errors, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Type', label: 'Tipo' },
+        { key: 'Message', label: 'Mensaje' },
+        { key: 'View', label: 'Vista' },
+        { key: 'Platform', label: 'Plataforma' },
+        { key: 'UserId', label: 'Usuario' },
+        { key: 'ServerTimestamp', label: 'Fecha' },
+        { key: 'Url', label: 'URL' },
+      ], `errores-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${errors.length} errores`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   async _viewError(id) {
@@ -3990,23 +4225,48 @@ Object.assign(AdminView, {
 
   async _renderAuditLogs() {
     this._loading('Cargando auditoría…');
+    if (this._auditSearch === undefined) this._auditSearch = '';
+    if (this._auditSortCol === undefined) this._auditSortCol = 'CreatedAt';
+    if (this._auditSortDir === undefined) this._auditSortDir = 'desc';
     let logs = [];
     let total = 0;
     try {
-      const res = await Api.request('GET', '/admin/audit-logs?limit=100');
+      const res = await Api.request('GET', '/admin/audit-logs?limit=200');
       logs = res.data || [];
       total = res.total || 0;
     } catch (err) {
       this._error('No se pueden cargar logs: ' + (err.message || err));
       return;
     }
+    // Client-side search + sort
+    const filtered = this._auditSearch
+      ? logs.filter(l => (l.Action || '').toLowerCase().includes(this._auditSearch.toLowerCase()) ||
+                          (l.EntityType || '').toLowerCase().includes(this._auditSearch.toLowerCase()) ||
+                          String(l.UserId || '').includes(this._auditSearch))
+      : logs;
+    filtered.sort((a, b) => {
+      const av = String(a[this._auditSortCol] ?? '');
+      const bv = String(b[this._auditSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._auditSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._auditSortCol === col
+      ? (this._auditSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const refreshBtn = this._btn('Actualizar', '', 'fa-rotate', "window.AdminView._renderAuditLogs()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportAuditLogs()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="audit-search"
+        placeholder="Buscar acción, entidad o usuario..." value="${this._escape(this._auditSearch)}"
+        oninput="window.AdminView._auditSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (logs.length === 0) {
-      this._setContent(this._header('Auditoría', refreshBtn) +
+      this._setContent(this._header('Auditoría', refreshBtn + ' ' + exportBtn) +
         '<div class="admin-empty">No hay eventos de auditoría.</div>');
       return;
     }
-    const rows = logs.map(l => {
+    const rows = filtered.map(l => {
       const action = l.Action || '—';
       const entity = l.EntityType || '—';
       const entityId = l.EntityId || '';
@@ -4022,8 +4282,65 @@ Object.assign(AdminView, {
           <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this._escape(details)}">${this._escape(details)}</td>
         </tr>`;
     }).join('');
-    this._setContent(this._header(`Auditoría (${total} eventos)`, refreshBtn) +
-      this._table(['Acción', 'Entidad', 'Usuario', 'Fecha', 'Detalles'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('Action')">Acción${sortIcon('Action')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('EntityType')">Entidad${sortIcon('EntityType')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('UserId')">Usuario${sortIcon('UserId')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('CreatedAt')">Fecha${sortIcon('CreatedAt')}</th>
+      <th>Detalles</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._auditSearch
+      ? `${filtered.length} de ${logs.length} eventos (filtrados)`
+      : `${total} eventos totales`;
+    this._setContent(this._header(`Auditoría (${countInfo})`, refreshBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _auditSort(col) {
+    if (this._auditSortCol === col) {
+      this._auditSortDir = this._auditSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._auditSortCol = col;
+      this._auditSortDir = 'asc';
+    }
+    this._renderAuditLogs();
+  },
+
+  _auditSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._auditSearch = value.trim();
+        AdminView._renderAuditLogs();
+      }, 300);
+    };
+  })(),
+
+  _exportAuditLogs() {
+    Api.request('GET', '/admin/audit-logs?limit=10000').then(res => {
+      const logs = res.data || [];
+      if (logs.length === 0) { this._toast('No hay logs para exportar', 'info'); return; }
+      window.CSVExport.export(logs, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Action', label: 'Acción' },
+        { key: 'EntityType', label: 'Tipo Entidad' },
+        { key: 'EntityId', label: 'ID Entidad' },
+        { key: 'UserId', label: 'Usuario' },
+        { key: 'CreatedAt', label: 'Fecha' },
+        { key: 'Details', label: 'Detalles' },
+      ], `audit-logs-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${logs.length} logs`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   // ===================================================================
@@ -4231,6 +4548,9 @@ Object.assign(AdminView, {
 
   async _renderCombos() {
     this._loading('Cargando combos…');
+    if (this._combosSearch === undefined) this._combosSearch = '';
+    if (this._combosSortCol === undefined) this._combosSortCol = 'Name';
+    if (this._combosSortDir === undefined) this._combosSortDir = 'asc';
     let combos = [];
     try {
       const res = await Api.request('GET', '/combos');
@@ -4240,13 +4560,33 @@ Object.assign(AdminView, {
       this._error('No se pueden cargar combos: ' + (err.message || err));
       return;
     }
+    // Client-side search + sort
+    const filtered = this._combosSearch
+      ? combos.filter(c => (c.Name || '').toLowerCase().includes(this._combosSearch.toLowerCase()))
+      : combos;
+    filtered.sort((a, b) => {
+      const av = String(a[this._combosSortCol] ?? '');
+      const bv = String(b[this._combosSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._combosSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._combosSortCol === col
+      ? (this._combosSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo combo', 'kds-btn--primary', 'fa-layer-group', "window.AdminView._newCombo()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportCombos()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="combos-search"
+        placeholder="Buscar combo..." value="${this._escape(this._combosSearch)}"
+        oninput="window.AdminView._combosSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (combos.length === 0) {
       this._setContent(this._header('Combos', newBtn) +
         '<div class="admin-empty">No hay combos configurados.</div>');
       return;
     }
-    const rows = combos.map(c => `
+    const rows = filtered.map(c => `
       <tr>
         <td><strong>${this._escape(c.Name)}</strong></td>
         <td>${c.UseCustomPrice ? '<span class="admin-tag admin-tag--info">$' + Number(c.ComboPrice || 0).toFixed(2) + '</span>' : '<span class="admin-tag">Suma</span>'}</td>
@@ -4257,8 +4597,62 @@ Object.assign(AdminView, {
         </td>
       </tr>
     `).join('');
-    this._setContent(this._header('Combos', newBtn) +
-      this._table(['Nombre', 'Precio', 'Estado', 'Acciones'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._combosSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._combosSort('UseCustomPrice')">Precio${sortIcon('UseCustomPrice')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._combosSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._combosSearch
+      ? `${filtered.length} de ${combos.length} combos`
+      : `${combos.length} combos`;
+    this._setContent(this._header(`Combos (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _combosSort(col) {
+    if (this._combosSortCol === col) {
+      this._combosSortDir = this._combosSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._combosSortCol = col;
+      this._combosSortDir = 'asc';
+    }
+    this._renderCombos();
+  },
+
+  _combosSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._combosSearch = value.trim();
+        AdminView._renderCombos();
+      }, 300);
+    };
+  })(),
+
+  _exportCombos() {
+    if (!this._combosCache || this._combosCache.length === 0) {
+      this._toast('No hay combos para exportar', 'info');
+      return;
+    }
+    window.CSVExport.export(this._combosCache, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Nombre' },
+      { key: 'UseCustomPrice', label: 'Precio Personalizado' },
+      { key: 'ComboPrice', label: 'Precio' },
+      { key: 'IsActive', label: 'Activo' },
+    ], `combos-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${this._combosCache.length} combos`, 'success');
   },
 
   _newCombo() { this._comboForm(null); },
