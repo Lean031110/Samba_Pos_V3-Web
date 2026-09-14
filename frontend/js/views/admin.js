@@ -647,7 +647,9 @@ const AdminView = {
 
   async _renderInventory() {
     this._loading('Cargando inventario...');
-    // Descubre warehouseId por defecto desde /departments (sólo la primera vez)
+    if (this._invSearch === undefined) this._invSearch = '';
+    if (this._invSortCol === undefined) this._invSortCol = 'Name';
+    if (this._invSortDir === undefined) this._invSortDir = 'asc';
     if (this._warehouseId === 1) {
       try {
         const deptRes = await Api.request('GET', '/departments');
@@ -675,6 +677,22 @@ const AdminView = {
       this._error('No se puede cargar el inventario: ' + (err.message || err));
     }
 
+    // Apply client-side search filter
+    const filteredIngredients = this._invSearch
+      ? ingredients.filter(ing => (ing.Name || '').toLowerCase().includes(this._invSearch.toLowerCase()) ||
+                                    (ing.Code || '').toLowerCase().includes(this._invSearch.toLowerCase()))
+      : ingredients;
+    // Apply client-side sort
+    filteredIngredients.sort((a, b) => {
+      const av = String(a[this._invSortCol] ?? '');
+      const bv = String(b[this._invSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._invSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._invSortCol === col
+      ? (this._invSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+
     // Selector de almacén
     const whSelector = `
       <label class="admin-inline-label">
@@ -685,6 +703,13 @@ const AdminView = {
     `;
     const adjustBtn = this._btn('Ajustar stock', 'kds-btn--primary', 'fa-scale-balanced',
       `window.AdminView._openStockAdjustment()`);
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportInventory()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="inv-search"
+        placeholder="Buscar ingrediente o código..." value="${this._escape(this._invSearch)}"
+        oninput="window.AdminView._invSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
 
     // Alertas de stock bajo
     let alertsHtml = '';
@@ -717,7 +742,7 @@ const AdminView = {
     // Stock por ingrediente (join con balances)
     const balanceByIngredient = new Map();
     for (const b of balances) balanceByIngredient.set(b.IngredientId, b);
-    const stockRows = ingredients.map(ing => {
+    const stockRows = filteredIngredients.map(ing => {
       const bal = balanceByIngredient.get(ing.Id);
       const qty = bal ? Number(bal.Quantity) : 0;
       const unit = bal?.UnitCode || ing.BaseUnitCode || '—';
@@ -737,6 +762,22 @@ const AdminView = {
         </tr>
       `;
     }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('Name')">Ingrediente${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('Code')">Código${sortIcon('Code')}</th>
+      <th>Stock</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('MinimumStock')">Mínimo${sortIcon('MinimumStock')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('CostPerUnit')">Costo/U${sortIcon('CostPerUnit')}</th>
+      <th>Acciones</th>
+    `;
+    const stockTableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${stockRows}</tbody>
+        </table>
+      </div>
+    `;
 
     // Movimientos recientes
     let movHtml = '';
@@ -759,14 +800,64 @@ const AdminView = {
       movHtml = this._table(['Tipo', 'Ingrediente', 'Cantidad', 'Fecha', 'Referencia'], mrows);
     }
 
+    const countInfo = this._invSearch
+      ? `${filteredIngredients.length} de ${ingredients.length} ingredientes`
+      : `${ingredients.length} ingredientes`;
+
     this._setContent(
-      this._header('Inventario', whSelector + adjustBtn) +
+      this._header(`Inventario (${countInfo})`, whSelector + ' ' + adjustBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       alertsHtml +
       '<h3 class="admin-section-title">Stock actual</h3>' +
-      this._table(['Ingrediente', 'Código', 'Stock', 'Mínimo', 'Costo/U', 'Acciones'], stockRows) +
+      stockTableHtml +
       '<h3 class="admin-section-title">Movimientos recientes</h3>' +
       movHtml
     );
+  },
+
+  _invSort(col) {
+    if (this._invSortCol === col) {
+      this._invSortDir = this._invSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._invSortCol = col;
+      this._invSortDir = 'asc';
+    }
+    this._renderInventory();
+  },
+
+  _invSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._invSearch = value.trim();
+        AdminView._renderInventory();
+      }, 300);
+    };
+  })(),
+
+  _exportInventory() {
+    if (!this._ingredientsCache || this._ingredientsCache.length === 0) {
+      this._toast('No hay inventario para exportar', 'info');
+      return;
+    }
+    const rows = this._ingredientsCache.map(ing => ({
+      Id: ing.Id,
+      Name: ing.Name,
+      Code: ing.Code || '',
+      MinimumStock: Number(ing.MinimumStock || 0),
+      CostPerUnit: Number(ing.CostPerUnit || 0),
+      BaseUnit: ing.BaseUnitCode || '',
+    }));
+    window.CSVExport.export(rows, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Ingrediente' },
+      { key: 'Code', label: 'Código' },
+      { key: 'MinimumStock', label: 'Stock Mínimo' },
+      { key: 'CostPerUnit', label: 'Costo por Unidad' },
+      { key: 'BaseUnit', label: 'Unidad Base' },
+    ], `inventario-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${rows.length} ingredientes`, 'success');
   },
 
   _movementTypeClass(t) {
@@ -2851,6 +2942,30 @@ Object.assign(AdminView, {
       return;
     }
     const newBtn = this._btn('Nueva estación', 'kds-btn--primary', 'fa-desktop', "window.AdminView._newStation()");
+    // Client-side search + sort (Bloque 12 FASE C)
+    if (this._stationsSearch === undefined) this._stationsSearch = '';
+    if (this._stationsSortCol === undefined) this._stationsSortCol = 'Name';
+    if (this._stationsSortDir === undefined) this._stationsSortDir = 'asc';
+    const filtered = this._stationsSearch
+      ? stations.filter(s => (s.Name || '').toLowerCase().includes(this._stationsSearch.toLowerCase()) ||
+                              (s.Code || '').toLowerCase().includes(this._stationsSearch.toLowerCase()) ||
+                              (s.StationType || '').toLowerCase().includes(this._stationsSearch.toLowerCase()))
+      : stations;
+    filtered.sort((a, b) => {
+      const av = String(a[this._stationsSortCol] ?? '');
+      const bv = String(b[this._stationsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._stationsSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._stationsSortCol === col
+      ? (this._stationsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const searchInput = `
+      <input type="text" class="admin-input" id="stations-search"
+        placeholder="Buscar estación..." value="${this._escape(this._stationsSearch)}"
+        oninput="window.AdminView._stationsSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (stations.length === 0) {
       this._setContent(this._header('Estaciones', newBtn) +
         '<div class="admin-empty">No hay estaciones registradas.</div>');
@@ -2858,7 +2973,7 @@ Object.assign(AdminView, {
     }
     const typeIcon = { POS: 'fa-cash-register', KDS: 'fa-fire', CASHIER: 'fa-money-bill-wave', DISPLAY: 'fa-tv' };
     const typeBadge = (t) => `<span class="admin-tag admin-tag--${t === 'POS' ? 'info' : t === 'KDS' ? 'warning' : t === 'CASHIER' ? 'success' : ''}">${t}</span>`;
-    const rows = stations.map(st => `
+    const rows = filtered.map(st => `
       <tr>
         <td><strong>${this._escape(st.Name)}</strong></td>
         <td><code>${this._escape(st.Code)}</code></td>
@@ -2876,9 +2991,51 @@ Object.assign(AdminView, {
         </td>
       </tr>
     `).join('');
-    this._setContent(this._header('Estaciones', newBtn) +
-      this._table(['Nombre', 'Código', 'Tipo', 'Factor', 'IP', 'Estado', 'Acciones'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('Code')">Código${sortIcon('Code')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('StationType')">Tipo${sortIcon('StationType')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('FormFactor')">Factor${sortIcon('FormFactor')}</th>
+      <th>IP</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._stationsSearch
+      ? `${filtered.length} de ${stations.length} estaciones`
+      : `${stations.length} estaciones`;
+    this._setContent(this._header(`Estaciones (${countInfo})`, newBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
   },
+
+  _stationsSort(col) {
+    if (this._stationsSortCol === col) {
+      this._stationsSortDir = this._stationsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._stationsSortCol = col;
+      this._stationsSortDir = 'asc';
+    }
+    this._renderStations();
+  },
+
+  _stationsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._stationsSearch = value.trim();
+        AdminView._renderStations();
+      }, 300);
+    };
+  })(),
 
   _newStation() { this._stationForm(null); },
 
@@ -3097,7 +3254,30 @@ Object.assign(AdminView, {
         '<div class="admin-empty">No hay áreas cargadas.</div>');
       return;
     }
-    const rows = areas.map(a => `
+    // Client-side search + sort (Bloque 12)
+    if (this._areasSearch === undefined) this._areasSearch = '';
+    if (this._areasSortCol === undefined) this._areasSortCol = 'Name';
+    if (this._areasSortDir === undefined) this._areasSortDir = 'asc';
+    const filtered = this._areasSearch
+      ? areas.filter(a => (a.Name || '').toLowerCase().includes(this._areasSearch.toLowerCase()) ||
+                            (a.Code || '').toLowerCase().includes(this._areasSearch.toLowerCase()))
+      : areas;
+    filtered.sort((a, b) => {
+      const av = String(a[this._areasSortCol] ?? '');
+      const bv = String(b[this._areasSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._areasSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._areasSortCol === col
+      ? (this._areasSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const searchInput = `
+      <input type="text" class="admin-input" id="areas-search"
+        placeholder="Buscar área..." value="${this._escape(this._areasSearch)}"
+        oninput="window.AdminView._areasSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    const rows = filtered.map(a => `
       <tr>
         <td><span class="admin-color-swatch" style="background: ${a.Color || '#044392'};"></span> <strong>${this._escape(a.Name)}</strong></td>
         <td><code>${this._escape(a.Code)}</code></td>
@@ -3111,9 +3291,50 @@ Object.assign(AdminView, {
         </td>
       </tr>
     `).join('');
-    this._setContent(this._header('Áreas de producción', newBtn) +
-      this._table(['Nombre', 'Código', 'Display', 'Almacén', 'Estado', 'Acciones'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('Code')">Código${sortIcon('Code')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('DisplayName')">Display${sortIcon('DisplayName')}</th>
+      <th>Almacén</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._areasSearch
+      ? `${filtered.length} de ${areas.length} áreas`
+      : `${areas.length} áreas`;
+    this._setContent(this._header(`Áreas de producción (${countInfo})`, newBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
   },
+
+  _areasSort(col) {
+    if (this._areasSortCol === col) {
+      this._areasSortDir = this._areasSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._areasSortCol = col;
+      this._areasSortDir = 'asc';
+    }
+    this._renderAreas();
+  },
+
+  _areasSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._areasSearch = value.trim();
+        AdminView._renderAreas();
+      }, 300);
+    };
+  })(),
 
   _newArea() { this._areaForm(null); },
 
@@ -3230,10 +3451,36 @@ Object.assign(AdminView, {
 
   async _renderTransfers() {
     this._loading('Cargando transferencias…');
+    if (this._transfersSearch === undefined) this._transfersSearch = '';
+    if (this._transfersSortCol === undefined) this._transfersSortCol = 'CreatedAt';
+    if (this._transfersSortDir === undefined) this._transfersSortDir = 'desc';
     let transfers = [];
     try { const res = await Api.request('GET', '/inventory/transfers'); transfers = res.data || []; } catch {}
+    // Client-side search + sort
+    const filtered = this._transfersSearch
+      ? transfers.filter(t => (t.TransferNumber || '').toLowerCase().includes(this._transfersSearch.toLowerCase()) ||
+                                (t.FromWarehouseName || '').toLowerCase().includes(this._transfersSearch.toLowerCase()) ||
+                                (t.ToWarehouseName || '').toLowerCase().includes(this._transfersSearch.toLowerCase()) ||
+                                (t.Status || '').toLowerCase().includes(this._transfersSearch.toLowerCase()))
+      : transfers;
+    filtered.sort((a, b) => {
+      const av = String(a[this._transfersSortCol] ?? '');
+      const bv = String(b[this._transfersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._transfersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._transfersSortCol === col
+      ? (this._transfersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nueva transferencia', 'kds-btn--primary', 'fa-arrow-right-arrow-left', "window.AdminView._newTransfer()");
-    const rows = transfers.length ? transfers.map(t => `
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportTransfers()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="transfers-search"
+        placeholder="Buscar transferencia..." value="${this._escape(this._transfersSearch)}"
+        oninput="window.AdminView._transfersSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    const rows = filtered.length ? filtered.map(t => `
       <tr>
         <td><strong>${this._escape(t.TransferNumber)}</strong></td>
         <td>${this._escape(t.FromWarehouseName || '—')}</td>
@@ -3242,8 +3489,63 @@ Object.assign(AdminView, {
         <td>${t.Status === 'COMPLETED' ? '<span class="admin-tag admin-tag--success">Completada</span>' : '<span class="admin-tag admin-tag--warning">Pendiente</span>'}</td>
       </tr>
     `).join('') : '<tr><td colspan="5" class="admin-empty">Sin transferencias</td></tr>';
-    this._setContent(this._header('Transferencias entre almacenes', newBtn) +
-      this._table(['N°', 'Origen', 'Destino', 'Fecha', 'Estado'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('TransferNumber')">N°${sortIcon('TransferNumber')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('FromWarehouseName')">Origen${sortIcon('FromWarehouseName')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('ToWarehouseName')">Destino${sortIcon('ToWarehouseName')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('CreatedAt')">Fecha${sortIcon('CreatedAt')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('Status')">Estado${sortIcon('Status')}</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._transfersSearch
+      ? `${filtered.length} de ${transfers.length} transferencias`
+      : `${transfers.length} transferencias`;
+    this._setContent(this._header(`Transferencias (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _transfersSort(col) {
+    if (this._transfersSortCol === col) {
+      this._transfersSortDir = this._transfersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._transfersSortCol = col;
+      this._transfersSortDir = 'asc';
+    }
+    this._renderTransfers();
+  },
+
+  _transfersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._transfersSearch = value.trim();
+        AdminView._renderTransfers();
+      }, 300);
+    };
+  })(),
+
+  _exportTransfers() {
+    Api.request('GET', '/inventory/transfers').then(res => {
+      const transfers = res.data || [];
+      if (transfers.length === 0) { this._toast('No hay transferencias para exportar', 'info'); return; }
+      window.CSVExport.export(transfers, [
+        { key: 'TransferNumber', label: 'N°' },
+        { key: 'FromWarehouseName', label: 'Origen' },
+        { key: 'ToWarehouseName', label: 'Destino' },
+        { key: 'Status', label: 'Estado' },
+        { key: 'CreatedAt', label: 'Fecha' },
+      ], `transferencias-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${transfers.length} transferencias`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newTransfer() {

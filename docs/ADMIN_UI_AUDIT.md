@@ -1,7 +1,7 @@
 # ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
 > Generado por `scripts/audit-admin-ui-v2.js`
-> Fecha: 2026-09-12T22:16:17.791Z
+> Fecha: 2026-09-14T15:44:04.779Z
 > Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
 ## Capabilities verificadas
@@ -21,17 +21,17 @@ Para cada sección × capability, se clasifica como:
 | Usuarios | 🔴 Crítica | ✅ | ✅ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Roles | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Clientes | 🔴 Crítica | ✅ | ✅ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
-| Estaciones | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Áreas | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Estaciones | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ✅ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Áreas | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Tipos de Pago | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Settings | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Caja | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Inventario | 🔴 Crítica | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Inventario | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Impresoras | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Departamentos | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Combos | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Recetas | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Transferencias | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Transferencias | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Plantillas | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Reportes | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ❌ | — |
 | Auditoría | 🟢 Opcional | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
@@ -43,9 +43,9 @@ Para cada sección × capability, se clasifica como:
 
 | Estado | Cantidad | % |
 |---|---|---|
-| ✅ PASS | 93 | 31.6% |
-| ⚠️ PARTIAL | 32 | 10.9% |
-| ❌ MISSING | 129 | 43.9% |
+| ✅ PASS | 101 | 34.4% |
+| ⚠️ PARTIAL | 34 | 11.6% |
+| ❌ MISSING | 119 | 40.5% |
 | — NOT_APPLICABLE | 40 | — |
 | **Total** | 294 | 100% |
 
@@ -57,12 +57,12 @@ Para cada sección × capability, se clasifica como:
 - **Usuarios**: MISSING filtrar, ver_detalle
 - **Roles**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
 - **Clientes**: MISSING filtrar, eliminar, ver_detalle
-- **Estaciones**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
-- **Áreas**: MISSING buscar, filtrar, ordenar, paginar, ver_detalle
+- **Estaciones**: MISSING paginar, eliminar, ver_detalle
+- **Áreas**: MISSING paginar, ver_detalle
 - **Tipos de Pago**: MISSING buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle
 - **Settings**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
 - **Caja**: MISSING buscar, filtrar, ordenar, paginar, crear, editar, eliminar, ver_detalle
-- **Inventario**: MISSING ordenar, paginar, editar, eliminar, ver_detalle
+- **Inventario**: MISSING paginar, editar, eliminar, ver_detalle
 - **Impresoras**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
 
 ### Secciones importantes (prioridad 2)
@@ -70,12 +70,12 @@ Para cada sección × capability, se clasifica como:
 - **Departamentos**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle PARTIAL: crear
 - **Combos**: MISSING: buscar, filtrar, ordenar, paginar, ver_detalle PARTIAL: crear, editar, eliminar
 - **Recetas**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle 
-- **Transferencias**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle PARTIAL: crear
+- **Transferencias**: MISSING: paginar, editar, eliminar, ver_detalle PARTIAL: filtrar, crear
 - **Plantillas**: MISSING: buscar, filtrar, ordenar, paginar, eliminar, ver_detalle PARTIAL: crear, editar
 - **Reportes**: MISSING: buscar, filtrar, ordenar, paginar, crear, editar, eliminar, ver_detalle, error 
 
 ## Recomendación
 
-- Coverage total PASS: 31.6%
-- Secciones críticas con MISSING: 54
+- Coverage total PASS: 34.4%
+- Secciones críticas con MISSING: 47
 - Próximo foco: implementar pagination + search en secciones críticas
