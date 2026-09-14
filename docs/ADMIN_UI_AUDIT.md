@@ -1,7 +1,7 @@
 # ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
 > Generado por `scripts/audit-admin-ui-v2.js`
-> Fecha: 2026-09-14T15:50:11.050Z
+> Fecha: 2026-09-14T23:25:38.587Z
 > Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
 ## Capabilities verificadas
@@ -30,9 +30,9 @@ Para cada sección × capability, se clasifica como:
 | Impresoras | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Departamentos | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Combos | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Recetas | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Recetas | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ✅ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Transferencias | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Plantillas | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Plantillas | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Reportes | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ❌ | — |
 | Auditoría | 🟢 Opcional | ✅ | ✅ | ⚠️ | ✅ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Errores | 🟢 Opcional | ✅ | ✅ | ⚠️ | ✅ | ❌ | ❌ | ❌ | ⚠️ | — | ✅ | ✅ | ✅ | ✅ | — |
@@ -43,9 +43,9 @@ Para cada sección × capability, se clasifica como:
 
 | Estado | Cantidad | % |
 |---|---|---|
-| ✅ PASS | 111 | 37.8% |
-| ⚠️ PARTIAL | 39 | 13.3% |
-| ❌ MISSING | 104 | 35.4% |
+| ✅ PASS | 115 | 39.1% |
+| ⚠️ PARTIAL | 41 | 13.9% |
+| ❌ MISSING | 98 | 33.3% |
 | — NOT_APPLICABLE | 40 | — |
 | **Total** | 294 | 100% |
 
@@ -69,13 +69,13 @@ Para cada sección × capability, se clasifica como:
 
 - **Departamentos**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle PARTIAL: crear
 - **Combos**: MISSING: paginar, ver_detalle PARTIAL: filtrar, crear, editar, eliminar
-- **Recetas**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle 
+- **Recetas**: MISSING: paginar, editar, eliminar, ver_detalle PARTIAL: filtrar
 - **Transferencias**: MISSING: paginar, editar, eliminar, ver_detalle PARTIAL: filtrar, crear
-- **Plantillas**: MISSING: buscar, filtrar, ordenar, paginar, eliminar, ver_detalle PARTIAL: crear, editar
+- **Plantillas**: MISSING: paginar, eliminar, ver_detalle PARTIAL: filtrar, crear, editar
 - **Reportes**: MISSING: buscar, filtrar, ordenar, paginar, crear, editar, eliminar, ver_detalle, error 
 
 ## Recomendación
 
-- Coverage total PASS: 37.8%
+- Coverage total PASS: 39.1%
 - Secciones críticas con MISSING: 41
 - Próximo foco: implementar pagination + search en secciones críticas

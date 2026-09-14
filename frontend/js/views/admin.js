@@ -974,6 +974,9 @@ const AdminView = {
 
   async _renderRecipes() {
     this._loading('Cargando recetas y costos...');
+    if (this._recipesSearch === undefined) this._recipesSearch = '';
+    if (this._recipesSortCol === undefined) this._recipesSortCol = 'menuItemName';
+    if (this._recipesSortDir === undefined) this._recipesSortDir = 'asc';
     let recipes = [], costSummary = [];
     try {
       const [recRes, sumRes] = await Promise.all([
@@ -985,15 +988,36 @@ const AdminView = {
     } catch (err) {
       this._error('No se pueden cargar las recetas: ' + (err.message || err));
     }
+    // Client-side search + sort
+    const filtered = this._recipesSearch
+      ? recipes.filter(r => (r.menuItemName || '').toLowerCase().includes(this._recipesSearch.toLowerCase()) ||
+                            (r.portionName || '').toLowerCase().includes(this._recipesSearch.toLowerCase()))
+      : recipes;
+    filtered.sort((a, b) => {
+      const av = String(a[this._recipesSortCol] ?? '');
+      const bv = String(b[this._recipesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._recipesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._recipesSortCol === col
+      ? (this._recipesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const calcBtn = this._btn('Calcular margen', '', 'fa-calculator', "window.AdminView._showMarginCalc()");
     const newBtn = this._btn('Nueva receta', 'kds-btn--primary', 'fa-plus', "window.AdminView._newRecipe()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportRecipes()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="recipes-search"
+        placeholder="Buscar producto o porción..." value="${this._escape(this._recipesSearch)}"
+        oninput="window.AdminView._recipesSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
 
     // Tabla principal: recetas existentes con costo, precio, margen
     let recipesHtml;
     if (recipes.length === 0) {
       recipesHtml = '<p class="admin-empty">No hay recetas definidas todavía. Usá "Nueva receta" o "Editar receta" en la lista inferior.</p>';
     } else {
-      const rows = recipes.map(r => {
+      const rows = filtered.map(r => {
         const marginClass = Number(r.marginPct) < 30 ? 'admin-num--danger'
           : Number(r.marginPct) < 60 ? 'admin-num--warning'
           : 'admin-num--success';
@@ -1013,7 +1037,23 @@ const AdminView = {
           </tr>
         `;
       }).join('');
-      recipesHtml = this._table(['Producto', 'Porción', 'Costo', 'Precio', 'Margen', '% Margen', 'Acciones'], rows);
+      const sortableHeaders = `
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('menuItemName')">Producto${sortIcon('menuItemName')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('portionName')">Porción${sortIcon('portionName')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('cost')">Costo${sortIcon('cost')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('price')">Precio${sortIcon('price')}</th>
+        <th>Margen</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('marginPct')">% Margen${sortIcon('marginPct')}</th>
+        <th>Acciones</th>
+      `;
+      recipesHtml = `
+        <div class="admin-table-wrap is-scrollable">
+          <table class="admin-table">
+            <thead><tr>${sortableHeaders}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     }
 
     // Resumen por producto (incluye los que no tienen receta)
@@ -1067,12 +1107,53 @@ const AdminView = {
       `;
     }
 
+    const countInfo = this._recipesSearch
+      ? `${filtered.length} de ${recipes.length} recetas`
+      : `${recipes.length} recetas`;
     this._setContent(
-      this._header('Recetas y costos', calcBtn + newBtn) +
+      this._header(`Recetas y costos (${countInfo})`, calcBtn + ' ' + newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       '<h3 class="admin-section-title">Recetas definidas</h3>' +
       recipesHtml +
       summaryHtml
     );
+  },
+
+  _recipesSort(col) {
+    if (this._recipesSortCol === col) {
+      this._recipesSortDir = this._recipesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._recipesSortCol = col;
+      this._recipesSortDir = 'asc';
+    }
+    this._renderRecipes();
+  },
+
+  _recipesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._recipesSearch = value.trim();
+        AdminView._renderRecipes();
+      }, 300);
+    };
+  })(),
+
+  _exportRecipes() {
+    Api.request('GET', '/recipes').then(res => {
+      const recipes = res.data || [];
+      if (recipes.length === 0) { this._toast('No hay recetas para exportar', 'info'); return; }
+      window.CSVExport.export(recipes, [
+        { key: 'menuItemName', label: 'Producto' },
+        { key: 'portionName', label: 'Porción' },
+        { key: 'cost', label: 'Costo' },
+        { key: 'price', label: 'Precio' },
+        { key: 'margin', label: 'Margen' },
+        { key: 'marginPct', label: '% Margen' },
+      ], `recetas-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${recipes.length} recetas`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   /**
@@ -1615,6 +1696,9 @@ const AdminView = {
 
   async _renderTemplates() {
     this._loading('Cargando plantillas de impresión...');
+    if (this._templatesSearch === undefined) this._templatesSearch = '';
+    if (this._templatesSortCol === undefined) this._templatesSortCol = 'Name';
+    if (this._templatesSortDir === undefined) this._templatesSortDir = 'asc';
     let templates = [];
     try {
       const res = await Api.request('GET', '/print/templates/list?includeInactive=true');
@@ -1625,6 +1709,27 @@ const AdminView = {
     }
 
     const newBtn = this._btn('Nueva plantilla', 'kds-btn--primary', 'fa-plus', "window.AdminView._newTemplate()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportTemplates()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="templates-search"
+        placeholder="Buscar plantilla..." value="${this._escape(this._templatesSearch)}"
+        oninput="window.AdminView._templatesSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    // Client-side search + sort
+    const filtered = this._templatesSearch
+      ? templates.filter(t => (t.Name || '').toLowerCase().includes(this._templatesSearch.toLowerCase()) ||
+                              (t.TemplateType || '').toLowerCase().includes(this._templatesSearch.toLowerCase()))
+      : templates;
+    filtered.sort((a, b) => {
+      const av = String(a[this._templatesSortCol] ?? '');
+      const bv = String(b[this._templatesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._templatesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._templatesSortCol === col
+      ? (this._templatesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
 
     const typeLabels = {
       RECEIPT: 'Recibo',
@@ -1638,7 +1743,7 @@ const AdminView = {
     if (templates.length === 0) {
       html = `<p class="admin-empty">No hay plantillas configuradas. Hacé clic en "Nueva plantilla" para crear una.</p>`;
     } else {
-      const rows = templates.map(t => {
+      const rows = filtered.map(t => {
         const isActive = t.IsActive === 1 || t.IsActive === true;
         const statusTag = isActive
           ? '<span class="admin-tag admin-tag--success">Activa</span>'
@@ -1659,22 +1764,73 @@ const AdminView = {
           </tr>
         `;
       }).join('');
-      const tableHtml = this._table(['Nombre', 'Tipo', 'Descripción', 'Estado', 'Acciones'], rows);
+      const sortableHeaders = `
+        <th style="cursor:pointer;" onclick="window.AdminView._templatesSort('Name')">Nombre${sortIcon('Name')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._templatesSort('TemplateType')">Tipo${sortIcon('TemplateType')}</th>
+        <th>Descripción</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._templatesSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+        <th>Acciones</th>
+      `;
+      const tableHtml = `
+        <div class="admin-table-wrap is-scrollable">
+          <table class="admin-table">
+            <thead><tr>${sortableHeaders}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+      const countInfo = this._templatesSearch
+        ? `${filtered.length} de ${templates.length} plantillas`
+        : `${templates.length} plantillas`;
       html = `
         <div class="admin-section">
-          <div class="admin-section__header">
-            <h2><i class="fa-solid fa-file-lines"></i> Plantillas de impresión</h2>
-            ${newBtn}
-          </div>
+          ${this._header(`Plantillas de impresión (${countInfo})`, newBtn + ' ' + exportBtn)}
           <p class="admin-help">
             Las plantillas definen cómo se formatean los recibos y comandas de cocina antes de enviarse a la impresora.
             Tipos: <strong>Recibo</strong> (ticket cliente), <strong>Comanda cocina</strong> (KDS), <strong>Prueba</strong> (test), <strong>Personalizada</strong>.
           </p>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>
           ${tableHtml}
         </div>
       `;
     }
     this._setContent(html);
+  },
+
+  _templatesSort(col) {
+    if (this._templatesSortCol === col) {
+      this._templatesSortDir = this._templatesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._templatesSortCol = col;
+      this._templatesSortDir = 'asc';
+    }
+    this._renderTemplates();
+  },
+
+  _templatesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._templatesSearch = value.trim();
+        AdminView._renderTemplates();
+      }, 300);
+    };
+  })(),
+
+  _exportTemplates() {
+    Api.request('GET', '/print/templates/list?includeInactive=true').then(res => {
+      const templates = res.data || [];
+      if (templates.length === 0) { this._toast('No hay plantillas para exportar', 'info'); return; }
+      window.CSVExport.export(templates, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'TemplateType', label: 'Tipo' },
+        { key: 'Description', label: 'Descripción' },
+        { key: 'IsActive', label: 'Activa' },
+      ], `plantillas-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${templates.length} plantillas`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newTemplate() {
