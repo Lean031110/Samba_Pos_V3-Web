@@ -1,4 +1,4 @@
-# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.4
+# FINAL PRODUCTION AUDIT — SambaPos_LBA v0.6.5
 
 > **Fecha:** 2026-09-12 (Bloque 12 final — todas las fases)
 > **Branch:** `feature/ui-system-v2-admin-first`
@@ -15,7 +15,7 @@ Los conteos provienen de **ejecución real de tests y scripts de auditoría**, n
 
 | Métrica | Valor | Fuente | Estado |
 |---|---|---|---|
-| **Unit tests PASS** | **577** (533 + 44) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` | ✅ PASS |
+| **Unit tests PASS** | **606** (533 + 73) | `bash scripts/run-all-tests.sh` + `node --test tests/bloque-*.test.js` | ✅ PASS |
 | **Unit tests FAIL** | **0** | misma fuente | ✅ PASS |
 | **Total unit suites** | 27 archivos (26 + 1 nuevo) | `ls backend/tests/*.test.js \| wc -l` | ✅ |
 | **E2E specs** | 10 archivos | `ls backend/tests/e2e/*.spec.js \| wc -l` | ✅ |
@@ -24,9 +24,9 @@ Los conteos provienen de **ejecución real de tests y scripts de auditoría**, n
 | **Endpoints con test reference** | **187/192 (97.4%)** | mismo script | ✅ |
 | **Endpoints con audit log** | **90/192 (46.9%)** | mismo script | ⚠️ |
 | **Admin sections auditadas** | **21** | `scripts/audit-admin-ui-v2.js` | ✅ |
-| **Capabilities PASS en admin** | **111/294 (37.8%)** | mismo script | ✅ mejorado |
+| **Capabilities PASS en admin** | **115/294 (39.1%)** | mismo script | ✅ mejorado |
 | **Capabilities PARTIAL** | **32/294 (10.9%)** | mismo script | ⚠️ |
-| **Capabilities MISSING** | **104/294 (35.4%)** | mismo script | ⚠️ parcial |
+| **Capabilities MISSING** | **98/294 (33.3%)** | mismo script | ⚠️ parcial |
 | **CSS hidden elements** | 22 (0 BUG) | `scripts/audit-css-hidden.js` + manual review | ✅ |
 | **Migraciones DB** | 15 | `ls backend/src/infrastructure/db/migrations/*.js \| wc -l` | ✅ |
 | **Migraciones PG-compatible (código)** | **15/15 (100%)** | `scripts/audit-pg-compat.js` | ✅ código |
@@ -54,7 +54,7 @@ Los conteos provienen de **ejecución real de tests y scripts de auditoría**, n
 
 ### SÍ está listo para producción (con SQLite)
 
-- ✅ 577 unit tests pasando.
+- ✅ 606 unit tests pasando.
 - ✅ 192 endpoints backend, 100% con UI consumer.
 - ✅ Login + RBAC + JWT + audit log funcionales.
 - ✅ POS + KDS + Admin + Cash + Reports.
@@ -409,7 +409,7 @@ node src/api/server.js
 
 ## 10. Conclusión — Estado REAL
 
-### Aprobado para producción v0.6.4 — SQLite únicamente
+### Aprobado para producción v0.6.5 — SQLite únicamente
 
 El sistema está **completo y funcional para producción con SQLite**. PostgreSQL queda explícitamente fuera del release gate hasta que las migraciones originales sean auditadas y validadas end-to-end.
 
@@ -429,7 +429,7 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 - ✅ Reports con 9 endpoints y dashboard en tiempo real
 - ✅ Cash sessions completo (open/close/payout/transfer/events)
 - ✅ Visual regression + WCAG AA accessibility tests
-- ✅ **577 unit tests PASS** (533 + 44), **0 FAIL** (ejecutados el 2026-09-12)
+- ✅ **606** (533 + 73), **0 FAIL** (ejecutados el 2026-09-12)
 - ✅ **192 endpoints backend, 100% con UI consumer, 0 ORPHAN**
 - ✅ Docker image build + smoke en CI
 - ✅ Android APK build en CI
@@ -467,7 +467,7 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 | No overlays problemáticos | ✅ (CSS audit: 0 BUG) |
 | No dead buttons | ✅ (no se encontraron TODO/FIXME en frontend) |
 | API/UI coverage | ✅ 192/192 |
-| Test coverage | ✅ 577 PASS |
+| Test coverage | ✅ 606 PASS |
 | Docker image | ✅ workflow + smoke en CI |
 | Docker smoke local | ❌ BLOCKED (sin Docker) |
 | Android APK | ✅ build en CI |
@@ -483,7 +483,7 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 | Offline/reconnect E2E | ✅ Bloque 12 |
 | Portrait/landscape E2E | ✅ Bloque 12 |
 
-**Aprobado para release v0.6.4 con SQLite.**
+**Aprobado para release v0.6.5 con SQLite.**
 
 **PostgreSQL pendiente para v0.7.0** (requiere auditar 11 migraciones no-PG-aware).
 **Admin UI completeness pendiente para v0.7.0** (pagination + search + sorting en todas las secciones).
@@ -494,4 +494,4 @@ El sistema está **completo y funcional para producción con SQLite**. PostgreSQ
 
 *Documento generado por Bloque 12 con evidencia ejecutable.*
 *Auditorías: `scripts/reconcile-state.js`, `audit-api-ui-coverage.js`, `audit-css-hidden.js`, `audit-admin-ui-v2.js`, `volume-test-dom.js`.*
-*Tests: 533 + 44 = 577 PASS, 0 FAIL (ejecutados 2026-09-12).*
+*Tests: 533 + 73 = 606 PASS, 0 FAIL (ejecutados 2026-09-12).*

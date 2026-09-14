@@ -135,11 +135,23 @@ jobs:
         working-directory: backend
         run: node scripts/run-migrations.js
 
-      - name: All unit tests (reset DB per suite — 533 tests, 22 suites)
+      - name: All unit tests (reset DB per suite — 606+ tests, 28+ suites)
         working-directory: backend
         env:
           SKIP_E2E: '1'
         run: bash scripts/run-all-tests.sh
+
+      - name: Run new Bloque 4-12 verification tests
+        working-directory: backend
+        env:
+          SKIP_E2E: '1'
+        run: |
+          node --test tests/bloque-4-5-verification.test.js \
+                   tests/bloque-7-error-reporting.test.js \
+                   tests/bloque-8-9-verification.test.js \
+                   tests/bloque-11-completeness.test.js \
+                   tests/bloque-12-final-features.test.js \
+                   tests/bloque-12-backend-functional.test.js
 
       - name: Print test count summary
         working-directory: backend
