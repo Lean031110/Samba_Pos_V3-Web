@@ -1,7 +1,7 @@
 # ADMIN_UI_AUDIT.md — Auditoría real con clasificación PASS/PARTIAL/MISSING
 
 > Generado por `scripts/audit-admin-ui-v2.js`
-> Fecha: 2026-09-14T23:25:38.587Z
+> Fecha: 2026-09-14T23:31:48.913Z
 > Reemplaza al audit anterior (que solo contaba presence/absence binaria).
 
 ## Capabilities verificadas
@@ -23,12 +23,12 @@ Para cada sección × capability, se clasifica como:
 | Clientes | 🔴 Crítica | ✅ | ✅ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | — |
 | Estaciones | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ✅ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Áreas | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Tipos de Pago | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Tipos de Pago | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Settings | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Caja | 🔴 Crítica | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Inventario | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Impresoras | 🔴 Crítica | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
-| Departamentos | 🟡 Importante | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
+| Departamentos | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Combos | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Recetas | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ✅ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
 | Transferencias | 🟡 Importante | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ❌ | ❌ | — | ❌ | ✅ | ✅ | ✅ | — |
@@ -43,9 +43,9 @@ Para cada sección × capability, se clasifica como:
 
 | Estado | Cantidad | % |
 |---|---|---|
-| ✅ PASS | 115 | 39.1% |
-| ⚠️ PARTIAL | 41 | 13.9% |
-| ❌ MISSING | 98 | 33.3% |
+| ✅ PASS | 119 | 40.5% |
+| ⚠️ PARTIAL | 43 | 14.6% |
+| ❌ MISSING | 92 | 31.3% |
 | — NOT_APPLICABLE | 40 | — |
 | **Total** | 294 | 100% |
 
@@ -59,7 +59,7 @@ Para cada sección × capability, se clasifica como:
 - **Clientes**: MISSING filtrar, eliminar, ver_detalle
 - **Estaciones**: MISSING paginar, eliminar, ver_detalle
 - **Áreas**: MISSING paginar, ver_detalle
-- **Tipos de Pago**: MISSING buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle
+- **Tipos de Pago**: MISSING paginar, editar, eliminar, ver_detalle
 - **Settings**: MISSING buscar, filtrar, ordenar, paginar, eliminar, ver_detalle
 - **Caja**: MISSING buscar, filtrar, ordenar, paginar, crear, editar, eliminar, ver_detalle
 - **Inventario**: MISSING paginar, editar, eliminar, ver_detalle
@@ -67,7 +67,7 @@ Para cada sección × capability, se clasifica como:
 
 ### Secciones importantes (prioridad 2)
 
-- **Departamentos**: MISSING: buscar, filtrar, ordenar, paginar, editar, eliminar, ver_detalle PARTIAL: crear
+- **Departamentos**: MISSING: paginar, editar, eliminar, ver_detalle PARTIAL: filtrar, crear
 - **Combos**: MISSING: paginar, ver_detalle PARTIAL: filtrar, crear, editar, eliminar
 - **Recetas**: MISSING: paginar, editar, eliminar, ver_detalle PARTIAL: filtrar
 - **Transferencias**: MISSING: paginar, editar, eliminar, ver_detalle PARTIAL: filtrar, crear
@@ -76,6 +76,6 @@ Para cada sección × capability, se clasifica como:
 
 ## Recomendación
 
-- Coverage total PASS: 39.1%
-- Secciones críticas con MISSING: 41
+- Coverage total PASS: 40.5%
+- Secciones críticas con MISSING: 38
 - Próximo foco: implementar pagination + search en secciones críticas

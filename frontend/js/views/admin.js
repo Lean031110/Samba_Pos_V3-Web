@@ -4505,6 +4505,9 @@ Object.assign(AdminView, {
 
   async _renderDepartments() {
     this._loading('Cargando departamentos…');
+    if (this._deptsSearch === undefined) this._deptsSearch = '';
+    if (this._deptsSortCol === undefined) this._deptsSortCol = 'Name';
+    if (this._deptsSortDir === undefined) this._deptsSortDir = 'asc';
     let depts = [];
     try {
       const res = await Api.request('GET', '/admin/departments');
@@ -4513,13 +4516,33 @@ Object.assign(AdminView, {
       this._error('No se pueden cargar departamentos: ' + (err.message || err));
       return;
     }
+    const filtered = this._deptsSearch
+      ? depts.filter(d => (d.Name || '').toLowerCase().includes(this._deptsSearch.toLowerCase()) ||
+                            (d.PriceTag || '').toLowerCase().includes(this._deptsSearch.toLowerCase()))
+      : depts;
+    filtered.sort((a, b) => {
+      const av = String(a[this._deptsSortCol] ?? '');
+      const bv = String(b[this._deptsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._deptsSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._deptsSortCol === col
+      ? (this._deptsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo departamento', 'kds-btn--primary', 'fa-plus', "window.AdminView._newDepartment()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportDepartments()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="depts-search"
+        placeholder="Buscar departamento..." value="${this._escape(this._deptsSearch)}"
+        oninput="window.AdminView._deptsSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (depts.length === 0) {
       this._setContent(this._header('Departamentos', newBtn) +
         '<div class="admin-empty">No hay departamentos.</div>');
       return;
     }
-    const rows = depts.map(d => `
+    const rows = filtered.map(d => `
       <tr>
         <td><strong>${this._escape(d.Name)}</strong></td>
         <td>${d.WarehouseId ? 'Almacén #' + d.WarehouseId : '—'}</td>
@@ -4527,8 +4550,62 @@ Object.assign(AdminView, {
         <td>${d.PriceTag ? '<code>' + this._escape(d.PriceTag) + '</code>' : '—'}</td>
       </tr>
     `).join('');
-    this._setContent(this._header('Departamentos', newBtn) +
-      this._table(['Nombre', 'Almacén', 'Orden', 'Price Tag'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._deptsSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th>Almacén</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._deptsSort('SortOrder')">Orden${sortIcon('SortOrder')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._deptsSort('PriceTag')">Price Tag${sortIcon('PriceTag')}</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._deptsSearch
+      ? `${filtered.length} de ${depts.length} departamentos`
+      : `${depts.length} departamentos`;
+    this._setContent(this._header(`Departamentos (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _deptsSort(col) {
+    if (this._deptsSortCol === col) {
+      this._deptsSortDir = this._deptsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._deptsSortCol = col;
+      this._deptsSortDir = 'asc';
+    }
+    this._renderDepartments();
+  },
+
+  _deptsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._deptsSearch = value.trim();
+        AdminView._renderDepartments();
+      }, 300);
+    };
+  })(),
+
+  _exportDepartments() {
+    Api.request('GET', '/admin/departments').then(res => {
+      const depts = res.data || [];
+      if (depts.length === 0) { this._toast('No hay departamentos para exportar', 'info'); return; }
+      window.CSVExport.export(depts, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'WarehouseId', label: 'Almacén ID' },
+        { key: 'SortOrder', label: 'Orden' },
+        { key: 'PriceTag', label: 'Price Tag' },
+      ], `departamentos-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${depts.length} departamentos`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newDepartment() {
@@ -4569,6 +4646,9 @@ Object.assign(AdminView, {
 
   async _renderPaymentTypes() {
     this._loading('Cargando tipos de pago…');
+    if (this._payTypesSearch === undefined) this._payTypesSearch = '';
+    if (this._payTypesSortCol === undefined) this._payTypesSortCol = 'Name';
+    if (this._payTypesSortDir === undefined) this._payTypesSortDir = 'asc';
     let types = [];
     try {
       const res = await Api.request('GET', '/admin/payment-types');
@@ -4577,20 +4657,89 @@ Object.assign(AdminView, {
       this._error('No se pueden cargar tipos de pago: ' + (err.message || err));
       return;
     }
+    const filtered = this._payTypesSearch
+      ? types.filter(t => (t.Name || '').toLowerCase().includes(this._payTypesSearch.toLowerCase()))
+      : types;
+    filtered.sort((a, b) => {
+      const av = String(a[this._payTypesSortCol] ?? '');
+      const bv = String(b[this._payTypesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._payTypesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._payTypesSortCol === col
+      ? (this._payTypesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo tipo', 'kds-btn--primary', 'fa-plus', "window.AdminView._newPaymentType()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportPaymentTypes()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="paytypes-search"
+        placeholder="Buscar tipo de pago..." value="${this._escape(this._payTypesSearch)}"
+        oninput="window.AdminView._payTypesSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (types.length === 0) {
       this._setContent(this._header('Tipos de Pago', newBtn) +
         '<div class="admin-empty">No hay tipos de pago configurados.</div>');
       return;
     }
-    const rows = types.map(t => `
+    const rows = filtered.map(t => `
       <tr>
         <td><strong>${this._escape(t.Name)}</strong></td>
         <td>${t.AccountTransactionTypeId || '—'}</td>
       </tr>
     `).join('');
-    this._setContent(this._header('Tipos de Pago', newBtn) +
-      this._table(['Nombre', 'Tipo Transacción'], rows));
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._payTypesSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._payTypesSort('AccountTransactionTypeId')">Tipo Transacción${sortIcon('AccountTransactionTypeId')}</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._payTypesSearch
+      ? `${filtered.length} de ${types.length} tipos`
+      : `${types.length} tipos`;
+    this._setContent(this._header(`Tipos de Pago (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _payTypesSort(col) {
+    if (this._payTypesSortCol === col) {
+      this._payTypesSortDir = this._payTypesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._payTypesSortCol = col;
+      this._payTypesSortDir = 'asc';
+    }
+    this._renderPaymentTypes();
+  },
+
+  _payTypesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._payTypesSearch = value.trim();
+        AdminView._renderPaymentTypes();
+      }, 300);
+    };
+  })(),
+
+  _exportPaymentTypes() {
+    Api.request('GET', '/admin/payment-types').then(res => {
+      const types = res.data || [];
+      if (types.length === 0) { this._toast('No hay tipos de pago para exportar', 'info'); return; }
+      window.CSVExport.export(types, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'AccountTransactionTypeId', label: 'Tipo Transacción' },
+      ], `tipos-pago-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${types.length} tipos de pago`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newPaymentType() {
