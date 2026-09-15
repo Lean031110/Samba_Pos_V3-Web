@@ -1,7 +1,7 @@
 {
   "name": "sambapos-lba-backend",
   "version": "0.4.0",
-  "description": "SambaPos_LBA — POS web moderno (backend Node.js + Knex + SQLite)",
+  "description": "SambaPos_LBA \u2014 POS web moderno (backend Node.js + Knex + SQLite)",
   "main": "src/api/server.js",
   "scripts": {
     "start": "node src/api/server.js",
@@ -42,5 +42,9 @@
   },
   "allowScripts": {
     "sqlite3@6.0.1": true
+  },
+  "overrides": {
+    "tar": ">=7.5.7",
+    "cacache": ">=18.0.5"
   }
 }
