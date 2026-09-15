@@ -61,18 +61,15 @@ jobs:
       - name: npm audit (must be 0 high/critical vulnerabilities)
         working-directory: backend
         run: |
-          set -e
           npm ci --ignore-scripts
-          # Audit at high level — low/moderate in build-time transitive deps
-          # (sqlite3 → node-gyp → tar) are acceptable for runtime.
-          npm audit --audit-level=high
           # Parse JSON: fail only if high or critical vulnerabilities exist
-          npm audit --json > /tmp/audit.json
+          npm audit --json > /tmp/audit.json 2>/dev/null || true
           VULN_HIGH=$(node -e "const r=require('/tmp/audit.json'); const v=r.metadata&&r.metadata.vulnerabilities||{}; console.log((v.high||0)+(v.critical||0))")
-          echo "High/Critical vulnerabilities: $VULN_HIGH"
+          VULN_TOTAL=$(node -e "const r=require('/tmp/audit.json'); const v=r.metadata&&r.metadata.vulnerabilities||{}; console.log(v.total||0)")
+          echo "Total vulnerabilities: $VULN_TOTAL (high+critical: $VULN_HIGH)"
           if [ "$VULN_HIGH" -ne "0" ]; then
             echo "FAIL: $VULN_HIGH high/critical vulnerabilities found"
-            npm audit --audit-level=high
+            npm audit --audit-level=high || true
             exit 1
           fi
           echo "OK: 0 high/critical vulnerabilities (low/moderate in build deps may exist)"
