@@ -151,7 +151,8 @@ jobs:
                    tests/bloque-8-9-verification.test.js \
                    tests/bloque-11-completeness.test.js \
                    tests/bloque-12-final-features.test.js \
-                   tests/bloque-12-backend-functional.test.js
+                   tests/bloque-12-backend-functional.test.js \
+                   tests/bloque-12-android-app.test.js
 
       - name: Print test count summary
         working-directory: backend
