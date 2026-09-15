@@ -96,10 +96,10 @@ test.describe('BLOQUE E — POS→KDS Realtime (P0 gate)', () => {
 
     // Wait for the kitchen view to become active + orders to load
     await pageA.waitForSelector('#view-kitchen.is-active', { timeout: 10000 });
-    await pageA.waitForSelector('.kds-orders-grid, .kds-empty, #kds-container', { timeout: 10000 });
+    await pageA.waitForSelector('.kds-cards, .kds-empty2, #kds-screen', { timeout: 10000 });
 
     // Count current orders in KDS (so we can detect a new one)
-    const initialCount = await pageA.locator('.kds-card').count();
+    const initialCount = await pageA.locator('.kds-card2').count();
     console.log(`[E1] Initial KDS order count: ${initialCount}`);
 
     // --- Terminal B (POS / API) ---
@@ -123,7 +123,7 @@ test.describe('BLOQUE E — POS→KDS Realtime (P0 gate)', () => {
     try {
       await pageA.waitForFunction(
         (prevCount) => {
-          const cards = document.querySelectorAll('.kds-card');
+          const cards = document.querySelectorAll('.kds-card2');
           return cards.length > prevCount;
         },
         initialCount,
@@ -131,7 +131,7 @@ test.describe('BLOQUE E — POS→KDS Realtime (P0 gate)', () => {
       );
     } catch (e) {
       // Diagnostic snapshot
-      const cards = await pageA.locator('.kds-card').count();
+      const cards = await pageA.locator('.kds-card2').count();
       throw new Error(
         `[E1] KDS did NOT receive the new order via WebSocket within 5s. ` +
         `Expected > ${initialCount} cards, found ${cards}. ` +
@@ -139,7 +139,7 @@ test.describe('BLOQUE E — POS→KDS Realtime (P0 gate)', () => {
       );
     }
 
-    const finalCount = await pageA.locator('.kds-card').count();
+    const finalCount = await pageA.locator('.kds-card2').count();
     expect(finalCount).toBeGreaterThan(initialCount);
     console.log(`[E1] Final KDS order count: ${finalCount} — PASS`);
 

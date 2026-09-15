@@ -18,14 +18,8 @@ test.describe('Suite B: UI (Isolated)', () => {
     await page.waitForSelector('#view-login.is-active');
     await page.fill('#login-username', 'Administrator');
     await page.fill('#login-pin', '1234');
-    // Click the Login flex-button (use attribute selector)
-    await page.locator('flex-button[variant="success"]').click({ force: true });
-    // If click doesn't work, try calling login directly
-    await page.evaluate(() => {
-      if (window.App && window.store && !window.store.state.currentUser) {
-        window.App.login();
-      }
-    });
+    // BLOQUE N: el botón de login ahora es .btn-odoo (antes flex-button)
+    await page.evaluate(() => window.App.login());
     await page.waitForSelector('#view-dashboard.is-active', { timeout: 8000 });
   }
 
@@ -47,11 +41,14 @@ test.describe('Suite B: UI (Isolated)', () => {
     await page.evaluate(() => window.App.navigate('pos'));
     await page.waitForSelector('#view-pos.is-active', { timeout: 5000 });
     await page.screenshot({ path: path.join(SHOTS, 'ui-03-pos.png') });
-    const texts = await page.locator('#pos-cmdbar flex-button').allTextContents();
-    // Button labels are now in Spanish (post-i18n translation).
-    for (const btn of ['Regalo', 'Anular', 'Nota', 'Etiquetas', 'Descuento', 'Imprimir cuenta', 'Cobrar']) {
+    // BLOQUE N: la barra de comandos ahora son .pos-cmd (antes flex-button)
+    const texts = await page.locator('#pos-cmdbar .pos-cmd').allTextContents();
+    for (const btn of ['Nota', 'Descuento', 'Regalo', 'Imprimir', 'Anular']) {
       expect(texts.some(t => t.includes(btn))).toBeTruthy();
     }
+    // El botón PAGAR está presente y el panel de totales visible
+    await expect(page.locator('#pos-pay-btn')).toBeVisible();
+    await expect(page.locator('#pos-grand-total')).toBeVisible();
   });
 
   test('B3: Kitchen view loads', async ({ page }) => {
@@ -60,8 +57,9 @@ test.describe('Suite B: UI (Isolated)', () => {
     await page.waitForSelector('#view-kitchen.is-active', { timeout: 5000 });
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SHOTS, 'ui-04-kitchen.png') });
-    // KDS toolbar (post-Fase-4 layout: .kds-toolbar replaces .kds-stations-bar).
-    await expect(page.locator('.kds-toolbar')).toBeVisible();
+    // BLOQUE N: KDS rediseñado — stagebar + estaciones (antes .kds-toolbar)
+    await expect(page.locator('.kds-stagebar')).toBeVisible();
+    await expect(page.locator('.kds-stations')).toBeVisible();
   });
 
   test('B4: Wrong PIN shows error', async ({ page }) => {

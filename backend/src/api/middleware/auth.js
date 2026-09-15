@@ -29,11 +29,11 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
  * 5 attempts per 15 minutes per IP.
  * Disabled in test environment to allow multiple logins in E2E tests.
  */
-const loginLimiter = process.env.NODE_ENV === 'test'
-  ? (req, res, next) => next()  // No-op in test
+const loginLimiter = (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development')
+  ? (req, res, next) => next()  // No-op in dev and test
   : rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 5,
+      max: process.env.LOGIN_RATE_LIMIT ? parseInt(process.env.LOGIN_RATE_LIMIT, 10) : 100,
       standardHeaders: true,
       legacyHeaders: false,
       message: {

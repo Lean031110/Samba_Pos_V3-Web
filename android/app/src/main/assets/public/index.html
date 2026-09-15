@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#044392">
+  <meta name="description" content="LBApos — POS de restaurante moderno (SambaPos_LBA)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="LBApos">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192-maskable.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512-maskable.png">
+  <title>LBApos — SambaPos_LBA</title>
+
+  <!-- Font Awesome 6 Free (vendored locally for offline/LAN support) -->
+  <link rel="stylesheet" href="vendor/css/fontawesome.min.css">
+
+  <!-- App styles (odoo19.css carga al final: redesign overlay) -->
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/mobile.css">
+  <link rel="stylesheet" href="css/odoo19.css">
+</head>
+<body data-view="login">
+  <div id="app">
+    <!-- =========================================================== -->
+    <!-- Topbar global (Odoo navbar style)                            -->
+    <!-- =========================================================== -->
+    <header class="topbar no-select" id="app-topbar">
+      <button class="topbar__burger" id="topbar-burger" title="Menú" onclick="window.App.toggleSidebar()">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+      <div class="topbar__brand">
+        <img src="assets/logo-header.png" alt="LBApos" class="topbar__logo" id="topbar-logo">
+        <span class="topbar__appname">LBApos</span>
+      </div>
+      <span class="topbar__area" id="topbar-area">
+        <i class="fa-solid fa-house"></i>
+        <span id="topbar-area-name">Inicio</span>
+      </span>
+      <span class="topbar__demo-badge" id="topbar-demo-badge" hidden title="Build demo: datos ficticios, sin backend">DEMO</span>
+      <div class="topbar__spacer"></div>
+      <input type="search" class="topbar__search" id="topbar-search" placeholder="Buscar…" autocomplete="off">
+      <span class="topbar__clock" id="header-clock">--:--</span>
+      <span class="topbar__conn" id="conn-indicator">
+        <span class="conn-indicator__dot"></span>
+        <span id="conn-label">Conectando…</span>
+      </span>
+      <button class="topbar__user" id="topbar-user-btn" onclick="window.App.toggleUserMenu()">
+        <i class="fa-solid fa-user-circle"></i>
+        <span id="header-user">Usuario</span>
+      </button>
+      <button class="topbar__btn topbar__btn--logout" id="topbar-logout" onclick="window.App.logout()" title="Cerrar sesión">
+        <i class="fa-solid fa-right-from-bracket"></i>
+        <span>Salir</span>
+      </button>
+    </header>
+
+    <!-- Menú de usuario (dropdown discreto) -->
+    <div class="user-menu" id="user-menu" hidden>
+      <div class="user-menu__header">
+        <div class="user-menu__name" id="user-menu-name">Usuario</div>
+        <div class="user-menu__role" id="user-menu-role">—</div>
+      </div>
+      <button class="user-menu__item" onclick="window.App.goHome()">
+        <i class="fa-solid fa-table-cells-large"></i> Todas las áreas
+      </button>
+      <button class="user-menu__item" onclick="window.App.logout()">
+        <i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión
+      </button>
+    </div>
+
+    <!-- =========================================================== -->
+    <!-- Main: una vista activa a la vez                              -->
+    <!-- =========================================================== -->
+    <main class="app-main">
+
+      <!-- ===== LoginView ===== -->
+      <section class="view view-login" id="view-login">
+        <div class="login-card no-select">
+          <div class="login-card__logo">
+            <img src="assets/logo-login.png" alt="LBApos">
+          </div>
+          <h1 class="login-card__title">LBApos</h1>
+          <p class="login-card__subtitle">Iniciá sesión con tu usuario y PIN</p>
+          <input type="text" class="login-card__input" id="login-username"
+                 placeholder="Usuario" value="Administrador" autocomplete="off">
+          <input type="password" class="login-card__input" id="login-pin"
+                 placeholder="PIN" inputmode="numeric" autocomplete="off">
+          <div class="login-keypad numpad" id="login-keypad"><!-- JS --></div>
+          <button class="btn-odoo" style="width: 100%; min-height: 50px;" onclick="window.App.login()">
+            <i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión
+          </button>
+          <div id="login-error" style="color: var(--lba-fg-error); font-size: 12px; min-height: 16px; text-align: center;"></div>
+          <div class="login-users" id="login-demo-users"><!-- JS: chips demo --></div>
+          <p class="login-card__hint">Demo: Administrador / Mesero / Cocinero / Cajero — PIN 1234</p>
+        </div>
+      </section>
+
+      <!-- ===== AreasView (home de áreas post-login) ===== -->
+      <section class="view view-areas" id="view-areas">
+        <div class="areas-hero">
+          <div class="areas-hero__app">
+            <img src="assets/logo-header.png" alt="LBApos" id="areas-logo">
+            LBApos
+          </div>
+          <p class="areas-hero__hello" id="areas-hello">Hola</p>
+          <span class="areas-hero__role" id="areas-role">—</span>
+        </div>
+        <div class="areas-body">
+          <h2 class="areas-title">Áreas del sistema</h2>
+          <div class="areas-grid" id="areas-grid"><!-- JS: area cards según permisos --></div>
+          <p class="areas-footer-note">Solo ves las áreas habilitadas para tu rol.</p>
+        </div>
+      </section>
+
+      <!-- ===== DashboardView (admin KPIs) ===== -->
+      <section class="view view-dashboard" id="view-dashboard">
+        <div class="dash">
+          <div class="dash__content" id="dash-content"><!-- JS --></div>
+        </div>
+      </section>
+
+      <!-- ===== TablesView (Mesas — floor) ===== -->
+      <section class="view view-tables" id="view-tables">
+        <div class="tables-header">
+          <button class="pos-back" onclick="window.App.navigate('pos')">
+            <i class="fa-solid fa-arrow-left"></i> POS
+          </button>
+          <div class="tables-header__floor"><i class="fa-solid fa-map-location-dot"></i> Piso principal</div>
+          <div class="tables-legend">
+            <span class="legend-item"><span class="legend-dot" style="background: var(--lba-success)"></span> Libre</span>
+            <span class="legend-item"><span class="legend-dot" style="background: var(--lba-blue-900)"></span> Ocupada</span>
+            <span class="legend-item"><span class="legend-dot" style="background: var(--lba-warning)"></span> Cuenta</span>
+          </div>
+        </div>
+        <div class="tables-grid" id="tables-grid"><!-- JS --></div>
+      </section>
+
+      <!-- ===== PosView ===== -->
+      <section class="view view-pos" id="view-pos">
+        <div class="pos-toolbar">
+          <button class="pos-back" id="pos-back-btn" onclick="window.App.navigate('tables')">
+            <i class="fa-solid fa-arrow-left"></i> Mesas
+          </button>
+          <div class="pos-ticketinfo">
+            <div class="pos-ticketinfo__field">
+              <span class="pos-ticketinfo__label">Ticket</span>
+              <span class="pos-ticketinfo__value" id="pos-ticket-number">(nuevo)</span>
+            </div>
+            <div class="pos-ticketinfo__field">
+              <span class="pos-ticketinfo__label">Mesa</span>
+              <span class="pos-ticketinfo__value" id="pos-table">(ninguna)</span>
+            </div>
+            <div class="pos-ticketinfo__field">
+              <span class="pos-ticketinfo__label">Fecha</span>
+              <span class="pos-ticketinfo__value" id="pos-date">--</span>
+            </div>
+          </div>
+        </div>
+        <div class="pos-main">
+          <!-- Order panel -->
+          <div class="pos-orders">
+            <div class="pos-orders__header">
+              <div class="pos-orders__table"><i class="fa-solid fa-receipt"></i> <span id="pos-order-title">Pedido</span></div>
+              <div class="pos-orders__meta" id="pos-order-meta">Sin ticket</div>
+            </div>
+            <div class="pos-orders__list" id="pos-orders-list"></div>
+            <div class="pos-orders__totals" id="pos-totals">
+              <div class="pos-orders__total-row"><span>Subtotal</span><span id="pos-subtotal">$0.00</span></div>
+              <div class="pos-orders__total-row"><span>Descuento</span><span id="pos-discount">$0.00</span></div>
+              <div class="pos-orders__total-row"><span>Impuesto</span><span id="pos-tax">$0.00</span></div>
+              <div class="pos-orders__total-row pos-orders__total-row--grand"><span>Total</span><span id="pos-grand-total">$0.00</span></div>
+            </div>
+            <div class="pos-cmds" id="pos-cmdbar">
+              <button class="pos-cmd" onclick="window.App.views.pos.note()"><i class="fa-solid fa-note-sticky"></i> Nota</button>
+              <button class="pos-cmd" onclick="window.App.views.pos.discount()"><i class="fa-solid fa-percent"></i> Descuento</button>
+              <button class="pos-cmd" onclick="window.App.views.pos.gift()"><i class="fa-solid fa-gift"></i> Regalo</button>
+              <button class="pos-cmd" onclick="window.App.views.pos.printBill()"><i class="fa-solid fa-print"></i> Imprimir</button>
+              <button class="pos-cmd pos-cmd--danger" onclick="window.App.views.pos.void()"><i class="fa-solid fa-ban"></i> Anular</button>
+            </div>
+            <div class="pos-orders__pay">
+              <button class="pay-btn" id="pos-pay-btn" onclick="window.App.views.pos.pay()">
+                <i class="fa-solid fa-money-bill-wave"></i> PAGAR · <span id="pos-pay-amount">$0.00</span>
+              </button>
+            </div>
+          </div>
+          <!-- Products -->
+          <div class="pos-products">
+            <div class="pos-categories" id="pos-categories"></div>
+            <div class="pos-products__grid" id="pos-products-grid"></div>
+            <div class="pos-products__paging" id="pos-products-paging"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== PaymentView ===== -->
+      <section class="view view-payment" id="view-payment">
+        <div class="payment-screen">
+          <div class="payment-header2">
+            <button class="pos-back" onclick="window.App.navigate('pos')">
+              <i class="fa-solid fa-arrow-left"></i> Volver
+            </button>
+            <span class="payment-header2__title">
+              <i class="fa-solid fa-money-bill-wave"></i> Pago
+              <span id="payment-ticket-number" style="font-weight: 400; color: var(--lba-fg-muted);"></span>
+            </span>
+          </div>
+          <div class="payment-main2">
+            <div class="payment-left">
+              <div class="payment-orders2" id="payment-orders"></div>
+              <div class="payment-methods" id="payment-types"></div>
+            </div>
+            <div class="payment-right2">
+              <div class="payment-total">
+                <span class="payment-total__label">Total a pagar</span>
+                <span class="payment-total__amount" id="payment-remaining">$0.00</span>
+              </div>
+              <div class="payment-numpad2" id="payment-numpad"></div>
+              <div class="payment-summary2">
+                <div class="ps-cell ps-cell--remaining">
+                  <span class="ps-cell__label">Restante</span>
+                  <span class="ps-cell__value" id="payment-remaining-2">$0.00</span>
+                </div>
+                <div class="ps-cell">
+                  <span class="ps-cell__label">Entregado</span>
+                  <span class="ps-cell__value" id="payment-tendered">$0.00</span>
+                </div>
+                <div class="ps-cell ps-cell--change">
+                  <span class="ps-cell__label">Cambio</span>
+                  <span class="ps-cell__value" id="payment-change">$0.00</span>
+                </div>
+                <div class="ps-cell">
+                  <span class="ps-cell__label">Total</span>
+                  <span class="ps-cell__value" id="payment-total">$0.00</span>
+                </div>
+              </div>
+              <div class="payment-confirm">
+                <button class="confirm-btn" id="payment-confirm-btn" onclick="window.App.views.payment.confirm()">
+                  <i class="fa-solid fa-circle-check"></i> CONFIRMAR PAGO
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== KitchenView (KDS a pantalla completa) ===== -->
+      <section class="view view-kitchen" id="view-kitchen">
+        <div class="kds-screen" id="kds-screen"></div>
+      </section>
+
+      <!-- ===== CashView (Caja) ===== -->
+      <section class="view view-cash simple-view" id="view-cash">
+        <div class="simple-view__header">
+          <span class="simple-view__title"><i class="fa-solid fa-cash-register"></i> Caja</span>
+          <div class="simple-view__tabs" id="cash-tabs">
+            <button class="simple-tab is-active" data-tab="current" onclick="window.App.views.cash.showTab('current')">Caja actual</button>
+            <button class="simple-tab" data-tab="movements" onclick="window.App.views.cash.showTab('movements')">Movimientos</button>
+            <button class="simple-tab" data-tab="history" onclick="window.App.views.cash.showTab('history')">Historial</button>
+          </div>
+        </div>
+        <div class="simple-view__body" id="cash-body"><!-- JS --></div>
+      </section>
+
+      <!-- ===== ReportsView ===== -->
+      <section class="view view-reports simple-view" id="view-reports">
+        <div class="simple-view__header">
+          <span class="simple-view__title"><i class="fa-solid fa-chart-bar"></i> Reportes</span>
+          <div class="simple-view__tabs" id="reports-tabs">
+            <button class="simple-tab is-active" data-tab="sales" onclick="window.App.views.reports.showTab('sales')">Ventas</button>
+            <button class="simple-tab" data-tab="top" onclick="window.App.views.reports.showTab('top')">Top productos</button>
+          </div>
+        </div>
+        <div class="simple-view__body" id="reports-body"><!-- JS --></div>
+      </section>
+
+      <!-- ===== InventoryView ===== -->
+      <section class="view view-inventory simple-view" id="view-inventory">
+        <div class="simple-view__header">
+          <span class="simple-view__title"><i class="fa-solid fa-warehouse"></i> Inventario</span>
+          <div class="simple-view__tabs" id="inventory-tabs">
+            <button class="simple-tab is-active" data-tab="stock" onclick="window.App.views.inventory.showTab('stock')">Stock</button>
+            <button class="simple-tab" data-tab="low" onclick="window.App.views.inventory.showTab('low')">Stock bajo</button>
+          </div>
+        </div>
+        <div class="simple-view__body" id="inventory-body"><!-- JS --></div>
+      </section>
+
+      <!-- ===== AdminView (webclient con sidebar) ===== -->
+      <section class="view view-admin" id="view-admin">
+        <div class="admin-layout">
+          <aside class="admin-sidebar" id="admin-sidebar">
+            <div class="admin-sidebar__header">
+              <i class="fa-solid fa-gear"></i> Administración
+            </div>
+            <nav class="admin-sidebar__nav">
+              <button class="admin-nav-item active" data-admin-tab="products" onclick="window.App.views.admin.showTab('products')">
+                <i class="fa-solid fa-box"></i> Productos
+              </button>
+              <button class="admin-nav-item" data-admin-tab="inventory" onclick="window.App.views.admin.showTab('inventory')">
+                <i class="fa-solid fa-warehouse"></i> Inventario
+              </button>
+              <button class="admin-nav-item" data-admin-tab="recipes" onclick="window.App.views.admin.showTab('recipes')">
+                <i class="fa-solid fa-book"></i> Recetas
+              </button>
+              <button class="admin-nav-item" data-admin-tab="printers" onclick="window.App.views.admin.showTab('printers')">
+                <i class="fa-solid fa-print"></i> Impresoras
+              </button>
+              <button class="admin-nav-item" data-admin-tab="templates" onclick="window.App.views.admin.showTab('templates')">
+                <i class="fa-solid fa-file-lines"></i> Plantillas
+              </button>
+              <button class="admin-nav-item" data-admin-tab="cash" onclick="window.App.views.admin.showTab('cash')">
+                <i class="fa-solid fa-cash-register"></i> Caja
+              </button>
+              <button class="admin-nav-item" data-admin-tab="reports" onclick="window.App.views.admin.showTab('reports')">
+                <i class="fa-solid fa-chart-bar"></i> Reportes
+              </button>
+              <button class="admin-nav-item" data-admin-tab="config" onclick="window.App.views.admin.showTab('config')">
+                <i class="fa-solid fa-sliders"></i> Configuración
+              </button>
+            </nav>
+          </aside>
+          <div class="admin-content" id="admin-content"><!-- JS: AdminView.showTab() --></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- =========================================================== -->
+    <!-- Modal + toasts                                               -->
+    <!-- =========================================================== -->
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-card" id="modal-card">
+        <div class="modal-card__title" id="modal-title"></div>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- Scripts (sin bundler — orden importa)                        -->
+  <!-- config.js SIEMPRE primero: APP_BASE_PATH + DEMO_MODE         -->
+  <!-- (única fuente de verdad; en el demo de Pages se reemplaza    -->
+  <!-- por config.demo.js en el deploy, sin parches sed)            -->
+  <!-- =========================================================== -->
+  <script src="js/config.js"></script>
+  <script src="js/components/flex-button.js"></script>
+  <script src="js/services/server-config.js"></script>
+  <script src="js/services/demo-data.js"></script>
+  <script src="js/services/api.js"></script>
+  <script src="js/services/pwa.js"></script>
+  <script src="js/services/push.js"></script>
+  <script src="js/store/store.js"></script>
+  <script src="js/store/offlineQueue.js"></script>
+  <script src="js/store/websocket-client.js"></script>
+  <script src="js/views/login.js"></script>
+  <script src="js/views/areas.js"></script>
+  <script src="js/views/dashboard.js"></script>
+  <script src="js/views/tables.js"></script>
+  <script src="js/views/pos.js"></script>
+  <script src="js/views/payment.js"></script>
+  <script src="js/views/kitchen.js"></script>
+  <script src="js/views/cash.js"></script>
+  <script src="js/views/reports.js"></script>
+  <script src="js/views/inventory.js"></script>
+  <script src="js/views/admin.js"></script>
+  <script src="js/app.js"></script>
+
+  <!-- PWA: Service Worker (registrado relativo al base path — APP_BASE_PATH) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // URLs relativas al documento: funcionan en la raíz (producción
+        // LAN / APK), en GitHub Pages (/Samba_Pos_V3-Web/) y en cualquier
+        // sub-path, sin parchear rutas en el deploy.
+        navigator.serviceWorker
+          .register('sw.js', { scope: './' })
+          .then((reg) => {
+            reg.addEventListener('updatefound', () => {
+              const nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', () => {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  window.dispatchEvent(new CustomEvent('sw:update-available'));
+                }
+              });
+            });
+          })
+          .catch((err) => console.warn('[PWA] SW registration failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>

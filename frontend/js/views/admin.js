@@ -49,8 +49,11 @@ const AdminView = {
     const style = document.createElement('style');
     style.id = 'admin-view-styles';
     style.textContent = `
-      /* Layout principal */
-      .view-admin { display: flex; overflow: hidden; }
+      /* Layout principal — FIX BLOQUE N: solo display cuando .is-active.
+         (Antes: .view-admin { display:flex } forzaba que la vista admin
+         quedara SIEMPRE renderizada encima de las demás (opacity 0 +
+         position absolute) e interceptaba todos los clicks). */
+      .view-admin.is-active { display: flex; overflow: hidden; flex-direction: row; }
       .admin-layout { display: flex; width: 100%; height: 100%; background: var(--lba-bg-app); }
       .admin-sidebar {
         width: var(--lba-sidebar-w); flex-shrink: 0;
