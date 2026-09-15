@@ -99,6 +99,9 @@ jobs:
           echo "OK: Gradle wrapper present and executable"
 
       # ─── GATE 4: THE BUILD — if this fails, the workflow fails ───
+      - name: Clean Gradle cache (avoid stale bcprov-jdk18on)
+        run: rm -rf ~/.gradle/caches/jars-9 || true
+
       - name: Build debug APK (assembleDebug)
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
