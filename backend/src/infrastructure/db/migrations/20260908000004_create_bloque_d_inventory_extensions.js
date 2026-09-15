@@ -72,7 +72,7 @@ exports.up = async function (knex) {
     table.integer('MenuItemId').notNullable();               // the combo product (container)
     table.string('Name', 200).notNullable();
     table.decimal('ComboPrice', 16, 2).notNullable().defaultTo(0);  // explicit combo price
-    table.boolean('UseCustomPrice').notNullable().defaultTo(0);      // 1 = use ComboPrice, 0 = sum sub-items
+    table.boolean('UseCustomPrice').notNullable().defaultTo(false);      // 1 = use ComboPrice, 0 = sum sub-items
     table.boolean('IsActive').notNullable().defaultTo(1);
     table.integer('CreatedBy').notNullable().defaultTo(0);
     table.timestamp('CreatedAt').notNullable().defaultTo(knex.fn.now());
@@ -89,7 +89,7 @@ exports.up = async function (knex) {
     table.integer('MenuItemPortionId').nullable();           // optional portion selection
     table.decimal('Quantity', 16, 4).notNullable().defaultTo(1);
     table.decimal('OverridePrice', 16, 2).notNullable().defaultTo(0);  // 0 = use menu price, >0 = override
-    table.boolean('IsOptional').notNullable().defaultTo(0);             // 1 = user can opt-out
+    table.boolean('IsOptional').notNullable().defaultTo(false);             // 1 = user can opt-out
     table.integer('SortOrder').notNullable().defaultTo(0);
     table.foreign('ComboId').references('Combos.Id').onDelete('CASCADE');
     table.foreign('MenuItemId').references('MenuItems.Id');
@@ -159,7 +159,7 @@ exports.up = async function (knex) {
     table.decimal('CountedQuantity', 16, 4).notNullable().defaultTo(0);    // entered by user
     table.decimal('Difference', 16, 4).notNullable().defaultTo(0);          // counted - expected (auto)
     table.decimal('UnitCost', 16, 2).notNullable().defaultTo(0);
-    table.boolean('Adjusted').notNullable().defaultTo(0);                   // 1 = adjustment was applied
+    table.boolean('Adjusted').notNullable().defaultTo(false);                   // 1 = adjustment was applied
     table.string('Notes');
     table.foreign('SessionId').references('PhysicalCountSessions.Id').onDelete('CASCADE');
     table.foreign('IngredientId').references('Ingredients.Id');

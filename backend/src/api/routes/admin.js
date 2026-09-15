@@ -35,14 +35,36 @@ router.use(requirePermission('users.manage'));
 // GET /api/admin/users — list all users
 router.get('/users', async (req, res, next) => {
   try {
-    const users = await db('Users')
+    // Pagination support (Bloque 12)
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
+    const offset = (page - 1) * pageSize;
+    const search = req.query.search ? String(req.query.search).trim() : null;
+
+    let query = db('Users')
       .leftJoin('UserRoles', 'Users.UserRoleId', 'UserRoles.Id')
       .select(
         'Users.Id', 'Users.Name', 'Users.UserRoleId',
         'UserRoles.Name as RoleName', 'UserRoles.IsAdmin'
-      )
-      .orderBy('Users.Name');
-    res.json({ data: users, count: users.length });
+      );
+    if (search) {
+      query = query.where('Users.Name', 'like', `%${search}%`);
+    }
+    const [users, totalRes] = await Promise.all([
+      query.clone().orderBy('Users.Name').limit(pageSize).offset(offset),
+      query.clone().count('* as c').first(),
+    ]);
+    const total = totalRes?.c || 0;
+    res.json({
+      data: users,
+      count: users.length,
+      pagination: {
+        page, pageSize, total,
+        totalPages: Math.ceil(total / pageSize),
+        hasNext: offset + users.length < total,
+        hasPrev: page > 1,
+      },
+    });
   } catch (err) { next(err); }
 });
 
@@ -214,6 +236,17 @@ router.delete('/roles/:id/permissions/:permId', auditLog('admin.role.removePerm'
     clearPermissionCache();
 
     res.json({ data: { removed: true, roleId, permissionId: permId } });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/permissions — list all available permissions
+router.get('/permissions', async (req, res, next) => {
+  try {
+    const perms = await db('Permissions')
+      .select('Id', 'Code', 'Name', 'Category')
+      .orderBy('Category')
+      .orderBy('Name');
+    res.json({ data: perms, count: perms.length });
   } catch (err) { next(err); }
 });
 

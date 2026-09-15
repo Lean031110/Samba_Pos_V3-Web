@@ -205,27 +205,17 @@ describe('Phase 1 — Security hardening', () => {
     });
 
     test('2J: Login OK with valid credentials → 200 + token', async () => {
-      // Spawn a fresh server on a different port to bypass rate-limiter state
-      const fresh = await startServer({
-        NODE_ENV: 'test',
-        JWT_SECRET: 'test-secret-32-chars-min!!',
-        CORS_ORIGIN: '*',
-        PORT: 3094,
+      // Use the already-running server (port 3097) — spawning a second server
+      // on the same SQLite DB file causes ECONNREFUSED because the DB is locked.
+      const res = await fetch(`${BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'Administrator', pin: '1234' }),
       });
-      if (!fresh.proc) assert.fail('fresh server did not start');
-      try {
-        const res = await fetch(`http://localhost:3094/api/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'Administrator', pin: '1234' }),
-        });
-        assert.strictEqual(res.status, 200);
-        const body = await res.json();
-        assert.ok(body.token, 'token must be present');
-        assert.ok(body.token.split('.').length === 3, 'JWT must have 3 parts');
-      } finally {
-        await killServer(fresh.proc);
-      }
+      assert.strictEqual(res.status, 200);
+      const body = await res.json();
+      assert.ok(body.token, 'token must be present');
+      assert.ok(body.token.split('.').length === 3, 'JWT must have 3 parts');
     });
   });
 

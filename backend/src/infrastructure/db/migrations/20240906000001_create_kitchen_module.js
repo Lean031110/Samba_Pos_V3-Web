@@ -18,7 +18,7 @@ exports.up = async function(knex) {
     table.string('Color', 20);
     table.integer('PrinterId');
     table.boolean('IsActive').notNullable().defaultTo(1);
-    table.boolean('IsDefault').notNullable().defaultTo(0);
+    table.boolean('IsDefault').notNullable().defaultTo(false);
     table.timestamps(true, true);
   });
 

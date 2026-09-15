@@ -144,27 +144,54 @@ exports.up = async function (knex) {
 exports.down = async function (knex) {
   // Revert to original schema (single-column UNIQUE on Key).
   // NOTE: data loss possible if same Key was used for multiple Endpoints.
-  await knex.raw(`
-    CREATE TABLE IF NOT EXISTS IdempotencyKeys_old (
-      Id INTEGER PRIMARY KEY AUTOINCREMENT,
-      Key VARCHAR(128) NOT NULL UNIQUE,
-      UserId INTEGER NOT NULL,
-      Endpoint VARCHAR(200) NOT NULL,
-      RequestBody TEXT,
-      ResponseStatus INTEGER,
-      ResponseBody TEXT,
-      CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      ExpiresAt DATETIME NOT NULL
-    )
-  `);
-  await knex.raw(`
-    INSERT OR IGNORE INTO IdempotencyKeys_old
-      (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, CreatedAt, ExpiresAt)
-    SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, CreatedAt, ExpiresAt
-    FROM IdempotencyKeys
-  `);
-  await knex.raw('DROP TABLE IdempotencyKeys');
-  await knex.raw('ALTER TABLE IdempotencyKeys_old RENAME TO IdempotencyKeys');
+  const isSQLite = knex.client.config.client === 'sqlite3';
+  if (isSQLite) {
+    await knex.raw(`
+      CREATE TABLE IF NOT EXISTS IdempotencyKeys_old (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Key VARCHAR(128) NOT NULL UNIQUE,
+        UserId INTEGER NOT NULL,
+        Endpoint VARCHAR(200) NOT NULL,
+        RequestBody TEXT,
+        ResponseStatus INTEGER,
+        ResponseBody TEXT,
+        CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ExpiresAt DATETIME NOT NULL
+      )
+    `);
+    await knex.raw(`
+      INSERT OR IGNORE INTO IdempotencyKeys_old
+        (Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, CreatedAt, ExpiresAt)
+      SELECT Id, Key, UserId, Endpoint, RequestBody, ResponseStatus, ResponseBody, CreatedAt, ExpiresAt
+      FROM IdempotencyKeys
+    `);
+  } else {
+    // PostgreSQL: use SERIAL and ON CONFLICT DO NOTHING
+    await knex.raw(`
+      CREATE TABLE IF NOT EXISTS "IdempotencyKeys_old" (
+        "Id" SERIAL PRIMARY KEY,
+        "Key" VARCHAR(128) NOT NULL UNIQUE,
+        "UserId" INTEGER NOT NULL,
+        "Endpoint" VARCHAR(200) NOT NULL,
+        "RequestBody" TEXT,
+        "ResponseStatus" INTEGER,
+        "ResponseBody" TEXT,
+        "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "ExpiresAt" TIMESTAMP NOT NULL
+      )
+    `);
+    await knex.raw(`
+      INSERT INTO "IdempotencyKeys_old"
+        ("Id", "Key", "UserId", "Endpoint", "RequestBody", "ResponseStatus", "ResponseBody", "CreatedAt", "ExpiresAt")
+      SELECT "Id", "Key", "UserId", "Endpoint", "RequestBody", "ResponseStatus", "ResponseBody", "CreatedAt", "ExpiresAt"
+      FROM "IdempotencyKeys"
+      ON CONFLICT ("Key") DO NOTHING
+    `);
+  }
+  await knex.raw(isSQLite ? 'DROP TABLE IdempotencyKeys' : 'DROP TABLE "IdempotencyKeys"');
+  await knex.raw(isSQLite
+    ? 'ALTER TABLE IdempotencyKeys_old RENAME TO IdempotencyKeys'
+    : 'ALTER TABLE "IdempotencyKeys_old" RENAME TO "IdempotencyKeys"');
   await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_Key ON IdempotencyKeys(Key)');
   await knex.raw('CREATE INDEX IF NOT EXISTS IX_IdempotencyKeys_ExpiresAt ON IdempotencyKeys(ExpiresAt)');
 };

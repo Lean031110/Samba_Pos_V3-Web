@@ -1,0 +1,514 @@
+/* =====================================================================
+   kds-tablet.css — KDS Android tablet-first design (Bloque 12 FASE G)
+   =====================================================================
+   Objetivo: pantalla grande, varias columnas, legible a distancia.
+
+   Tableta horizontal: 4 columnas (configurable)
+   Tableta vertical: 2 columnas
+   Teléfono: 1 columna con scroll
+
+   Modos:
+   - normal: tarjetas estándar
+   - kitchen-mode: full screen, sin chrome (header/footer)
+   ===================================================================== */
+
+/* =====================================================================
+   KDS base layout
+   ===================================================================== */
+
+.view-kitchen,
+#view-kitchen {
+  background: #0f1419;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+#kds-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+}
+
+/* Kitchen Display Mode — full screen, no chrome */
+html.is-kitchen-mode .app-header,
+html.is-kitchen-mode .ds-footer {
+  display: none !important;
+}
+
+html.is-kitchen-mode .app-main {
+  padding: 0;
+}
+
+html.is-kitchen-mode .view-kitchen {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* KDS top bar — station name, time, connection */
+.kds-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+}
+
+.kds-topbar__station {
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kds-topbar__station i {
+  color: var(--lba-blue-400, #60a5fa);
+}
+
+.kds-topbar__clock {
+  font-family: var(--lba-font-mono, monospace);
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px 12px;
+  border-radius: 6px;
+}
+
+.kds-topbar__conn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.kds-topbar__conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.kds-topbar__conn-dot.offline {
+  background: #ef4444;
+}
+
+/* =====================================================================
+   KDS board — columns of tickets
+   ===================================================================== */
+
+.kds-board {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 100%;
+}
+
+/* Tablet landscape: 4 columns */
+@media (min-width: 1024px) and (orientation: landscape) {
+  .kds-board {
+    grid-template-columns: repeat(4, minmax(280px, 1fr));
+  }
+}
+
+/* Tablet portrait: 2 columns */
+@media (min-width: 768px) and (orientation: portrait) {
+  .kds-board {
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+  }
+}
+
+/* Desktop: 5 columns */
+@media (min-width: 1440px) {
+  .kds-board {
+    grid-template-columns: repeat(5, minmax(280px, 1fr));
+  }
+}
+
+/* Phone: 1 column */
+@media (max-width: 767px) {
+  .kds-board {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 8px;
+  }
+}
+
+/* =====================================================================
+   KDS ticket card
+   ===================================================================== */
+
+.kds-card {
+  background: #1e2937;
+  border-radius: 12px;
+  padding: 14px;
+  border-left: 4px solid var(--lba-blue-400, #60a5fa);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 180px;
+  position: relative;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.kds-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Status: normal, urgent, ready, late */
+.kds-card.status--normal {
+  border-left-color: #60a5fa;
+}
+
+.kds-card.status--urgent {
+  border-left-color: #f59e0b;
+  background: #292524;
+}
+
+.kds-card.status--ready {
+  border-left-color: #10b981;
+  background: #142a23;
+}
+
+.kds-card.status--late {
+  border-left-color: #ef4444;
+  background: #2a1212;
+  animation: kds-blink 2s ease-in-out infinite;
+}
+
+@keyframes kds-blink {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  50% { box-shadow: 0 0 12px 4px rgba(239, 68, 68, 0.3); }
+}
+
+.kds-card.is-new {
+  animation: kds-flash 1.5s ease-out;
+}
+
+@keyframes kds-flash {
+  0% { transform: scale(1.05); box-shadow: 0 0 20px rgba(96, 165, 250, 0.8); }
+  100% { transform: scale(1); box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); }
+}
+
+/* Card header */
+.kds-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.kds-card__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kds-card__table {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: 8px;
+}
+
+.kds-card__timer {
+  font-family: var(--lba-font-mono, monospace);
+  font-size: 16px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.kds-card__timer.late {
+  color: #fff;
+  background: #ef4444;
+}
+
+.kds-card__timer.urgent {
+  color: #fff;
+  background: #f59e0b;
+}
+
+.kds-card__timer.ready {
+  color: #fff;
+  background: #10b981;
+}
+
+/* Card items */
+.kds-card__items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.kds-card__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  font-size: 14px;
+  min-height: 40px;
+}
+
+.kds-card__item.done {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.kds-card__item-qty {
+  background: var(--lba-blue-600, #044392);
+  color: white;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-weight: 700;
+  min-width: 32px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.kds-card__item-name {
+  flex: 1;
+  color: #fff;
+  font-weight: 500;
+}
+
+.kds-card__item-note {
+  color: #fbbf24;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Card footer — bump button */
+.kds-card__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.kds-card__bump-btn {
+  flex: 1;
+  padding: 12px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  min-height: 48px;
+  transition: transform 100ms;
+}
+
+.kds-card__bump-btn:active {
+  transform: scale(0.97);
+}
+
+.kds-card__bump-btn.is-ready {
+  background: #059669;
+}
+
+.kds-card__recall-btn {
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 48px;
+}
+
+.kds-card__recall-btn:active {
+  transform: scale(0.97);
+}
+
+/* =====================================================================
+   KDS empty state
+   ===================================================================== */
+
+.kds-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.kds-empty i {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.kds-empty__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.kds-empty__subtitle {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* =====================================================================
+   KDS stats bar
+   ===================================================================== */
+
+.kds-stats {
+  display: flex;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+}
+
+.kds-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.kds-stat__num {
+  font-weight: 700;
+  color: #fff;
+}
+
+.kds-stat--urgent .kds-stat__num { color: #f59e0b; }
+.kds-stat--late .kds-stat__num { color: #ef4444; }
+.kds-stat--ready .kds-stat__num { color: #10b981; }
+
+/* =====================================================================
+   Kitchen mode toggle button
+   ===================================================================== */
+
+.kds-kitchen-toggle {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+html.is-kitchen-mode .kds-kitchen-toggle {
+  background: var(--lba-blue-600, #044392);
+}
+
+/* =====================================================================
+   KDS sound notification indicator
+   ===================================================================== */
+
+.kds-sound-indicator {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kds-sound-indicator.muted i {
+  color: #ef4444;
+}
+
+/* =====================================================================
+   New order flash + sound alert animation
+   ===================================================================== */
+
+@keyframes kds-new-order-alert {
+  0% { background: rgba(96, 165, 250, 0.3); }
+  100% { background: #1e2937; }
+}
+
+.kds-card.is-new {
+  animation: kds-new-order-alert 1.5s ease-out;
+}
+
+/* =====================================================================
+   Phone KDS — single column with swipe between tickets
+   ===================================================================== */
+
+@media (max-width: 767px) {
+  .kds-topbar {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .kds-topbar__clock {
+    font-size: 14px;
+    padding: 2px 8px;
+  }
+
+  .kds-card {
+    padding: 10px;
+    min-height: 140px;
+  }
+
+  .kds-card__title {
+    font-size: 14px;
+  }
+
+  .kds-card__timer {
+    font-size: 14px;
+  }
+
+  .kds-card__item {
+    padding: 6px 8px;
+    font-size: 12px;
+    min-height: 36px;
+  }
+
+  .kds-card__bump-btn {
+    padding: 10px;
+    font-size: 13px;
+    min-height: 44px;
+  }
+}

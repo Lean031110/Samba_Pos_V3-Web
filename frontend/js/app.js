@@ -1,96 +1,68 @@
 // =====================================================================
-// app.js — LBApos application entry point + navigation controller
+// app.js — Application entry point + navigation controller
 // =====================================================================
-// BLOQUE N — Rediseño UI Odoo 19:
-//   - Navegación con "áreas": login → ÁREAS → (dashboard|pos|kitchen|cash…)
-//   - Flujo por ROL tras login (admin→dashboard, mesero→pos, cocina→kds,
-//     cajero→cash) con pantalla de áreas accesible siempre ("Todas las áreas")
-//   - En Android (ServerConfig con modo dispositivo): kitchen abre KDS directo
-//   - Topbar global Odoo-style con estado de conexión, usuario y reloj
-// Mantiene: store, websocket, offline queue, push, PWA (lógica intacta).
+// Mirrors Samba.Presentation PRISM region manager: a single #app-main
+// region holds all views; only one is .is-active at a time.
+// Navigation between views is instant (no page reload, no flicker).
 // =====================================================================
-
-const AREA_LABELS = {
-  login: 'Inicio de sesión',
-  areas: 'Áreas',
-  dashboard: 'Administración',
-  tables: 'Mesas',
-  pos: 'Punto de Venta',
-  payment: 'Pago',
-  kitchen: 'Cocina',
-  cash: 'Caja',
-  reports: 'Reportes',
-  inventory: 'Inventario',
-  admin: 'Administración',
-};
 
 const App = {
-  views: {},
+  views: {},   // populated below
 
   async init() {
-    // BLOQUE Android — server config SOLO dentro del shell nativo de
-    // Capacitor (APK). Cuando la web la sirve el propio backend (LAN) o
-    // GitHub Pages (DEMO_MODE), la configuración no es necesaria: no
-    // forzar la pantalla de bienvenida/config en el navegador.
-    const isNativeApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-    if (window.ServerConfig && isNativeApp && !window.DEMO_MODE) {
+    // BLOQUE Android — Initialize server config (for Android POS tablets)
+    // Skip entirely if DEMO_MODE (GitHub Pages demo — no server needed)
+    if (window.ServerConfig && !window.DEMO_MODE) {
       ServerConfig.init();
       if (!ServerConfig.isConfigured()) {
-        console.log('[app] Native shell without server — showing welcome/config screen');
+        console.log('[app] Server not configured — showing config screen');
         return;
       }
     }
 
-    // Init views
+    // Initialize views
     LoginView.init();
-    AreasView.init();
     DashboardView.init();
-    TablesView.init();
     PosView.init();
     PaymentView.init();
     KitchenView.init();
-    CashView.init();
-    ReportsView.init();
-    InventoryView.init();
     AdminView.init();
-    this.views = {
-      login: LoginView, areas: AreasView, dashboard: DashboardView,
-      tables: TablesView, pos: PosView, payment: PaymentView,
-      kitchen: KitchenView, cash: CashView, reports: ReportsView,
-      inventory: InventoryView, admin: AdminView,
-    };
+    this.views = { login: LoginView, dashboard: DashboardView, pos: PosView, payment: PaymentView, kitchen: KitchenView, admin: AdminView };
 
+    // Clock
     this._startClock();
-    this._toggleDemoBadge();
 
-    // Initial navigation
+    // Initial navigation — role-based landing (not hardcoded)
     const deviceMode = window.ServerConfig ? ServerConfig.getMode() : 'pos';
     if (deviceMode === 'kitchen') {
       this.navigate('kitchen');
     } else {
-      this.navigate('login');
+      // Role-based landing: determine the best view for this user
+      const user = window.store.state.currentUser;
+      const landingView = this._resolveLandingView(user);
+      this.navigate(landingView);
     }
 
-    // Session restore: si hay JWT previo, restaurar usuario (sin re-login)
-    if (window.DEMO_MODE && localStorage.getItem('samba_jwt')) {
-      // en demo el token es estático: volver a área si el usuario lo era
-      const saved = sessionStorage.getItem('lba_last_user');
-      if (saved) {
-        try { this._applyUser(JSON.parse(saved), { silent: true }); } catch (e) { /* noop */ }
-      }
+    // Initialize push notifications (after login will subscribe properly)
+    if (window.PushClient) {
+      PushClient.init();
     }
 
-    if (window.PushClient) PushClient.init();
+    // BLOQUE 2 — Update footer with station/server info
+    this._updateFooter();
 
-    // BLOQUE I — offline sync auth-expired
+    // BLOQUE I — Listen for offline sync auth-expired events
+    // When JWT expires during offline sync, show a toast + redirect to login
     window.addEventListener('offline:auth-expired', (e) => {
       const msg = e.detail?.message || 'Tu sesión ha expirado durante la sincronización.';
       this.toast(msg, 'error');
+      // Navigate to login (the sync is paused — user must re-login to resume)
       Api.setToken(null);
       this.navigate('login');
     });
 
-    // BLOQUE I — resume offline sync after login
+    // BLOQUE I — Resume offline sync after successful login
+    // When the user logs in again, resume the paused sync
     window.addEventListener('store:state', (e) => {
       const state = e.detail?.state;
       if (state?.currentUser && window.OfflineQueue && OfflineQueue._syncPaused) {
@@ -98,68 +70,88 @@ const App = {
       }
     });
 
-    // Cerrar user-menu al hacer click fuera
-    document.addEventListener('click', (e) => {
-      const menu = document.getElementById('user-menu');
-      if (menu && !menu.hidden && !menu.contains(e.target) && !e.target.closest('#topbar-user-btn')) {
-        menu.hidden = true;
-      }
-    });
-
-    // Click en el fondo del modal lo cierra
-    document.getElementById('modal-overlay')?.addEventListener('click', (e) => {
-      if (e.target.id === 'modal-overlay') this.closeModal();
-    });
-
+    // Expose globally for inline onclick handlers
     window.App = this;
   },
 
-  // ===================================================================
-  // Navegación entre vistas (áreas)
-  // ===================================================================
+  /**
+   * Navigate to a view by name ('login', 'dashboard', 'pos', 'payment').
+   * Hides all other views, shows the requested one with a fade transition.
+   */
   navigate(viewName) {
     const views = document.querySelectorAll('.view');
     views.forEach(v => v.classList.remove('is-active'));
     const target = document.getElementById('view-' + viewName);
-    if (!target) return;
-
-    target.classList.add('is-active');
-    document.body.dataset.view = viewName;
-    window.store.setState({ currentView: viewName }, 'navigate');
-
-    // Topbar: actualizar área actual
-    const areaName = document.getElementById('topbar-area-name');
-    if (areaName) areaName.textContent = AREA_LABELS[viewName] || viewName;
-
-    // Refresh on-enter
-    if (viewName === 'dashboard') DashboardView.refresh();
-    if (viewName === 'areas') AreasView.render();
-    if (viewName === 'tables') TablesView.refresh();
-    if (viewName === 'pos') PosView.refresh();
-    if (viewName === 'kitchen') KitchenView.load();
-    if (viewName === 'admin') AdminView.load();
-    if (viewName === 'cash') CashView.refresh();
-    if (viewName === 'reports') ReportsView.refresh();
-    if (viewName === 'inventory') InventoryView.refresh();
-    if (viewName !== 'kitchen' && KitchenView._timerInterval) KitchenView.unload();
+    if (target) {
+      target.classList.add('is-active');
+      window.store.setState({ currentView: viewName }, 'navigate');
+      // Bloque 7 — track current view for error reporter
+      if (window.ErrorReporter) window.ErrorReporter.setView(viewName);
+      // Refresh data when entering certain views
+      if (viewName === 'dashboard') DashboardView.refresh();
+      if (viewName === 'pos') PosView.refresh();
+      if (viewName === 'kitchen') {
+        KitchenView.containerEl = document.getElementById('kds-container');
+        KitchenView.load();
+      }
+      if (viewName === 'admin') {
+        AdminView.load();
+      }
+      if (viewName !== 'kitchen' && KitchenView._timerInterval) {
+        KitchenView.unload();
+      }
+    }
   },
 
-  goHome() {
-    this.toggleUserMenu(true);
-    this.navigate('areas');
+  /**
+   * BLOQUE 2 — Update footer with station/server/mode info.
+   * Shows: version, station name, server URL, connection status, device mode.
+   */
+  _updateFooter() {
+    const stationEl = document.getElementById('footer-station');
+    const serverEl = document.getElementById('footer-server');
+    const modeEl = document.getElementById('footer-mode');
+
+    // Station name (from ServerConfig or default)
+    const mode = window.ServerConfig ? ServerConfig.getMode() : 'pos';
+    const serverUrl = window.ServerConfig && ServerConfig.isConfigured()
+      ? ServerConfig.getServerUrl()
+      : (window.location.origin || 'localhost:3001');
+
+    if (stationEl) stationEl.textContent = mode === 'kitchen' ? 'KDS' : 'POS';
+    if (serverEl) serverEl.textContent = serverUrl.replace(/^https?:\/\//, '');
+    if (modeEl) modeEl.innerHTML = 'Modo: <strong>' + (mode === 'kitchen' ? 'Cocina' : 'POS') + '</strong>';
   },
 
-  toggleSidebar() { this.goHome(); },
-
-  toggleUserMenu(forceClose) {
-    const menu = document.getElementById('user-menu');
-    if (!menu) return;
-    menu.hidden = forceClose === true ? true : !menu.hidden;
+  /**
+   * BLOQUE 2 — Resolve the landing view based on user role/permissions.
+   * Not hardcoded — uses a configurable policy:
+   *   - Admin → dashboard (can see everything)
+   *   - Kitchen role → kitchen (KDS)
+   *   - POS/Cashier role → pos
+   *   - Default → login (no user, or unknown role)
+   *
+   * Future: this can be replaced by a RoleDefaultView config from the backend.
+   */
+  _resolveLandingView(user) {
+    if (!user) return 'login';
+    if (user.isAdmin) return 'dashboard';
+    // Check role-based permissions for landing
+    // This is a hint, not the final authority — the backend still protects
+    if (user.roleName) {
+      const role = user.roleName.toLowerCase();
+      if (role.includes('cocina') || role.includes('kitchen') || role.includes('chef')) return 'kitchen';
+      if (role.includes('caja') || role.includes('cashier')) return 'admin'; // cash tab
+      if (role.includes('inventario') || role.includes('inventory')) return 'admin'; // inventory tab
+    }
+    // Default for POS users (waiters, cashiers, etc.)
+    return 'pos';
   },
 
-  // ===================================================================
-  // Login + flujo por rol
-  // ===================================================================
+  /**
+   * Login handler — calls POST /api/auth/login to get a JWT.
+   * Stores token in localStorage via Api.setToken().
+   */
   async login() {
     const { username, pin } = LoginView.getValues();
     if (!username || !pin) {
@@ -171,60 +163,34 @@ const App = {
       Api.setToken(res.token);
       window.store.setState({ currentUser: res.user }, 'logged-in');
       LoginView.reset();
-      this._applyUser(res.user, { navigateByRole: true });
+      document.getElementById('header-user').textContent = res.user.name;
+      // Bloque 7 — track user for error reporter
+      if (window.ErrorReporter) window.ErrorReporter.setUserId(res.user.userId);
+      // BLOQUE 2 — Role-based landing: navigate to the appropriate view
+      const landingView = this._resolveLandingView(res.user);
+      this.navigate(landingView);
+      this.toast('Bienvenido, ' + res.user.name, 'success');
     } catch (err) {
-      LoginView.showError(err.message || 'Error al iniciar sesión');
+      // Discrete error — don't reveal if the user exists
+      LoginView.showError('Credenciales no válidas');
     }
-  },
-
-  _applyUser(user, { navigateByRole = false, silent = false } = {}) {
-    // Topbar + menú usuario
-    const nameEl = document.getElementById('header-user');
-    if (nameEl) nameEl.textContent = user.name;
-    const menuName = document.getElementById('user-menu-name');
-    if (menuName) menuName.textContent = user.name;
-    const menuRole = document.getElementById('user-menu-role');
-    if (menuRole) menuRole.textContent = user.roleName || (user.isAdmin ? 'Administrador' : 'Usuario');
-    try { sessionStorage.setItem('lba_last_user', JSON.stringify(user)); } catch (e) { /* noop */ }
-
-    if (!silent) this.toast('¡Bienvenido, ' + user.name + '!', 'success');
-
-    if (navigateByRole) {
-      const dest = this.homeForUser(user);
-      this.navigate(dest);
-    }
-  },
-
-  /**
-   * Flujo por ROL (spec §6):
-   *   Administrador → dashboard · Mesero/Dependiente → pos (mesas)
-   *   Cocina/Pizzero → kitchen (KDS) · Cajero → cash · Bartender → pos
-   *   Otros → areas
-   */
-  homeForUser(user) {
-    if (!user) return 'login';
-    if (user.isAdmin) return 'dashboard';
-    const role = (user.roleName || '').toLowerCase();
-    if (role.includes('meser') || role.includes('depend') || role.includes('waiter') || role.includes('bartender') || role.includes('barra')) return 'pos';
-    if (role.includes('cocin') || role.includes('chef') || role.includes('pizzer') || role.includes('kitchen')) return 'kitchen';
-    if (role.includes('caja') || role.includes('cashier')) return 'cash';
-    return 'areas';
   },
 
   logout() {
     Api.setToken(null);
-    sessionStorage.removeItem('lba_last_user');
     window.store.setState({ currentUser: null, currentTicket: null }, 'logged-out');
-    const nameEl = document.getElementById('header-user');
-    if (nameEl) nameEl.textContent = 'Usuario';
-    this.toggleUserMenu(true);
+    document.getElementById('header-user').textContent = '—';
+    // Bloque 7 — clear user from error reporter
+    if (window.ErrorReporter) window.ErrorReporter.setUserId(null);
     this.navigate('login');
     this.toast('Sesión cerrada', 'info');
   },
 
-  // ===================================================================
-  // Modal + toast
-  // ===================================================================
+  /**
+   * Show a modal dialog.
+   * @param {string} title
+   * @param {string} htmlBody
+   */
   showModal(title, htmlBody) {
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = htmlBody;
@@ -235,9 +201,14 @@ const App = {
     document.getElementById('modal-overlay').classList.remove('is-open');
   },
 
+  /**
+   * Show a toast message.
+   * @param {string} message
+   * @param {'info'|'success'|'warn'|'error'} type
+   * @param {number} duration — ms (default 3000)
+   */
   toast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toast-container');
-    if (!container) return;
     const toast = document.createElement('div');
     toast.className = 'toast toast--' + type;
     toast.textContent = message;
@@ -247,26 +218,20 @@ const App = {
       toast.style.transition = 'opacity 200ms';
       setTimeout(() => toast.remove(), 200);
     }, duration);
+    // Also log to footer status
+    document.getElementById('footer-status').textContent = message;
   },
 
   _startClock() {
     const el = document.getElementById('header-clock');
-    if (!el) return;
-    const tick = () => { el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+    const tick = () => {
+      const now = new Date();
+      el.textContent = now.toLocaleTimeString();
+    };
     tick();
-    setInterval(tick, 15000);
-  },
-
-  // DEMO_MODE (PR #9 hardening): badge visible en el topbar cuando la
-  // build corre con la config explícita de demo (GitHub Pages). Las
-  // builds de producción (LAN / APK) nunca lo muestran.
-  _toggleDemoBadge() {
-    const badge = document.getElementById('topbar-demo-badge');
-    if (!badge) return;
-    const isDemo = !!(window.LBA_CONFIG && window.LBA_CONFIG.DEMO_MODE === true);
-    badge.hidden = !isDemo;
+    setInterval(tick, 1000);
   },
 };
 
-// Bootstrap
+// Bootstrap on DOMContentLoaded
 document.addEventListener('DOMContentLoaded', () => App.init());

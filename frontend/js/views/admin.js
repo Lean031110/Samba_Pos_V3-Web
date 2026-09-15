@@ -202,8 +202,22 @@ const AdminView = {
       case 'cash':      await this._renderCash();       break;
       case 'reports':   await this._renderReports();    break;
       case 'config':    await this._renderConfig();    break;
+      // BLOQUE 3 — Nuevos tabs modulares
+      case 'users':     await this._renderUsers();      break;
+      case 'roles':     await this._renderRoles();      break;
+      case 'stations':  await this._renderStations();   break;
+      case 'areas':     await this._renderAreas();      break;
+      case 'combos':    await this._renderCombos();     break;
+      case 'transfers': await this._renderTransfers();  break;
+      case 'system':    await this._renderSystem();     break;
+      case 'errors':    await this._renderErrors();     break;
+      case 'audit':     await this._renderAuditLogs();  break;
+      case 'customers': await this._renderCustomers();  break;
+      case 'departments': await this._renderDepartments(); break;
+      case 'payment-types': await this._renderPaymentTypes(); break;
+      case 'settings': await this._renderSettings();   break;
       default:
-        this._setContent('<p class="admin-empty">Pestaña no reconocida</p>');
+        this._setContent('<div class="ds-empty"><div class="ds-empty__icon"><i class="fa-solid fa-folder-open"></i></div><div class="ds-empty__title">Sección no disponible</div></div>');
     }
   },
 
@@ -370,6 +384,11 @@ const AdminView = {
 
   async _renderProducts() {
     this._loading('Cargando productos...');
+    if (this._productsSearch === undefined) this._productsSearch = '';
+    if (this._productsPage === undefined) this._productsPage = 1;
+    if (this._productsSortCol === undefined) this._productsSortCol = 'Name';
+    if (this._productsSortDir === undefined) this._productsSortDir = 'asc';
+    const pageSize = 50;
     let items = [];
     try {
       const res = await Api.request('GET', '/products');
@@ -381,13 +400,49 @@ const AdminView = {
         '<p class="admin-empty">Error al cargar productos.</p>');
       return;
     }
+    // Client-side filter
+    const filtered = this._productsSearch
+      ? items.filter(it => (it.Name || '').toLowerCase().includes(this._productsSearch.toLowerCase()) ||
+                            (it.GroupCode || '').toLowerCase().includes(this._productsSearch.toLowerCase()))
+      : items;
+    // Client-side sort
+    filtered.sort((a, b) => {
+      const av = String(a[this._productsSortCol] ?? '');
+      const bv = String(b[this._productsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._productsSortDir === 'asc' ? cmp : -cmp;
+    });
+    // Client-side pagination (backend /products doesn't support server-side)
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (this._productsPage > totalPages) this._productsPage = 1;
+    const start = (this._productsPage - 1) * pageSize;
+    const paged = filtered.slice(start, start + pageSize);
+    const pagination = {
+      page: this._productsPage,
+      pageSize,
+      total,
+      totalPages,
+      hasNext: this._productsPage < totalPages,
+      hasPrev: this._productsPage > 1,
+    };
+    const sortIcon = (col) => this._productsSortCol === col
+      ? (this._productsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nuevo producto', 'kds-btn--primary', 'fa-plus', "window.AdminView._newProduct()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportProducts()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="products-search"
+        placeholder="Buscar producto o grupo..." value="${this._escape(this._productsSearch)}"
+        oninput="window.AdminView._productsSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
     if (items.length === 0) {
       this._setContent(this._header('Productos', newBtn) +
         '<p class="admin-empty">No hay productos cargados. Hacé clic en "Nuevo producto" para crear el primero.</p>');
       return;
     }
-    const rows = items.map(it => {
+    const rows = paged.map(it => {
       const price = Number(it.Portions?.[0]?.Prices?.[0]?.Price || 0);
       const group = it.GroupCode || '—';
       return `
@@ -402,11 +457,74 @@ const AdminView = {
         </tr>
       `;
     }).join('');
+    const countInfo = this._productsSearch
+      ? `${filtered.length} de ${items.length} productos`
+      : `${items.length} productos`;
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._productsSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._productsSort('GroupCode')">Grupo${sortIcon('GroupCode')}</th>
+      <th>Precio</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const paginationHtml = this._renderPagination(pagination, '_productsPage', '_renderProducts');
     this._setContent(
-      this._header('Productos (' + items.length + ')', newBtn) +
-      this._table(['Nombre', 'Grupo', 'Precio', 'Acciones'], rows)
+      this._header('Productos (' + countInfo + ')', newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml +
+      paginationHtml
     );
   },
+
+  _productsSort(col) {
+    if (this._productsSortCol === col) {
+      this._productsSortDir = this._productsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._productsSortCol = col;
+      this._productsSortDir = 'asc';
+    }
+    this._renderProducts();
+  },
+
+  _exportProducts() {
+    if (!this._productsCache || this._productsCache.length === 0) {
+      this._toast('No hay productos para exportar', 'info');
+      return;
+    }
+    const rows = this._productsCache.map(it => ({
+      Id: it.Id,
+      Name: it.Name,
+      GroupCode: it.GroupCode || '',
+      Price: Number(it.Portions?.[0]?.Prices?.[0]?.Price || 0),
+      Barcode: it.Barcode || '',
+    }));
+    window.CSVExport.export(rows, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Nombre' },
+      { key: 'GroupCode', label: 'Grupo' },
+      { key: 'Price', label: 'Precio' },
+      { key: 'Barcode', label: 'Código de Barras' },
+    ], `productos-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${rows.length} productos`, 'success');
+  },
+
+  _productsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._productsSearch = value.trim();
+        AdminView._renderProducts();
+      }, 300);
+    };
+  })(),
 
   _btn(label, cls, icon, onclick, extraAttrs) {
     const clsAttr = cls ? (' ' + cls) : '';
@@ -532,7 +650,9 @@ const AdminView = {
 
   async _renderInventory() {
     this._loading('Cargando inventario...');
-    // Descubre warehouseId por defecto desde /departments (sólo la primera vez)
+    if (this._invSearch === undefined) this._invSearch = '';
+    if (this._invSortCol === undefined) this._invSortCol = 'Name';
+    if (this._invSortDir === undefined) this._invSortDir = 'asc';
     if (this._warehouseId === 1) {
       try {
         const deptRes = await Api.request('GET', '/departments');
@@ -560,6 +680,22 @@ const AdminView = {
       this._error('No se puede cargar el inventario: ' + (err.message || err));
     }
 
+    // Apply client-side search filter
+    const filteredIngredients = this._invSearch
+      ? ingredients.filter(ing => (ing.Name || '').toLowerCase().includes(this._invSearch.toLowerCase()) ||
+                                    (ing.Code || '').toLowerCase().includes(this._invSearch.toLowerCase()))
+      : ingredients;
+    // Apply client-side sort
+    filteredIngredients.sort((a, b) => {
+      const av = String(a[this._invSortCol] ?? '');
+      const bv = String(b[this._invSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._invSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._invSortCol === col
+      ? (this._invSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+
     // Selector de almacén
     const whSelector = `
       <label class="admin-inline-label">
@@ -570,6 +706,13 @@ const AdminView = {
     `;
     const adjustBtn = this._btn('Ajustar stock', 'kds-btn--primary', 'fa-scale-balanced',
       `window.AdminView._openStockAdjustment()`);
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportInventory()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="inv-search"
+        placeholder="Buscar ingrediente o código..." value="${this._escape(this._invSearch)}"
+        oninput="window.AdminView._invSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
 
     // Alertas de stock bajo
     let alertsHtml = '';
@@ -602,7 +745,7 @@ const AdminView = {
     // Stock por ingrediente (join con balances)
     const balanceByIngredient = new Map();
     for (const b of balances) balanceByIngredient.set(b.IngredientId, b);
-    const stockRows = ingredients.map(ing => {
+    const stockRows = filteredIngredients.map(ing => {
       const bal = balanceByIngredient.get(ing.Id);
       const qty = bal ? Number(bal.Quantity) : 0;
       const unit = bal?.UnitCode || ing.BaseUnitCode || '—';
@@ -622,6 +765,22 @@ const AdminView = {
         </tr>
       `;
     }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('Name')">Ingrediente${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('Code')">Código${sortIcon('Code')}</th>
+      <th>Stock</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('MinimumStock')">Mínimo${sortIcon('MinimumStock')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._invSort('CostPerUnit')">Costo/U${sortIcon('CostPerUnit')}</th>
+      <th>Acciones</th>
+    `;
+    const stockTableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${stockRows}</tbody>
+        </table>
+      </div>
+    `;
 
     // Movimientos recientes
     let movHtml = '';
@@ -644,14 +803,64 @@ const AdminView = {
       movHtml = this._table(['Tipo', 'Ingrediente', 'Cantidad', 'Fecha', 'Referencia'], mrows);
     }
 
+    const countInfo = this._invSearch
+      ? `${filteredIngredients.length} de ${ingredients.length} ingredientes`
+      : `${ingredients.length} ingredientes`;
+
     this._setContent(
-      this._header('Inventario', whSelector + adjustBtn) +
+      this._header(`Inventario (${countInfo})`, whSelector + ' ' + adjustBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       alertsHtml +
       '<h3 class="admin-section-title">Stock actual</h3>' +
-      this._table(['Ingrediente', 'Código', 'Stock', 'Mínimo', 'Costo/U', 'Acciones'], stockRows) +
+      stockTableHtml +
       '<h3 class="admin-section-title">Movimientos recientes</h3>' +
       movHtml
     );
+  },
+
+  _invSort(col) {
+    if (this._invSortCol === col) {
+      this._invSortDir = this._invSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._invSortCol = col;
+      this._invSortDir = 'asc';
+    }
+    this._renderInventory();
+  },
+
+  _invSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._invSearch = value.trim();
+        AdminView._renderInventory();
+      }, 300);
+    };
+  })(),
+
+  _exportInventory() {
+    if (!this._ingredientsCache || this._ingredientsCache.length === 0) {
+      this._toast('No hay inventario para exportar', 'info');
+      return;
+    }
+    const rows = this._ingredientsCache.map(ing => ({
+      Id: ing.Id,
+      Name: ing.Name,
+      Code: ing.Code || '',
+      MinimumStock: Number(ing.MinimumStock || 0),
+      CostPerUnit: Number(ing.CostPerUnit || 0),
+      BaseUnit: ing.BaseUnitCode || '',
+    }));
+    window.CSVExport.export(rows, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Ingrediente' },
+      { key: 'Code', label: 'Código' },
+      { key: 'MinimumStock', label: 'Stock Mínimo' },
+      { key: 'CostPerUnit', label: 'Costo por Unidad' },
+      { key: 'BaseUnit', label: 'Unidad Base' },
+    ], `inventario-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${rows.length} ingredientes`, 'success');
   },
 
   _movementTypeClass(t) {
@@ -768,6 +977,9 @@ const AdminView = {
 
   async _renderRecipes() {
     this._loading('Cargando recetas y costos...');
+    if (this._recipesSearch === undefined) this._recipesSearch = '';
+    if (this._recipesSortCol === undefined) this._recipesSortCol = 'menuItemName';
+    if (this._recipesSortDir === undefined) this._recipesSortDir = 'asc';
     let recipes = [], costSummary = [];
     try {
       const [recRes, sumRes] = await Promise.all([
@@ -779,15 +991,36 @@ const AdminView = {
     } catch (err) {
       this._error('No se pueden cargar las recetas: ' + (err.message || err));
     }
+    // Client-side search + sort
+    const filtered = this._recipesSearch
+      ? recipes.filter(r => (r.menuItemName || '').toLowerCase().includes(this._recipesSearch.toLowerCase()) ||
+                            (r.portionName || '').toLowerCase().includes(this._recipesSearch.toLowerCase()))
+      : recipes;
+    filtered.sort((a, b) => {
+      const av = String(a[this._recipesSortCol] ?? '');
+      const bv = String(b[this._recipesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._recipesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._recipesSortCol === col
+      ? (this._recipesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const calcBtn = this._btn('Calcular margen', '', 'fa-calculator', "window.AdminView._showMarginCalc()");
     const newBtn = this._btn('Nueva receta', 'kds-btn--primary', 'fa-plus', "window.AdminView._newRecipe()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportRecipes()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="recipes-search"
+        placeholder="Buscar producto o porción..." value="${this._escape(this._recipesSearch)}"
+        oninput="window.AdminView._recipesSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
 
     // Tabla principal: recetas existentes con costo, precio, margen
     let recipesHtml;
     if (recipes.length === 0) {
       recipesHtml = '<p class="admin-empty">No hay recetas definidas todavía. Usá "Nueva receta" o "Editar receta" en la lista inferior.</p>';
     } else {
-      const rows = recipes.map(r => {
+      const rows = filtered.map(r => {
         const marginClass = Number(r.marginPct) < 30 ? 'admin-num--danger'
           : Number(r.marginPct) < 60 ? 'admin-num--warning'
           : 'admin-num--success';
@@ -807,7 +1040,23 @@ const AdminView = {
           </tr>
         `;
       }).join('');
-      recipesHtml = this._table(['Producto', 'Porción', 'Costo', 'Precio', 'Margen', '% Margen', 'Acciones'], rows);
+      const sortableHeaders = `
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('menuItemName')">Producto${sortIcon('menuItemName')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('portionName')">Porción${sortIcon('portionName')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('cost')">Costo${sortIcon('cost')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('price')">Precio${sortIcon('price')}</th>
+        <th>Margen</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._recipesSort('marginPct')">% Margen${sortIcon('marginPct')}</th>
+        <th>Acciones</th>
+      `;
+      recipesHtml = `
+        <div class="admin-table-wrap is-scrollable">
+          <table class="admin-table">
+            <thead><tr>${sortableHeaders}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     }
 
     // Resumen por producto (incluye los que no tienen receta)
@@ -861,12 +1110,53 @@ const AdminView = {
       `;
     }
 
+    const countInfo = this._recipesSearch
+      ? `${filtered.length} de ${recipes.length} recetas`
+      : `${recipes.length} recetas`;
     this._setContent(
-      this._header('Recetas y costos', calcBtn + newBtn) +
+      this._header(`Recetas y costos (${countInfo})`, calcBtn + ' ' + newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       '<h3 class="admin-section-title">Recetas definidas</h3>' +
       recipesHtml +
       summaryHtml
     );
+  },
+
+  _recipesSort(col) {
+    if (this._recipesSortCol === col) {
+      this._recipesSortDir = this._recipesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._recipesSortCol = col;
+      this._recipesSortDir = 'asc';
+    }
+    this._renderRecipes();
+  },
+
+  _recipesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._recipesSearch = value.trim();
+        AdminView._renderRecipes();
+      }, 300);
+    };
+  })(),
+
+  _exportRecipes() {
+    Api.request('GET', '/recipes').then(res => {
+      const recipes = res.data || [];
+      if (recipes.length === 0) { this._toast('No hay recetas para exportar', 'info'); return; }
+      window.CSVExport.export(recipes, [
+        { key: 'menuItemName', label: 'Producto' },
+        { key: 'portionName', label: 'Porción' },
+        { key: 'cost', label: 'Costo' },
+        { key: 'price', label: 'Precio' },
+        { key: 'margin', label: 'Margen' },
+        { key: 'marginPct', label: '% Margen' },
+      ], `recetas-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${recipes.length} recetas`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   /**
@@ -1143,6 +1433,9 @@ const AdminView = {
 
   async _renderPrinters() {
     this._loading('Cargando impresoras...');
+    if (this._printersSearch === undefined) this._printersSearch = '';
+    if (this._printersSortCol === undefined) this._printersSortCol = 'Name';
+    if (this._printersSortDir === undefined) this._printersSortDir = 'asc';
     let printers = [], areas = [], rules = [];
     try {
       const [pRes, aRes, rRes] = await Promise.all([
@@ -1156,7 +1449,28 @@ const AdminView = {
     } catch (err) {
       this._error('No se pueden cargar las impresoras: ' + (err.message || err));
     }
+    // Client-side search + sort on printers
+    const filtered = this._printersSearch
+      ? printers.filter(p => (p.Name || '').toLowerCase().includes(this._printersSearch.toLowerCase()) ||
+                              (p.ShareName || '').toLowerCase().includes(this._printersSearch.toLowerCase()))
+      : printers;
+    filtered.sort((a, b) => {
+      const av = String(a[this._printersSortCol] ?? '');
+      const bv = String(b[this._printersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._printersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._printersSortCol === col
+      ? (this._printersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
     const newBtn = this._btn('Nueva impresora', 'kds-btn--primary', 'fa-plus', "window.AdminView._newPrinter()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportPrinters()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="printers-search"
+        placeholder="Buscar impresora o conexión..." value="${this._escape(this._printersSearch)}"
+        oninput="window.AdminView._printersSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
     const areaName = (id) => {
       const a = areas.find(x => x.Id === id);
       return a ? (a.DisplayName || a.Name) : '—';
@@ -1166,7 +1480,7 @@ const AdminView = {
     if (printers.length === 0) {
       printersHtml = '<p class="admin-empty">No hay impresoras configuradas. Hacé clic en "Nueva impresora" para crear una.</p>';
     } else {
-      const rows = printers.map(pr => {
+      const rows = filtered.map(pr => {
         const isActive = pr.IsActive === 1 || pr.IsActive === true;
         const statusTag = isActive
           ? '<span class="admin-tag admin-tag--success">Activa</span>'
@@ -1188,7 +1502,21 @@ const AdminView = {
           </tr>
         `;
       }).join('');
-      printersHtml = this._table(['Nombre', 'Conexión (IP:puerto)', 'Área', 'Estado', 'Acciones'], rows);
+      const sortableHeaders = `
+        <th style="cursor:pointer;" onclick="window.AdminView._printersSort('Name')">Nombre${sortIcon('Name')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._printersSort('ShareName')">Conexión (IP:puerto)${sortIcon('ShareName')}</th>
+        <th>Área</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._printersSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+        <th>Acciones</th>
+      `;
+      printersHtml = `
+        <div class="admin-table-wrap is-scrollable">
+          <table class="admin-table">
+            <thead><tr>${sortableHeaders}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     }
 
     // Áreas de impresión
@@ -1225,8 +1553,12 @@ const AdminView = {
       rulesHtml = this._table(['Tipo de regla', 'Match', 'Área destino', 'Impresora', 'Prioridad'], rrows);
     }
 
+    const countInfo = this._printersSearch
+      ? `${filtered.length} de ${printers.length} impresoras`
+      : `${printers.length} impresoras`;
     this._setContent(
-      this._header('Impresoras', newBtn) +
+      this._header(`Impresoras (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
       '<h3 class="admin-section-title">Impresoras configuradas</h3>' +
       printersHtml +
       '<h3 class="admin-section-title">Áreas de impresión</h3>' +
@@ -1234,6 +1566,41 @@ const AdminView = {
       '<h3 class="admin-section-title">Reglas de routing</h3>' +
       rulesHtml
     );
+  },
+
+  _printersSort(col) {
+    if (this._printersSortCol === col) {
+      this._printersSortDir = this._printersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._printersSortCol = col;
+      this._printersSortDir = 'asc';
+    }
+    this._renderPrinters();
+  },
+
+  _printersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._printersSearch = value.trim();
+        AdminView._renderPrinters();
+      }, 300);
+    };
+  })(),
+
+  _exportPrinters() {
+    Api.request('GET', '/printers').then(res => {
+      const printers = res.data || [];
+      if (printers.length === 0) { this._toast('No hay impresoras para exportar', 'info'); return; }
+      window.CSVExport.export(printers, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'ShareName', label: 'Conexión' },
+        { key: 'IsActive', label: 'Activa' },
+      ], `impresoras-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${printers.length} impresoras`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newPrinter() {
@@ -1332,6 +1699,9 @@ const AdminView = {
 
   async _renderTemplates() {
     this._loading('Cargando plantillas de impresión...');
+    if (this._templatesSearch === undefined) this._templatesSearch = '';
+    if (this._templatesSortCol === undefined) this._templatesSortCol = 'Name';
+    if (this._templatesSortDir === undefined) this._templatesSortDir = 'asc';
     let templates = [];
     try {
       const res = await Api.request('GET', '/print/templates/list?includeInactive=true');
@@ -1342,6 +1712,27 @@ const AdminView = {
     }
 
     const newBtn = this._btn('Nueva plantilla', 'kds-btn--primary', 'fa-plus', "window.AdminView._newTemplate()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportTemplates()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="templates-search"
+        placeholder="Buscar plantilla..." value="${this._escape(this._templatesSearch)}"
+        oninput="window.AdminView._templatesSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    // Client-side search + sort
+    const filtered = this._templatesSearch
+      ? templates.filter(t => (t.Name || '').toLowerCase().includes(this._templatesSearch.toLowerCase()) ||
+                              (t.TemplateType || '').toLowerCase().includes(this._templatesSearch.toLowerCase()))
+      : templates;
+    filtered.sort((a, b) => {
+      const av = String(a[this._templatesSortCol] ?? '');
+      const bv = String(b[this._templatesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._templatesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._templatesSortCol === col
+      ? (this._templatesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
 
     const typeLabels = {
       RECEIPT: 'Recibo',
@@ -1355,7 +1746,7 @@ const AdminView = {
     if (templates.length === 0) {
       html = `<p class="admin-empty">No hay plantillas configuradas. Hacé clic en "Nueva plantilla" para crear una.</p>`;
     } else {
-      const rows = templates.map(t => {
+      const rows = filtered.map(t => {
         const isActive = t.IsActive === 1 || t.IsActive === true;
         const statusTag = isActive
           ? '<span class="admin-tag admin-tag--success">Activa</span>'
@@ -1376,22 +1767,73 @@ const AdminView = {
           </tr>
         `;
       }).join('');
-      const tableHtml = this._table(['Nombre', 'Tipo', 'Descripción', 'Estado', 'Acciones'], rows);
+      const sortableHeaders = `
+        <th style="cursor:pointer;" onclick="window.AdminView._templatesSort('Name')">Nombre${sortIcon('Name')}</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._templatesSort('TemplateType')">Tipo${sortIcon('TemplateType')}</th>
+        <th>Descripción</th>
+        <th style="cursor:pointer;" onclick="window.AdminView._templatesSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+        <th>Acciones</th>
+      `;
+      const tableHtml = `
+        <div class="admin-table-wrap is-scrollable">
+          <table class="admin-table">
+            <thead><tr>${sortableHeaders}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+      const countInfo = this._templatesSearch
+        ? `${filtered.length} de ${templates.length} plantillas`
+        : `${templates.length} plantillas`;
       html = `
         <div class="admin-section">
-          <div class="admin-section__header">
-            <h2><i class="fa-solid fa-file-lines"></i> Plantillas de impresión</h2>
-            ${newBtn}
-          </div>
+          ${this._header(`Plantillas de impresión (${countInfo})`, newBtn + ' ' + exportBtn)}
           <p class="admin-help">
             Las plantillas definen cómo se formatean los recibos y comandas de cocina antes de enviarse a la impresora.
             Tipos: <strong>Recibo</strong> (ticket cliente), <strong>Comanda cocina</strong> (KDS), <strong>Prueba</strong> (test), <strong>Personalizada</strong>.
           </p>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>
           ${tableHtml}
         </div>
       `;
     }
     this._setContent(html);
+  },
+
+  _templatesSort(col) {
+    if (this._templatesSortCol === col) {
+      this._templatesSortDir = this._templatesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._templatesSortCol = col;
+      this._templatesSortDir = 'asc';
+    }
+    this._renderTemplates();
+  },
+
+  _templatesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._templatesSearch = value.trim();
+        AdminView._renderTemplates();
+      }, 300);
+    };
+  })(),
+
+  _exportTemplates() {
+    Api.request('GET', '/print/templates/list?includeInactive=true').then(res => {
+      const templates = res.data || [];
+      if (templates.length === 0) { this._toast('No hay plantillas para exportar', 'info'); return; }
+      window.CSVExport.export(templates, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'TemplateType', label: 'Tipo' },
+        { key: 'Description', label: 'Descripción' },
+        { key: 'IsActive', label: 'Activa' },
+      ], `plantillas-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${templates.length} plantillas`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
   },
 
   _newTemplate() {
@@ -1542,6 +1984,9 @@ const AdminView = {
             <div><span>Usuario:</span> <strong>${this._escape(openSession.OpenedByName || '—')}</strong></div>
           </div>
           <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            ${this._btn('Retiro (payout)', '', 'fa-money-bill-transfer', `window.AdminView._cashPayout(${openSession.Id})`)}
+            ${this._btn('Transferencia', '', 'fa-arrow-right-arrow-left', `window.AdminView._cashTransfer(${openSession.Id})`)}
+            ${this._btn('Ver eventos', '', 'fa-list', `window.AdminView._cashEvents(${openSession.Id})`)}
             ${this._btn('Cerrar caja', 'kds-btn--void', 'fa-lock', `window.AdminView._closeCash(${openSession.Id})`)}
           </div>
         </div>
@@ -1600,6 +2045,60 @@ const AdminView = {
     }
   },
 
+  async _cashPayout(sessionId) {
+    const amount = prompt('Monto del retiro:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Motivo del retiro:', '') || '';
+    try {
+      await Api.request('POST', `/api/cash-sessions/${sessionId}/payout`, { amount: amt, note });
+      this._toast('Retiro registrado', 'success');
+      await this._renderCash();
+    } catch (err) {
+      this._error('No se pudo registrar retiro: ' + (err.message || err));
+    }
+  },
+
+  async _cashTransfer(sessionId) {
+    const amount = prompt('Monto a transferir:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Destino/nota:', '') || '';
+    try {
+      await Api.request('POST', `/api/cash-sessions/${sessionId}/transfer`, { amount: amt, note });
+      this._toast('Transferencia registrada', 'success');
+      await this._renderCash();
+    } catch (err) {
+      this._error('No se pudo registrar transferencia: ' + (err.message || err));
+    }
+  },
+
+  async _cashEvents(sessionId) {
+    this._loading('Cargando eventos de caja…');
+    let events = [];
+    try {
+      const res = await Api.request('GET', `/api/cash-sessions/${sessionId}/events`);
+      events = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar eventos: ' + (err.message || err));
+      return;
+    }
+    const rows = events.length ? events.map(e => `
+      <tr>
+        <td><code>${this._escape(e.EventType || e.Type || '—')}</code></td>
+        <td class="admin-num">$${Number(e.Amount || 0).toFixed(2)}</td>
+        <td>${this._escape(e.Note || '—')}</td>
+        <td>${this._formatDate(e.CreatedAt)}</td>
+        <td>${e.UserId || '—'}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5" class="admin-empty">Sin eventos</td></tr>';
+    this._setContent(this._header(`Eventos de Caja #${sessionId}`, '') +
+      this._table(['Tipo', 'Monto', 'Nota', 'Fecha', 'Usuario'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a caja', '', 'fa-arrow-left', "window.AdminView.showTab('cash')")}</div>`);
+  },
+
   // ===================================================================
   // Tab: REPORTES (BLOQUE L — Fase 12: UI de reportes con selector de período)
   // ===================================================================
@@ -1612,14 +2111,24 @@ const AdminView = {
     const fromDate = this._reportFromDate || today;
     const toDate = this._reportToDate || today;
 
-    // Fetch summary report
-    let reportData = null;
+    // Fetch all reports in parallel (9 endpoints)
+    let summary = null, topProducts = [], byCategory = [], byUser = [], byPayment = [], voidsRefunds = null, inventory = null, cashSessions = null, dashboard = null;
     try {
-      const res = await Api.request('GET', `/reports/sales-summary?from=${fromDate}&to=${toDate}`);
-      reportData = res.data;
+      const qs = `from=${fromDate}&to=${toDate}`;
+      const [s, tp, cat, usr, pay, vr, inv, cs, db] = await Promise.all([
+        Api.request('GET', `/reports/sales?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/top-products?${qs}&limit=10`).catch(() => null),
+        Api.request('GET', `/reports/categories?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/users?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/payments?${qs}`).catch(() => null),
+        Api.request('GET', `/reports/voids-refunds?${qs}`).catch(() => null),
+        Api.request('GET', '/reports/inventory').catch(() => null),
+        Api.request('GET', '/reports/cash-sessions').catch(() => null),
+        Api.request('GET', '/reports/dashboard').catch(() => null),
+      ]);
+      summary = s?.data; topProducts = tp?.data || []; byCategory = cat?.data || []; byUser = usr?.data || []; byPayment = pay?.data || []; voidsRefunds = vr?.data; inventory = inv?.data; cashSessions = cs?.data; dashboard = db?.data;
     } catch (err) {
-      // If endpoint not available, show placeholder
-      console.warn('[reports] No se pudo cargar el reporte:', err.message);
+      console.warn('[reports] Error:', err.message);
     }
 
     const dateSelector = `
@@ -1627,18 +2136,23 @@ const AdminView = {
         <label>Desde: <input type="date" id="rpt-from" value="${fromDate}" onchange="window.AdminView._setReportDates()"></label>
         <label>Hasta: <input type="date" id="rpt-to" value="${toDate}" onchange="window.AdminView._setReportDates()"></label>
         ${this._btn('Generar', 'kds-btn--primary', 'fa-magnifying-glass', "window.AdminView._renderReports()")}
+        ${this._btn('Exportar Top Productos', '', 'fa-file-csv', "window.AdminView._exportTopProducts()")}
+        ${this._btn('Exportar por Categoría', '', 'fa-file-csv', "window.AdminView._exportByCategory()")}
+        ${this._btn('Exportar por Mesero', '', 'fa-file-csv', "window.AdminView._exportByUser()")}
       </div>
     `;
 
-    let reportCard;
-    if (reportData) {
-      const r = reportData;
-      reportCard = `
+    let html = this._header('Reportes', '') + `<div class="admin-section">${dateSelector}`;
+
+    // 1. Resumen de ventas (sales)
+    if (summary) {
+      const r = summary;
+      html += `
         <div class="admin-card">
           <h3><i class="fa-solid fa-chart-line"></i> Resumen de Ventas (${fromDate} → ${toDate})</h3>
           <div class="admin-stats-grid">
             <div class="admin-stat admin-stat--success">
-              <div class="admin-stat__num">$${Number(r.totalSales || 0).toFixed(2)}</div>
+              <div class="admin-stat__num">$${Number(r.totalSales || r.grossSales || 0).toFixed(2)}</div>
               <div class="admin-stat__label">Ventas totales</div>
             </div>
             <div class="admin-stat">
@@ -1651,50 +2165,195 @@ const AdminView = {
             </div>
             <div class="admin-stat admin-stat--danger">
               <div class="admin-stat__num">${r.voidedCount || 0}</div>
-              <div class="admin-stat__label">Tickets anulados</div>
+              <div class="admin-stat__label">Anulados</div>
             </div>
             <div class="admin-stat admin-stat--warn">
               <div class="admin-stat__num">${r.refundedCount || 0}</div>
-              <div class="admin-stat__label">Tickets reembolsados</div>
+              <div class="admin-stat__label">Reembolsados</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">$${Number(r.refundedAmount || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Monto reembolsado</div>
             </div>
           </div>
-        </div>
-      `;
-    } else {
-      reportCard = `
-        <div class="admin-card">
-          <h3><i class="fa-solid fa-chart-line"></i> Resumen de Ventas</h3>
-          <p class="admin-empty">Selecciona un rango de fechas y haz clic en "Generar" para ver el reporte.</p>
         </div>
       `;
     }
 
-    // Fetch top products
-    let topProductsCard = '';
-    try {
-      const res = await Api.request('GET', `/reports/top-products?from=${fromDate}&to=${toDate}&limit=10`);
-      const products = res.data || [];
-      if (products.length > 0) {
-        const rows = products.map(p => `
-          <tr>
-            <td data-label="Producto">${this._escape(p.name || p.Name || '—')}</td>
-            <td data-label="Cantidad">${p.quantity || p.Quantity || 0}</td>
-            <td data-label="Total">$${Number(p.total || p.Total || 0).toFixed(2)}</td>
-          </tr>
-        `).join('');
-        topProductsCard = `
-          <div class="admin-card">
-            <h3><i class="fa-solid fa-trophy"></i> Top 10 Productos</h3>
-            ${this._table(['Producto', 'Cantidad', 'Total'], rows)}
+    // 2. Dashboard (real-time metrics)
+    if (dashboard) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-gauge-high"></i> Dashboard en tiempo real</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--info">
+              <div class="admin-stat__num">${dashboard.openTickets || 0}</div>
+              <div class="admin-stat__label">Tickets abiertos</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${dashboard.activeTables || 0}</div>
+              <div class="admin-stat__label">Mesas activas</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${dashboard.kitchenOrders || 0}</div>
+              <div class="admin-stat__label">Pedidos en cocina</div>
+            </div>
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(dashboard.todaySales || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Ventas de hoy</div>
+            </div>
           </div>
-        `;
-      }
-    } catch {}
+        </div>
+      `;
+    }
 
-    this._setContent(
-      this._header('Reportes', '') +
-      `<div class="admin-section">${dateSelector}${reportCard}${topProductsCard}</div>`
-    );
+    // 3. Top products
+    if (topProducts.length > 0) {
+      const rows = topProducts.map(p => `
+        <tr>
+          <td data-label="Producto">${this._escape(p.name || p.Name || '—')}</td>
+          <td class="admin-num">${p.quantity || p.Quantity || 0}</td>
+          <td class="admin-num">$${Number(p.total || p.Total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-trophy"></i> Top 10 Productos</h3>
+          ${this._table(['Producto', 'Cantidad', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 4. Sales by category
+    if (byCategory.length > 0) {
+      const rows = byCategory.map(c => `
+        <tr>
+          <td>${this._escape(c.category || c.Category || '—')}</td>
+          <td class="admin-num">${c.quantity || c.count || 0}</td>
+          <td class="admin-num">$${Number(c.total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-tags"></i> Ventas por Categoría</h3>
+          ${this._table(['Categoría', 'Cantidad', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 5. Sales by user (mesero)
+    if (byUser.length > 0) {
+      const rows = byUser.map(u => `
+        <tr>
+          <td>${this._escape(u.userName || u.User || '—')}</td>
+          <td class="admin-num">${u.ticketCount || 0}</td>
+          <td class="admin-num">$${Number(u.total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-user-tie"></i> Ventas por Mesero</h3>
+          ${this._table(['Mesero', 'Tickets', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 6. Payments by type
+    if (byPayment.length > 0) {
+      const rows = byPayment.map(p => `
+        <tr>
+          <td>${this._escape(p.paymentType || p.PaymentType || '—')}</td>
+          <td class="admin-num">${p.count || 0}</td>
+          <td class="admin-num">$${Number(p.total || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-money-bill-wave"></i> Pagos por Tipo</h3>
+          ${this._table(['Tipo de Pago', 'Transacciones', 'Total'], rows)}
+        </div>
+      `;
+    }
+
+    // 7. Voids and refunds
+    if (voidsRefunds) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-ban"></i> Anulaciones y Reembolsos</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">${voidsRefunds.voidsCount || 0}</div>
+              <div class="admin-stat__label">Anulaciones</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">${voidsRefunds.refundsCount || 0}</div>
+              <div class="admin-stat__label">Reembolsos</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">$${Number(voidsRefunds.voidsAmount || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Monto anulado</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">$${Number(voidsRefunds.refundsAmount || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Monto reembolsado</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 8. Inventory summary
+    if (inventory) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-warehouse"></i> Resumen de Inventario</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat">
+              <div class="admin-stat__num">${inventory.totalIngredients || 0}</div>
+              <div class="admin-stat__label">Ingredientes</div>
+            </div>
+            <div class="admin-stat admin-stat--warn">
+              <div class="admin-stat__num">${inventory.lowStockCount || 0}</div>
+              <div class="admin-stat__label">Stock bajo</div>
+            </div>
+            <div class="admin-stat admin-stat--danger">
+              <div class="admin-stat__num">${inventory.outOfStockCount || 0}</div>
+              <div class="admin-stat__label">Sin stock</div>
+            </div>
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(inventory.totalValue || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Valor total</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 9. Cash sessions summary
+    if (cashSessions) {
+      html += `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-cash-register"></i> Sesiones de Caja</h3>
+          <div class="admin-stats-grid">
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">${cashSessions.openCount || 0}</div>
+              <div class="admin-stat__label">Sesiones abiertas</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat__num">${cashSessions.closedCount || 0}</div>
+              <div class="admin-stat__label">Sesiones cerradas</div>
+            </div>
+            <div class="admin-stat admin-stat--success">
+              <div class="admin-stat__num">$${Number(cashSessions.totalCash || 0).toFixed(2)}</div>
+              <div class="admin-stat__label">Efectivo total</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    html += '</div>';
+    this._setContent(html);
   },
 
   _setReportDates() {
@@ -1702,6 +2361,54 @@ const AdminView = {
     const toEl = document.getElementById('rpt-to');
     if (fromEl) this._reportFromDate = fromEl.value;
     if (toEl) this._reportToDate = toEl.value;
+  },
+
+  async _exportTopProducts() {
+    const fromDate = this._reportFromDate || new Date().toISOString().slice(0, 10);
+    const toDate = this._reportToDate || fromDate;
+    try {
+      const res = await Api.request('GET', `/reports/top-products?from=${fromDate}&to=${toDate}&limit=100`);
+      const products = res.data || [];
+      if (products.length === 0) { this._toast('No hay datos para exportar', 'info'); return; }
+      window.CSVExport.export(products, [
+        { key: 'name', label: 'Producto' },
+        { key: 'quantity', label: 'Cantidad' },
+        { key: 'total', label: 'Total' },
+      ], `top-productos-${fromDate}-a-${toDate}.csv`);
+      this._toast(`Exportados ${products.length} productos`, 'success');
+    } catch (err) { this._error('No se puede exportar: ' + (err.message || err)); }
+  },
+
+  async _exportByCategory() {
+    const fromDate = this._reportFromDate || new Date().toISOString().slice(0, 10);
+    const toDate = this._reportToDate || fromDate;
+    try {
+      const res = await Api.request('GET', `/reports/categories?from=${fromDate}&to=${toDate}`);
+      const cats = res.data || [];
+      if (cats.length === 0) { this._toast('No hay datos para exportar', 'info'); return; }
+      window.CSVExport.export(cats, [
+        { key: 'category', label: 'Categoría' },
+        { key: 'quantity', label: 'Cantidad' },
+        { key: 'total', label: 'Total' },
+      ], `ventas-categoria-${fromDate}-a-${toDate}.csv`);
+      this._toast(`Exportadas ${cats.length} categorías`, 'success');
+    } catch (err) { this._error('No se puede exportar: ' + (err.message || err)); }
+  },
+
+  async _exportByUser() {
+    const fromDate = this._reportFromDate || new Date().toISOString().slice(0, 10);
+    const toDate = this._reportToDate || fromDate;
+    try {
+      const res = await Api.request('GET', `/reports/users?from=${fromDate}&to=${toDate}`);
+      const users = res.data || [];
+      if (users.length === 0) { this._toast('No hay datos para exportar', 'info'); return; }
+      window.CSVExport.export(users, [
+        { key: 'userName', label: 'Mesero' },
+        { key: 'ticketCount', label: 'Tickets' },
+        { key: 'total', label: 'Total' },
+      ], `ventas-mesero-${fromDate}-a-${toDate}.csv`);
+      this._toast(`Exportados ${users.length} meseros`, 'success');
+    } catch (err) { this._error('No se puede exportar: ' + (err.message || err)); }
   },
 
   // ===================================================================
@@ -2131,7 +2838,2209 @@ const AdminView = {
       cell.innerHTML = `<span class="admin-tag admin-tag--danger">Error</span>`;
     }
   },
+
+  // (Bootstrap is at the very end of this file, after all methods)
 };
+
+// Extend AdminView with additional methods (BLOQUE 3-11)
+Object.assign(AdminView, {
+  async _renderUsers() {
+    this._loading('Cargando usuarios…');
+    // Pagination + search state (Bloque 12 FASE C)
+    if (this._usersPage === undefined) this._usersPage = 1;
+    if (this._usersSearch === undefined) this._usersSearch = '';
+    if (this._usersSortCol === undefined) this._usersSortCol = 'Name';
+    if (this._usersSortDir === undefined) this._usersSortDir = 'asc';
+    const pageSize = 20;
+    let users = [];
+    let roles = [];
+    let pagination = null;
+    try {
+      const params = new URLSearchParams({
+        page: String(this._usersPage),
+        pageSize: String(pageSize),
+      });
+      if (this._usersSearch) params.set('search', this._usersSearch);
+      const [u, r] = await Promise.all([
+        Api.request('GET', `/admin/users?${params.toString()}`),
+        Api.request('GET', '/admin/roles'),
+      ]);
+      users = u.data || [];
+      pagination = u.pagination;
+      roles = r.data || [];
+      this._rolesCache = roles;
+    } catch (err) {
+      this._error('No se pueden cargar los usuarios: ' + (err.message || err));
+      return;
+    }
+    // Client-side sort (Bloque 12 FASE C — backend doesn't support sort yet)
+    users.sort((a, b) => {
+      const av = String(a[this._usersSortCol] ?? '');
+      const bv = String(b[this._usersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._usersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._usersSortCol === col
+      ? (this._usersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nuevo usuario', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newUser()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportUsers()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="users-search"
+        placeholder="Buscar usuario..." value="${this._escape(this._usersSearch)}"
+        oninput="window.AdminView._usersSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (users.length === 0 && !this._usersSearch) {
+      this._setContent(this._header('Usuarios', newBtn) +
+        '<p class="admin-empty">No hay usuarios cargados.</p>');
+      return;
+    }
+    const rows = users.map(u => {
+      const adminBadge = u.IsAdmin
+        ? '<span class="admin-tag admin-tag--info">Sí</span>'
+        : '<span class="admin-tag">No</span>';
+      return `
+        <tr>
+          <td><strong>${this._escape(u.Name)}</strong></td>
+          <td>${this._escape(u.RoleName || '—')}</td>
+          <td>${adminBadge}</td>
+          <td class="admin-row-actions">
+            ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editUser(${u.Id})`)}
+            ${this._btn('Eliminar', 'kds-btn--void', 'fa-trash', `window.AdminView._deleteUser(${u.Id})`)}
+          </td>
+        </tr>`;
+    }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._usersSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._usersSort('RoleName')">Rol${sortIcon('RoleName')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._usersSort('IsAdmin')">Admin${sortIcon('IsAdmin')}</th>
+      <th>Acciones</th>
+    `;
+    const paginationHtml = this._renderPagination(pagination, '_usersPage', '_renderUsers');
+    // Use raw table HTML to inject sortable headers
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    this._setContent(this._header('Usuarios', newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml +
+      paginationHtml);
+  },
+
+  _usersSort(col) {
+    if (this._usersSortCol === col) {
+      this._usersSortDir = this._usersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._usersSortCol = col;
+      this._usersSortDir = 'asc';
+    }
+    this._renderUsers();
+  },
+
+  _exportUsers() {
+    if (!this._rolesCache) return;
+    // Fetch ALL users (without pagination) for export
+    Api.request('GET', '/admin/users?pageSize=10000').then(res => {
+      const users = res.data || [];
+      window.CSVExport.export(users, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'RoleName', label: 'Rol' },
+        { key: 'IsAdmin', label: 'Es Admin' },
+      ], `usuarios-${new Date().toISOString().slice(0,10)}.csv`);
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  _usersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._usersSearch = value.trim();
+        AdminView._usersPage = 1;
+        AdminView._renderUsers();
+      }, 300);
+    };
+  })(),
+
+  _renderPagination(pagination, pageProp, renderMethod) {
+    if (!pagination || !pagination.totalPages || pagination.totalPages <= 1) {
+      return pagination ? `<div style="text-align:center; color:var(--lba-fg-muted, #6b7280); font-size:12px; padding:8px;">Total: ${pagination.total || 0} registros</div>` : '';
+    }
+    const prev = pagination.hasPrev
+      ? `<button class="kds-btn" onclick="window.AdminView.${pageProp}--; window.AdminView.${renderMethod}()" style="min-height:36px; padding:6px 12px;">← Anterior</button>`
+      : '<button class="kds-btn" disabled style="min-height:36px; padding:6px 12px; opacity:0.4;">← Anterior</button>';
+    const next = pagination.hasNext
+      ? `<button class="kds-btn" onclick="window.AdminView.${pageProp}++; window.AdminView.${renderMethod}()" style="min-height:36px; padding:6px 12px;">Siguiente →</button>`
+      : '<button class="kds-btn" disabled style="min-height:36px; padding:6px 12px; opacity:0.4;">Siguiente →</button>';
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; gap:8px; flex-wrap:wrap;">
+        <div style="font-size:12px; color:var(--lba-fg-muted, #6b7280);">
+          Página ${pagination.page} de ${pagination.totalPages} — Total: ${pagination.total} registros
+        </div>
+        <div style="display:flex; gap:4px;">
+          ${prev}
+          ${next}
+        </div>
+      </div>
+    `;
+  },
+
+  _newUser() { this._userForm(null); },
+  _editUser(id) {
+    const u = (this._productsCache || []).find(x => x.Id === id);
+    // Users aren't in productsCache; fetch via API.
+    Api.request('GET', `/admin/users/${id}`).then(res => {
+      this._userForm(res.data);
+    }).catch(err => this._error('No se puede cargar el usuario: ' + (err.message || err)));
+  },
+
+  _userForm(user) {
+    const isEdit = !!user;
+    const roles = this._rolesCache || [];
+    const roleOpts = roles.map(r =>
+      `<option value="${r.Id}" ${user && user.UserRoleId === r.Id ? 'selected' : ''}>${this._escape(r.Name)}${r.IsAdmin ? ' (admin)' : ''}</option>`
+    ).join('');
+    this._showModal(isEdit ? 'Editar usuario' : 'Nuevo usuario', `
+      <div class="admin-field"><span>Nombre *</span><input id="uf-name" class="admin-input" value="${user ? this._escape(user.Name) : ''}" placeholder="Ej: Carlos Mesero"></div>
+      <div class="admin-field"><span>Rol *</span><select id="uf-role" class="admin-input">${roleOpts || '<option value="">— Sin roles —</option>'}</select></div>
+      <div class="admin-field"><span>PIN ${isEdit ? '(dejar vacío para mantener)' : '*'}</span><input id="uf-pin" type="password" inputmode="numeric" class="admin-input" placeholder="● ● ● ●" maxlength="8"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveUser(${isEdit ? user.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveUser(id) {
+    const name = document.getElementById('uf-name').value.trim();
+    const roleId = parseInt(document.getElementById('uf-role').value, 10);
+    const pin = document.getElementById('uf-pin').value;
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    if (!roleId) { this._toast('Rol requerido', 'error'); return; }
+    if (!id && !pin) { this._toast('PIN requerido', 'error'); return; }
+    const body = { name, roleId };
+    if (pin) body.pin = pin;
+    try {
+      if (id) {
+        await Api.request('PATCH', `/admin/users/${id}`, body);
+        this._toast('Usuario actualizado', 'success');
+      } else {
+        await Api.request('POST', '/admin/users', body);
+        this._toast('Usuario creado', 'success');
+      }
+      this._closeModal();
+      await this._renderUsers();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _deleteUser(id) {
+    if (!confirm('¿Desactivar este usuario? Se quitará su rol.')) return;
+    try {
+      await Api.request('DELETE', `/admin/users/${id}`);
+      this._toast('Usuario desactivado', 'success');
+      await this._renderUsers();
+    } catch (err) {
+      this._error('No se puede desactivar: ' + (err.message || err));
+    }
+  },
+
+  async _renderRoles() {
+    this._loading('Cargando roles…');
+    if (this._rolesSearch === undefined) this._rolesSearch = '';
+    if (this._rolesSortCol === undefined) this._rolesSortCol = 'Name';
+    if (this._rolesSortDir === undefined) this._rolesSortDir = 'asc';
+    let roles = [];
+    try {
+      const res = await Api.request('GET', '/admin/roles');
+      roles = res.data || [];
+      this._rolesCache = roles;
+    } catch (err) {
+      this._error('No se pueden cargar los roles: ' + (err.message || err));
+      return;
+    }
+    // Client-side search + sort
+    const filtered = this._rolesSearch
+      ? roles.filter(r => (r.Name || '').toLowerCase().includes(this._rolesSearch.toLowerCase()))
+      : roles;
+    filtered.sort((a, b) => {
+      const av = String(a[this._rolesSortCol] ?? '');
+      const bv = String(b[this._rolesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._rolesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._rolesSortCol === col
+      ? (this._rolesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nuevo rol', 'kds-btn--primary', 'fa-shield-halved', "window.AdminView._newRole()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportRoles()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="roles-search"
+        placeholder="Buscar rol..." value="${this._escape(this._rolesSearch)}"
+        oninput="window.AdminView._rolesSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (roles.length === 0) {
+      this._setContent(this._header('Roles', newBtn) +
+        '<p class="admin-empty">No hay roles cargados.</p>');
+      return;
+    }
+    const rows = filtered.map(r => `
+      <tr>
+        <td><strong>${this._escape(r.Name)}</strong></td>
+        <td>${r.IsAdmin ? '<span class="admin-tag admin-tag--info">Sí</span>' : '<span class="admin-tag">No</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Permisos', '', 'fa-key', `window.AdminView._editRolePerms(${r.Id})`)}
+        </td>
+      </tr>
+    `).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._rolesSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._rolesSort('IsAdmin')">Admin${sortIcon('IsAdmin')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._rolesSearch
+      ? `${filtered.length} de ${roles.length} roles`
+      : `${roles.length} roles`;
+    this._setContent(this._header(`Roles (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _rolesSort(col) {
+    if (this._rolesSortCol === col) {
+      this._rolesSortDir = this._rolesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._rolesSortCol = col;
+      this._rolesSortDir = 'asc';
+    }
+    this._renderRoles();
+  },
+
+  _rolesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._rolesSearch = value.trim();
+        AdminView._renderRoles();
+      }, 300);
+    };
+  })(),
+
+  _exportRoles() {
+    if (!this._rolesCache || this._rolesCache.length === 0) {
+      this._toast('No hay roles para exportar', 'info');
+      return;
+    }
+    window.CSVExport.export(this._rolesCache, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Nombre' },
+      { key: 'IsAdmin', label: 'Es Admin' },
+    ], `roles-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${this._rolesCache.length} roles`, 'success');
+  },
+
+  _newRole() {
+    this._showModal('Nuevo rol', `
+      <div class="admin-field"><span>Nombre *</span><input id="rf-name" class="admin-input" placeholder="Ej: Supervisor"></div>
+      <div class="admin-field admin-field--inline"><input type="checkbox" id="rf-isadmin"><span>Es administrador (acceso total)</span></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveRole()")}
+      </div>
+    `);
+  },
+
+  async _saveRole() {
+    const name = document.getElementById('rf-name').value.trim();
+    const isAdmin = document.getElementById('rf-isadmin').checked;
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      await Api.request('POST', '/admin/roles', { name, isAdmin });
+      this._toast('Rol creado', 'success');
+      this._closeModal();
+      await this._renderRoles();
+    } catch (err) {
+      this._error('No se puede crear rol: ' + (err.message || err));
+    }
+  },
+
+  async _editRolePerms(roleId) {
+    this._loading('Cargando permisos…');
+    let perms = [];
+    let allPerms = [];
+    try {
+      const [assigned, all] = await Promise.all([
+        Api.request('GET', `/admin/roles/${roleId}/permissions`),
+        Api.request('GET', '/admin/permissions').catch(() => ({ data: [] })),
+      ]);
+      perms = assigned.data || [];
+      allPerms = all.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar permisos: ' + (err.message || err));
+      return;
+    }
+    const role = (this._rolesCache || []).find(r => r.Id === roleId);
+    const rows = allPerms.length > 0 ? allPerms.map(p => {
+      const has = perms.some(x => x.Code === p.Code);
+      return `
+        <tr>
+          <td>${this._escape(p.Name)}</td>
+          <td><code>${this._escape(p.Code)}</code></td>
+          <td>${this._escape(p.Category || '—')}</td>
+          <td>
+            <input type="checkbox" data-perm-id="${p.Id}" data-perm-code="${this._escape(p.Code)}" ${has ? 'checked' : ''} onchange="window.AdminView._togglePerm(${roleId}, ${p.Id}, this.checked)">
+          </td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="4" class="admin-empty">No hay permisos disponibles.</td></tr>';
+    this._setContent(this._header(`Permisos — ${role ? role.Name : 'Rol ' + roleId}`, '') +
+      this._table(['Permiso', 'Código', 'Categoría', 'Activo'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a roles', '', 'fa-arrow-left', "window.AdminView.showTab('roles')")}</div>`);
+  },
+
+  async _togglePerm(roleId, permId, checked) {
+    try {
+      if (checked) {
+        await Api.request('POST', `/admin/roles/${roleId}/permissions`, { permissionId: permId });
+        this._toast('Permiso asignado', 'success');
+      } else {
+        await Api.request('DELETE', `/admin/roles/${roleId}/permissions/${permId}`);
+        this._toast('Permiso revocado', 'info');
+      }
+    } catch (err) {
+      this._error('No se puede cambiar permiso: ' + (err.message || err));
+      // Re-render to revert checkbox
+      await this._editRolePerms(roleId);
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 4 — ESTACIONES (full CRUD)
+  // ===================================================================
+
+  async _renderStations() {
+    this._loading('Cargando estaciones…');
+    let stations = [];
+    let areas = [];
+    try {
+      const [s, a] = await Promise.all([
+        Api.request('GET', '/stations'),
+        Api.request('GET', '/stations/areas'),
+      ]);
+      stations = s.data || [];
+      areas = a.data || [];
+      this._areasCache = areas;
+    } catch (err) {
+      this._error('No se pueden cargar estaciones: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nueva estación', 'kds-btn--primary', 'fa-desktop', "window.AdminView._newStation()");
+    // Client-side search + sort (Bloque 12 FASE C)
+    if (this._stationsSearch === undefined) this._stationsSearch = '';
+    if (this._stationsSortCol === undefined) this._stationsSortCol = 'Name';
+    if (this._stationsSortDir === undefined) this._stationsSortDir = 'asc';
+    const filtered = this._stationsSearch
+      ? stations.filter(s => (s.Name || '').toLowerCase().includes(this._stationsSearch.toLowerCase()) ||
+                              (s.Code || '').toLowerCase().includes(this._stationsSearch.toLowerCase()) ||
+                              (s.StationType || '').toLowerCase().includes(this._stationsSearch.toLowerCase()))
+      : stations;
+    filtered.sort((a, b) => {
+      const av = String(a[this._stationsSortCol] ?? '');
+      const bv = String(b[this._stationsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._stationsSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._stationsSortCol === col
+      ? (this._stationsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const searchInput = `
+      <input type="text" class="admin-input" id="stations-search"
+        placeholder="Buscar estación..." value="${this._escape(this._stationsSearch)}"
+        oninput="window.AdminView._stationsSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (stations.length === 0) {
+      this._setContent(this._header('Estaciones', newBtn) +
+        '<div class="admin-empty">No hay estaciones registradas.</div>');
+      return;
+    }
+    const typeIcon = { POS: 'fa-cash-register', KDS: 'fa-fire', CASHIER: 'fa-money-bill-wave', DISPLAY: 'fa-tv' };
+    const typeBadge = (t) => `<span class="admin-tag admin-tag--${t === 'POS' ? 'info' : t === 'KDS' ? 'warning' : t === 'CASHIER' ? 'success' : ''}">${t}</span>`;
+    const rows = filtered.map(st => `
+      <tr>
+        <td><strong>${this._escape(st.Name)}</strong></td>
+        <td><code>${this._escape(st.Code)}</code></td>
+        <td><i class="fa-solid ${typeIcon[st.StationType] || 'fa-desktop'}" style="margin-right: 6px;"></i>${typeBadge(st.StationType)}</td>
+        <td>${this._escape(st.FormFactor || '—')}</td>
+        <td>${st.IpAddress ? '<code>' + this._escape(st.IpAddress) + '</code>' : '—'}</td>
+        <td>${st.IsActive ? '<span class="admin-tag admin-tag--success">Activa</span>' : '<span class="admin-tag admin-tag--danger">Inactiva</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editStation(${st.Id})`)}
+          ${this._btn('Áreas', '', 'fa-link', `window.AdminView._editStationAreas(${st.Id})`)}
+          ${this._btn('KDS', '', 'fa-fire', `window.AdminView._editStationKDS(${st.Id})`)}
+          ${st.IsActive
+            ? this._btn('Desactivar', 'kds-btn--void', 'fa-power-off', `window.AdminView._toggleStation(${st.Id}, false)`)
+            : this._btn('Activar', '', 'fa-power-off', `window.AdminView._toggleStation(${st.Id}, true)`)}
+        </td>
+      </tr>
+    `).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('Code')">Código${sortIcon('Code')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('StationType')">Tipo${sortIcon('StationType')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('FormFactor')">Factor${sortIcon('FormFactor')}</th>
+      <th>IP</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._stationsSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._stationsSearch
+      ? `${filtered.length} de ${stations.length} estaciones`
+      : `${stations.length} estaciones`;
+    this._setContent(this._header(`Estaciones (${countInfo})`, newBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _stationsSort(col) {
+    if (this._stationsSortCol === col) {
+      this._stationsSortDir = this._stationsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._stationsSortCol = col;
+      this._stationsSortDir = 'asc';
+    }
+    this._renderStations();
+  },
+
+  _stationsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._stationsSearch = value.trim();
+        AdminView._renderStations();
+      }, 300);
+    };
+  })(),
+
+  _newStation() { this._stationForm(null); },
+
+  async _editStation(id) {
+    try {
+      const res = await Api.request('GET', `/stations/${id}`);
+      this._stationForm(res.data);
+    } catch (err) {
+      this._error('No se puede cargar la estación: ' + (err.message || err));
+    }
+  },
+
+  _stationForm(station) {
+    const isEdit = !!station;
+    const st = station || { StationType: 'POS', FormFactor: 'DESKTOP', AutoLogoutSeconds: 300 };
+    this._showModal(isEdit ? `Editar estación — ${station.Name}` : 'Nueva estación', `
+      <div class="admin-row">
+        <div class="admin-field"><span>Nombre *</span><input id="sf-name" class="admin-input" value="${st.Name || ''}"></div>
+        <div class="admin-field"><span>Código *</span><input id="sf-code" class="admin-input" value="${st.Code || ''}" placeholder="Ej: POS-03"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field">
+          <span>Tipo *</span>
+          <select id="sf-type" class="admin-input">
+            ${['POS', 'KDS', 'CASHIER', 'DISPLAY'].map(t => `<option value="${t}" ${st.StationType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="admin-field">
+          <span>Form factor</span>
+          <select id="sf-form" class="admin-input">
+            ${['DESKTOP', 'TABLET', 'PHONE', 'KIOSK'].map(f => `<option value="${f}" ${st.FormFactor === f ? 'selected' : ''}>${f}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>IP</span><input id="sf-ip" class="admin-input" value="${st.IpAddress || ''}" placeholder="192.168.1.10"></div>
+        <div class="admin-field"><span>Hardware ID</span><input id="sf-hw" class="admin-input" value="${st.HardwareId || ''}" placeholder="HW-POS-XX"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Rol por defecto</span><input id="sf-role" class="admin-input" value="${st.DefaultRole || ''}" placeholder="mesero, cajero, cocinero"></div>
+        <div class="admin-field"><span>Auto-logout (s)</span><input id="sf-logout" type="number" min="0" class="admin-input" value="${st.AutoLogoutSeconds || 0}"></div>
+      </div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveStation(${isEdit ? station.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveStation(id) {
+    const body = {
+      name: document.getElementById('sf-name').value.trim(),
+      code: document.getElementById('sf-code').value.trim(),
+      stationType: document.getElementById('sf-type').value,
+      formFactor: document.getElementById('sf-form').value,
+      ipAddress: document.getElementById('sf-ip').value.trim() || null,
+      hardwareId: document.getElementById('sf-hw').value.trim() || null,
+      defaultRole: document.getElementById('sf-role').value.trim() || null,
+      autoLogoutSeconds: parseInt(document.getElementById('sf-logout').value, 10) || 0,
+    };
+    if (!body.name || !body.code) { this._toast('Nombre y código requeridos', 'error'); return; }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/stations/${id}`, body);
+        this._toast('Estación actualizada', 'success');
+      } else {
+        await Api.request('POST', '/stations', body);
+        this._toast('Estación creada', 'success');
+      }
+      this._closeModal();
+      await this._renderStations();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _toggleStation(id, activate) {
+    try {
+      await Api.request('PATCH', `/stations/${id}`, { isActive: activate });
+      this._toast(activate ? 'Estación activada' : 'Estación desactivada', 'success');
+      await this._renderStations();
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+    }
+  },
+
+  async _editStationAreas(stationId) {
+    this._loading('Cargando áreas…');
+    let bound = [];
+    let all = this._areasCache || [];
+    try {
+      if (all.length === 0) {
+        const a = await Api.request('GET', '/stations/areas');
+        all = a.data || [];
+        this._areasCache = all;
+      }
+      const res = await Api.request('GET', `/stations/${stationId}/areas`);
+      bound = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar áreas: ' + (err.message || err));
+      return;
+    }
+    const station = (await Api.request('GET', `/stations/${stationId}`)).data;
+    const rows = all.map(a => {
+      const isBound = bound.some(b => b.Id === a.Id);
+      return `
+        <tr>
+          <td><i class="fa-solid ${a.Icon || 'fa-utensils'}" style="color: ${a.Color || '#044392'}; margin-right: 6px;"></i><strong>${this._escape(a.Name)}</strong></td>
+          <td><code>${this._escape(a.Code)}</code></td>
+          <td>${this._escape(a.DisplayName || a.Name)}</td>
+          <td>
+            <input type="checkbox" data-area-id="${a.Id}" ${isBound ? 'checked' : ''} onchange="window.AdminView._toggleStationArea(${stationId}, ${a.Id}, this.checked)">
+          </td>
+        </tr>`;
+    }).join('');
+    this._setContent(this._header(`Áreas vinculadas — ${station.Name}`, '') +
+      this._table(['Área', 'Código', 'Display', 'Vinculada'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a estaciones', '', 'fa-arrow-left', "window.AdminView.showTab('stations')")}</div>`);
+  },
+
+  async _toggleStationArea(stationId, areaId, checked) {
+    try {
+      if (checked) {
+        await Api.request('POST', `/stations/${stationId}/areas`, { productionAreaId: areaId });
+        this._toast('Área vinculada', 'success');
+      } else {
+        await Api.request('DELETE', `/stations/${stationId}/areas/${areaId}`);
+        this._toast('Área desvinculada', 'info');
+      }
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+      await this._editStationAreas(stationId);
+    }
+  },
+
+  async _editStationKDS(stationId) {
+    this._loading('Cargando configuración KDS…');
+    let configs = [];
+    try {
+      const res = await Api.request('GET', `/stations/${stationId}/kds-config`);
+      configs = res.data || [];
+    } catch (err) {
+      this._error('No se puede cargar config KDS: ' + (err.message || err));
+      return;
+    }
+    const station = (await Api.request('GET', `/stations/${stationId}`)).data;
+    const cfg = configs.find(c => c.ProductionAreaId === null) || configs[0] || { ColumnCount: 4, RefreshIntervalMs: 5000, AutoBumpSeconds: 0, SoundEnabled: 1, ColorCodingEnabled: 1, FontScale: 'MD', ShowPrepTime: 1, ShowAllergens: 0 };
+    this._setContent(this._header(`Configuración KDS — ${station.Name}`, '') + `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-fire"></i> Layout</h3>
+        <div class="admin-card-grid">
+          <div><span>Columnas:</span> <input id="kds-cols" type="number" min="1" max="8" value="${cfg.ColumnCount || 4}" class="admin-input" style="width: 80px;"></div>
+          <div><span>Refresh (ms):</span> <input id="kds-refresh" type="number" min="1000" step="500" value="${cfg.RefreshIntervalMs || 5000}" class="admin-input" style="width: 100px;"></div>
+          <div><span>Auto-bump (s):</span> <input id="kds-bump" type="number" min="0" value="${cfg.AutoBumpSeconds || 0}" class="admin-input" style="width: 80px;"></div>
+          <div><span>Font scale:</span>
+            <select id="kds-font" class="admin-input">
+              ${['SM', 'MD', 'LG', 'XL'].map(f => `<option value="${f}" ${cfg.FontScale === f ? 'selected' : ''}>${f}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-bell"></i> Sonido y visual</h3>
+        <div class="admin-card-grid">
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-sound" ${cfg.SoundEnabled ? 'checked' : ''}><span>Sonido</span></div>
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-color" ${cfg.ColorCodingEnabled ? 'checked' : ''}><span>Colores por área</span></div>
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-prep" ${cfg.ShowPrepTime ? 'checked' : ''}><span>Mostrar tiempo prep.</span></div>
+          <div class="admin-field admin-field--inline"><input type="checkbox" id="kds-allergens" ${cfg.ShowAllergens ? 'checked' : ''}><span>Alérgenos</span></div>
+        </div>
+      </div>
+      <div style="margin-top: 14px;">
+        ${this._btn('Guardar config', 'kds-btn--primary', 'fa-check', `window.AdminView._saveStationKDS(${stationId})`)}
+        ${this._btn('Volver', '', 'fa-arrow-left', "window.AdminView.showTab('stations')")}
+      </div>
+    `);
+  },
+
+  async _saveStationKDS(stationId) {
+    const body = {
+      columnCount: parseInt(document.getElementById('kds-cols').value, 10),
+      refreshIntervalMs: parseInt(document.getElementById('kds-refresh').value, 10),
+      autoBumpSeconds: parseInt(document.getElementById('kds-bump').value, 10),
+      fontScale: document.getElementById('kds-font').value,
+      soundEnabled: document.getElementById('kds-sound').checked,
+      colorCodingEnabled: document.getElementById('kds-color').checked,
+      showPrepTime: document.getElementById('kds-prep').checked,
+      showAllergens: document.getElementById('kds-allergens').checked,
+    };
+    try {
+      await Api.request('PUT', `/stations/${stationId}/kds-config`, body);
+      this._toast('Configuración KDS guardada', 'success');
+      await this._renderStations();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 4 — ÁREAS DE PRODUCCIÓN (full CRUD)
+  // ===================================================================
+
+  async _renderAreas() {
+    this._loading('Cargando áreas…');
+    let areas = [];
+    try {
+      const res = await Api.request('GET', '/stations/areas');
+      areas = res.data || [];
+      this._areasCache = areas;
+    } catch (err) {
+      this._error('No se pueden cargar áreas: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nueva área', 'kds-btn--primary', 'fa-utensils', "window.AdminView._newArea()");
+    if (areas.length === 0) {
+      this._setContent(this._header('Áreas de producción', newBtn) +
+        '<div class="admin-empty">No hay áreas cargadas.</div>');
+      return;
+    }
+    // Client-side search + sort (Bloque 12)
+    if (this._areasSearch === undefined) this._areasSearch = '';
+    if (this._areasSortCol === undefined) this._areasSortCol = 'Name';
+    if (this._areasSortDir === undefined) this._areasSortDir = 'asc';
+    const filtered = this._areasSearch
+      ? areas.filter(a => (a.Name || '').toLowerCase().includes(this._areasSearch.toLowerCase()) ||
+                            (a.Code || '').toLowerCase().includes(this._areasSearch.toLowerCase()))
+      : areas;
+    filtered.sort((a, b) => {
+      const av = String(a[this._areasSortCol] ?? '');
+      const bv = String(b[this._areasSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._areasSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._areasSortCol === col
+      ? (this._areasSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const searchInput = `
+      <input type="text" class="admin-input" id="areas-search"
+        placeholder="Buscar área..." value="${this._escape(this._areasSearch)}"
+        oninput="window.AdminView._areasSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    const rows = filtered.map(a => `
+      <tr>
+        <td><span class="admin-color-swatch" style="background: ${a.Color || '#044392'};"></span> <strong>${this._escape(a.Name)}</strong></td>
+        <td><code>${this._escape(a.Code)}</code></td>
+        <td>${this._escape(a.DisplayName || a.Name)}</td>
+        <td>${this._escape(a.WarehouseName || '—')}</td>
+        <td>${a.IsActive ? '<span class="admin-tag admin-tag--success">Activa</span>' : '<span class="admin-tag admin-tag--danger">Inactiva</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editArea(${a.Id})`)}
+          ${this._btn('Productos', '', 'fa-box', `window.AdminView._editAreaProducts(${a.Id})`)}
+          ${this._btn('Eliminar', 'kds-btn--void', 'fa-trash', `window.AdminView._deleteArea(${a.Id})`)}
+        </td>
+      </tr>
+    `).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('Code')">Código${sortIcon('Code')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('DisplayName')">Display${sortIcon('DisplayName')}</th>
+      <th>Almacén</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._areasSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._areasSearch
+      ? `${filtered.length} de ${areas.length} áreas`
+      : `${areas.length} áreas`;
+    this._setContent(this._header(`Áreas de producción (${countInfo})`, newBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _areasSort(col) {
+    if (this._areasSortCol === col) {
+      this._areasSortDir = this._areasSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._areasSortCol = col;
+      this._areasSortDir = 'asc';
+    }
+    this._renderAreas();
+  },
+
+  _areasSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._areasSearch = value.trim();
+        AdminView._renderAreas();
+      }, 300);
+    };
+  })(),
+
+  _newArea() { this._areaForm(null); },
+
+  _areaForm(area) {
+    const isEdit = !!area;
+    const a = area || { Color: '#044392', Icon: 'fa-utensils', SortOrder: 0 };
+    this._showModal(isEdit ? `Editar área — ${area.Name}` : 'Nueva área de producción', `
+      <div class="admin-row">
+        <div class="admin-field"><span>Nombre *</span><input id="af-name" class="admin-input" value="${a.Name || ''}"></div>
+        <div class="admin-field"><span>Código *</span><input id="af-code" class="admin-input" value="${a.Code || ''}" placeholder="KITCHEN, PIZZA, BAR..."></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Display</span><input id="af-display" class="admin-input" value="${a.DisplayName || ''}"></div>
+        <div class="admin-field"><span>Color</span><input id="af-color" type="color" value="${a.Color || '#044392'}" style="height: 40px; padding: 4px;"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Icono (FA)</span><input id="af-icon" class="admin-input" value="${a.Icon || 'fa-utensils'}" placeholder="fa-utensils"></div>
+        <div class="admin-field"><span>Sort order</span><input id="af-sort" type="number" min="0" class="admin-input" value="${a.SortOrder || 0}"></div>
+      </div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveArea(${isEdit ? area.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveArea(id) {
+    const body = {
+      name: document.getElementById('af-name').value.trim(),
+      code: document.getElementById('af-code').value.trim(),
+      displayName: document.getElementById('af-display').value.trim(),
+      color: document.getElementById('af-color').value,
+      icon: document.getElementById('af-icon').value.trim(),
+      sortOrder: parseInt(document.getElementById('af-sort').value, 10) || 0,
+    };
+    if (!body.name || !body.code) { this._toast('Nombre y código requeridos', 'error'); return; }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/stations/areas/${id}`, body);
+        this._toast('Área actualizada', 'success');
+      } else {
+        await Api.request('POST', '/stations/areas', body);
+        this._toast('Área creada', 'success');
+      }
+      this._closeModal();
+      await this._renderAreas();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _deleteArea(id) {
+    if (!confirm('¿Eliminar esta área? Se quitarán todos los vínculos.')) return;
+    try {
+      await Api.request('DELETE', `/stations/areas/${id}`);
+      this._toast('Área eliminada', 'success');
+      await this._renderAreas();
+    } catch (err) {
+      this._error('No se puede eliminar: ' + (err.message || err));
+    }
+  },
+
+  async _editAreaProducts(areaId) {
+    this._loading('Cargando productos del área…');
+    let items = [];
+    let products = this._productsCache || [];
+    const area = (this._areasCache || []).find(a => a.Id === areaId);
+    try {
+      if (products.length === 0) {
+        const p = await Api.request('GET', '/products');
+        products = p.data || [];
+        this._productsCache = products;
+      }
+      const res = await Api.request('GET', `/stations/areas/${areaId}/products`);
+      items = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar productos: ' + (err.message || err));
+      return;
+    }
+    const bound = new Set(items.map(i => i.MenuItemId));
+    const rows = products.map(p => `
+      <tr>
+        <td><strong>${this._escape(p.Name)}</strong></td>
+        <td>${this._escape(p.GroupCode || '—')}</td>
+        <td>
+          <input type="checkbox" data-product-id="${p.Id}" ${bound.has(p.Id) ? 'checked' : ''} onchange="window.AdminView._toggleAreaProduct(${areaId}, ${p.Id}, this.checked)">
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header(`Productos — ${area ? area.Name : 'Área ' + areaId}`, '') +
+      this._table(['Producto', 'Grupo', 'Vinculado'], rows) +
+      `<div style="margin-top: 12px;">${this._btn('Volver a áreas', '', 'fa-arrow-left', "window.AdminView.showTab('areas')")}</div>`);
+  },
+
+  async _toggleAreaProduct(areaId, productId, checked) {
+    try {
+      if (checked) {
+        await Api.request('POST', `/stations/areas/${areaId}/products`, { menuItemId: productId });
+        this._toast('Producto asignado', 'success');
+      } else {
+        await Api.request('DELETE', `/stations/areas/${areaId}/products/${productId}`);
+        this._toast('Producto desvinculado', 'info');
+      }
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+      await this._editAreaProducts(areaId);
+    }
+  },
+
+
+  // ===================================================================
+  // BLOQUE 5 — TRANSFERENCIAS (listado + crear)
+  // ===================================================================
+
+  async _renderTransfers() {
+    this._loading('Cargando transferencias…');
+    if (this._transfersSearch === undefined) this._transfersSearch = '';
+    if (this._transfersSortCol === undefined) this._transfersSortCol = 'CreatedAt';
+    if (this._transfersSortDir === undefined) this._transfersSortDir = 'desc';
+    let transfers = [];
+    try { const res = await Api.request('GET', '/inventory/transfers'); transfers = res.data || []; } catch {}
+    // Client-side search + sort
+    const filtered = this._transfersSearch
+      ? transfers.filter(t => (t.TransferNumber || '').toLowerCase().includes(this._transfersSearch.toLowerCase()) ||
+                                (t.FromWarehouseName || '').toLowerCase().includes(this._transfersSearch.toLowerCase()) ||
+                                (t.ToWarehouseName || '').toLowerCase().includes(this._transfersSearch.toLowerCase()) ||
+                                (t.Status || '').toLowerCase().includes(this._transfersSearch.toLowerCase()))
+      : transfers;
+    filtered.sort((a, b) => {
+      const av = String(a[this._transfersSortCol] ?? '');
+      const bv = String(b[this._transfersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._transfersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._transfersSortCol === col
+      ? (this._transfersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nueva transferencia', 'kds-btn--primary', 'fa-arrow-right-arrow-left', "window.AdminView._newTransfer()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportTransfers()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="transfers-search"
+        placeholder="Buscar transferencia..." value="${this._escape(this._transfersSearch)}"
+        oninput="window.AdminView._transfersSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    const rows = filtered.length ? filtered.map(t => `
+      <tr>
+        <td><strong>${this._escape(t.TransferNumber)}</strong></td>
+        <td>${this._escape(t.FromWarehouseName || '—')}</td>
+        <td>${this._escape(t.ToWarehouseName || '—')}</td>
+        <td>${this._formatDate(t.CreatedAt)}</td>
+        <td>${t.Status === 'COMPLETED' ? '<span class="admin-tag admin-tag--success">Completada</span>' : '<span class="admin-tag admin-tag--warning">Pendiente</span>'}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5" class="admin-empty">Sin transferencias</td></tr>';
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('TransferNumber')">N°${sortIcon('TransferNumber')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('FromWarehouseName')">Origen${sortIcon('FromWarehouseName')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('ToWarehouseName')">Destino${sortIcon('ToWarehouseName')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('CreatedAt')">Fecha${sortIcon('CreatedAt')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._transfersSort('Status')">Estado${sortIcon('Status')}</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._transfersSearch
+      ? `${filtered.length} de ${transfers.length} transferencias`
+      : `${transfers.length} transferencias`;
+    this._setContent(this._header(`Transferencias (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _transfersSort(col) {
+    if (this._transfersSortCol === col) {
+      this._transfersSortDir = this._transfersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._transfersSortCol = col;
+      this._transfersSortDir = 'asc';
+    }
+    this._renderTransfers();
+  },
+
+  _transfersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._transfersSearch = value.trim();
+        AdminView._renderTransfers();
+      }, 300);
+    };
+  })(),
+
+  _exportTransfers() {
+    Api.request('GET', '/inventory/transfers').then(res => {
+      const transfers = res.data || [];
+      if (transfers.length === 0) { this._toast('No hay transferencias para exportar', 'info'); return; }
+      window.CSVExport.export(transfers, [
+        { key: 'TransferNumber', label: 'N°' },
+        { key: 'FromWarehouseName', label: 'Origen' },
+        { key: 'ToWarehouseName', label: 'Destino' },
+        { key: 'Status', label: 'Estado' },
+        { key: 'CreatedAt', label: 'Fecha' },
+      ], `transferencias-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportadas ${transfers.length} transferencias`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  _newTransfer() {
+    // Form for transfer: select warehouses + items
+    Api.request('GET', '/inventory/warehouses').then(r => {
+      const warehouses = r.data || [];
+      const whOpts = warehouses.map(w => `<option value="${w.Id}">${this._escape(w.Name)}</option>`).join('');
+      this._showModal('Nueva transferencia', `
+        <div class="admin-row">
+          <div class="admin-field"><span>Origen *</span><select id="tf-from" class="admin-input">${whOpts}</select></div>
+          <div class="admin-field"><span>Destino *</span><select id="tf-to" class="admin-input">${whOpts}</select></div>
+        </div>
+        <div class="admin-field"><span>Notas</span><textarea id="tf-notes" class="admin-input" rows="2"></textarea></div>
+        <div class="admin-note"><i class="fa-solid fa-info-circle"></i> Los ítems se agregan via API: POST /api/inventory/transfer con array items[].</div>
+        <div class="admin-modal-actions">
+          ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+          ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveTransfer()")}
+        </div>
+      `);
+    }).catch(err => this._error('No se pueden cargar almacenes: ' + (err.message || err)));
+  },
+
+  async _saveTransfer() {
+    const fromWarehouseId = parseInt(document.getElementById('tf-from').value, 10);
+    const toWarehouseId = parseInt(document.getElementById('tf-to').value, 10);
+    const notes = document.getElementById('tf-notes').value.trim();
+    if (!fromWarehouseId || !toWarehouseId) { this._toast('Origen y destino requeridos', 'error'); return; }
+    if (fromWarehouseId === toWarehouseId) { this._toast('Origen y destino deben ser diferentes', 'error'); return; }
+    try {
+      // Empty transfer just creates the record; items get added later via stock movement
+      await Api.request('POST', '/inventory/transfer', { fromWarehouseId, toWarehouseId, items: [], notes });
+      this._toast('Transferencia creada', 'success');
+      this._closeModal();
+      await this._renderTransfers();
+    } catch (err) {
+      this._error('No se puede crear: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE — SISTEMA (información + estado)
+  // ===================================================================
+
+  async _renderSystem() {
+    this._loading('Cargando sistema…');
+    let version = null;
+    let health = null;
+    try {
+      const [v, h] = await Promise.all([
+        fetch('/version').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/health').then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+      version = v;
+      health = h;
+    } catch {}
+    const wsStatus = window.store?.state?.wsConnected
+      ? '<span class="admin-tag admin-tag--success">Conectado</span>'
+      : '<span class="admin-tag admin-tag--danger">Desconectado</span>';
+    const healthStatus = health?.status === 'ok'
+      ? '<span class="admin-tag admin-tag--success">OK</span>'
+      : '<span class="admin-tag admin-tag--warning">' + (health?.status || '—') + '</span>';
+    this._setContent(this._header('Sistema', '') + `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-circle-info"></i> Información de la aplicación</h3>
+        <div class="admin-card-grid">
+          <div><span>App:</span> <strong>${this._escape(version?.name || 'SambaPos_LBA')}</strong></div>
+          <div><span>Versión:</span> <strong>${this._escape(version?.version || '0.5.0')}</strong></div>
+          <div><span>Node:</span> <strong>${this._escape(version?.node || '—')}</strong></div>
+          <div><span>Uptime:</span> <strong>${this._formatUptime(version?.uptime || 0)}</strong></div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-heart-pulse"></i> Estado de servicios</h3>
+        <div class="admin-card-grid">
+          <div><span>Health:</span> ${healthStatus}</div>
+          <div><span>WebSocket:</span> ${wsStatus}</div>
+          <div><span>Offline queue:</span> <strong>${(window.offlineQueue?.queue?.length || 0)} pendientes</strong></div>
+          <div><span>Timestamp:</span> <strong>${this._formatDate(health?.timestamp || new Date().toISOString())}</strong></div>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-database"></i> Base de datos</h3>
+        <div class="admin-card-grid">
+          <div><span>Tipo:</span> <strong>${this._escape(version?.dbType || (window.DEMO_MODE ? 'Demo' : 'SQLite/PostgreSQL'))}</strong></div>
+          <div><span>Migraciones:</span> <strong>${this._escape(version?.migrationsCount || '—')}</strong></div>
+        </div>
+      </div>
+    `);
+  },
+
+  // ===================================================================
+  // BLOQUE 7 — ERRORES (client-side error log viewer)
+  // ===================================================================
+
+  async _renderErrors() {
+    this._loading('Cargando errores…');
+    if (this._errorsSearch === undefined) this._errorsSearch = '';
+    if (this._errorsSortCol === undefined) this._errorsSortCol = 'ServerTimestamp';
+    if (this._errorsSortDir === undefined) this._errorsSortDir = 'desc';
+    let errors = [];
+    let stats = null;
+    try {
+      const [e, s] = await Promise.all([
+        Api.request('GET', '/errors?limit=200'),
+        Api.request('GET', '/errors/stats').catch(() => ({ data: null })),
+      ]);
+      errors = e.data || [];
+      stats = s.data;
+    } catch (err) {
+      this._error('No se pueden cargar errores: ' + (err.message || err));
+      return;
+    }
+    // Client-side search + sort
+    const filtered = this._errorsSearch
+      ? errors.filter(e => (e.Type || '').toLowerCase().includes(this._errorsSearch.toLowerCase()) ||
+                            (e.Message || '').toLowerCase().includes(this._errorsSearch.toLowerCase()) ||
+                            (e.View || '').toLowerCase().includes(this._errorsSearch.toLowerCase()) ||
+                            (e.Platform || '').toLowerCase().includes(this._errorsSearch.toLowerCase()))
+      : errors;
+    filtered.sort((a, b) => {
+      const av = String(a[this._errorsSortCol] ?? '');
+      const bv = String(b[this._errorsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._errorsSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._errorsSortCol === col
+      ? (this._errorsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const clearBtn = this._btn('Limpiar logs', 'kds-btn--void', 'fa-trash', "window.AdminView._clearErrors()");
+    const refreshBtn = this._btn('Actualizar', '', 'fa-rotate', "window.AdminView._renderErrors()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportErrors()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="errors-search"
+        placeholder="Buscar tipo, mensaje, vista..." value="${this._escape(this._errorsSearch)}"
+        oninput="window.AdminView._errorsSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (errors.length === 0) {
+      this._setContent(this._header('Errores de cliente', refreshBtn + clearBtn) +
+        '<div class="admin-empty"><i class="fa-solid fa-circle-check" style="font-size: 36px; color: var(--lba-success, #198754);"></i><br>No hay errores reportados. ¡Excelente!</div>');
+      return;
+    }
+    // Stats summary
+    const statsHtml = stats ? `
+      <div class="admin-card">
+        <h3><i class="fa-solid fa-chart-pie"></i> Resumen (últimas 24h)</h3>
+        <div class="admin-stats-grid">
+          <div class="admin-stat admin-stat--info">
+            <div class="admin-stat__num">${stats.last24h || 0}</div>
+            <div class="admin-stat__label">Errores 24h</div>
+          </div>
+          <div class="admin-stat">
+            <div class="admin-stat__num">${stats.total || 0}</div>
+            <div class="admin-stat__label">Total histórico</div>
+          </div>
+          ${Object.entries(stats.byPlatform || {}).map(([p, c]) => `
+            <div class="admin-stat">
+              <div class="admin-stat__num">${c}</div>
+              <div class="admin-stat__label">${this._escape(p)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+    const rows = filtered.map(e => {
+      const typeColor = {
+        uncaught: 'admin-tag--danger',
+        unhandledrejection: 'admin-tag--danger',
+        'console.error': 'admin-tag--warning',
+        manual: 'admin-tag--info',
+      }[e.Type] || '';
+      return `
+        <tr>
+          <td><span class="admin-tag ${typeColor}">${this._escape(e.Type)}</span></td>
+          <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this._escape(e.Message)}">${this._escape(e.Message)}</td>
+          <td>${this._escape(e.View || '—')}</td>
+          <td>${this._escape(e.Platform || 'web')}</td>
+          <td>${this._formatDate(e.ServerTimestamp)}</td>
+          <td class="admin-row-actions">
+            ${this._btn('Ver', '', 'fa-eye', `window.AdminView._viewError(${e.Id})`)}
+          </td>
+        </tr>`;
+    }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('Type')">Tipo${sortIcon('Type')}</th>
+      <th>Mensaje</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('View')">Vista${sortIcon('View')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('Platform')">Plataforma${sortIcon('Platform')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._errorsSort('ServerTimestamp')">Fecha${sortIcon('ServerTimestamp')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._errorsSearch
+      ? `${filtered.length} de ${errors.length} errores (filtrados)`
+      : `${errors.length} errores`;
+    this._setContent(this._header(`Errores de cliente (${countInfo})`, refreshBtn + clearBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      statsHtml + tableHtml);
+  },
+
+  _errorsSort(col) {
+    if (this._errorsSortCol === col) {
+      this._errorsSortDir = this._errorsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._errorsSortCol = col;
+      this._errorsSortDir = 'asc';
+    }
+    this._renderErrors();
+  },
+
+  _errorsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._errorsSearch = value.trim();
+        AdminView._renderErrors();
+      }, 300);
+    };
+  })(),
+
+  _exportErrors() {
+    Api.request('GET', '/errors?limit=10000').then(res => {
+      const errors = res.data || [];
+      if (errors.length === 0) { this._toast('No hay errores para exportar', 'info'); return; }
+      window.CSVExport.export(errors, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Type', label: 'Tipo' },
+        { key: 'Message', label: 'Mensaje' },
+        { key: 'View', label: 'Vista' },
+        { key: 'Platform', label: 'Plataforma' },
+        { key: 'UserId', label: 'Usuario' },
+        { key: 'ServerTimestamp', label: 'Fecha' },
+        { key: 'Url', label: 'URL' },
+      ], `errores-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${errors.length} errores`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  async _viewError(id) {
+    try {
+      const res = await Api.request('GET', '/errors?limit=200');
+      const err = (res.data || []).find(e => e.Id === id);
+      if (!err) { this._toast('Error no encontrado', 'warn'); return; }
+      this._showModal('Detalle del error #' + err.Id, `
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-circle-exclamation"></i> Información</h3>
+          <div class="admin-card-grid">
+            <div><span>Tipo:</span> <strong>${this._escape(err.Type)}</strong></div>
+            <div><span>Vista:</span> <strong>${this._escape(err.View || '—')}</strong></div>
+            <div><span>Usuario:</span> <strong>${err.UserId || '—'}</strong></div>
+            <div><span>Plataforma:</span> <strong>${this._escape(err.Platform || 'web')}</strong></div>
+            <div><span>Factor:</span> <strong>${this._escape(err.FormFactor || '—')}</strong></div>
+            <div><span>Evento:</span> <strong>${this._formatDate(err.EventTimestamp)}</strong></div>
+            <div><span>Servidor:</span> <strong>${this._formatDate(err.ServerTimestamp)}</strong></div>
+            <div><span>URL:</span> <code>${this._escape(err.Url || err.Href || '')}</code></div>
+          </div>
+        </div>
+        <div class="admin-card">
+          <h3><i class="fa-solid fa-message"></i> Mensaje</h3>
+          <pre style="white-space: pre-wrap; word-wrap: break-word; background: var(--lba-blue-50, #eff6ff); padding: 10px; border-radius: 4px; font-size: 13px;">${this._escape(err.Message)}</pre>
+        </div>
+        ${err.Stack ? `
+          <div class="admin-card">
+            <h3><i class="fa-solid fa-code"></i> Stack trace</h3>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; background: var(--lba-blue-50, #eff6ff); padding: 10px; border-radius: 4px; font-size: 12px; max-height: 400px; overflow-y: auto;">${this._escape(err.Stack)}</pre>
+          </div>
+        ` : ''}
+        <div class="admin-modal-actions">
+          ${this._btn('Cerrar', '', '', "window.AdminView._closeModal()")}
+        </div>
+      `);
+    } catch (err) {
+      this._error('No se puede cargar el error: ' + (err.message || err));
+    }
+  },
+
+  async _clearErrors() {
+    if (!confirm('¿Borrar todos los logs de errores? Esta acción no se puede deshacer.')) return;
+    try {
+      await Api.request('DELETE', '/errors');
+      this._toast('Logs borrados', 'success');
+      await this._renderErrors();
+    } catch (err) {
+      this._error('No se pueden borrar: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — CLIENTES (CRUD completo: 8 endpoints)
+  // ===================================================================
+
+  async _renderCustomers() {
+    this._loading('Cargando clientes…');
+    if (this._customersPage === undefined) this._customersPage = 1;
+    if (this._customersSearch === undefined) this._customersSearch = '';
+    if (this._customersSortCol === undefined) this._customersSortCol = 'Name';
+    if (this._customersSortDir === undefined) this._customersSortDir = 'asc';
+    const pageSize = 20;
+    let customers = [];
+    let pagination = null;
+    try {
+      const params = new URLSearchParams({
+        limit: String(pageSize),
+        offset: String((this._customersPage - 1) * pageSize),
+        active: 'all',
+      });
+      if (this._customersSearch) params.set('search', this._customersSearch);
+      const res = await Api.request('GET', `/customers?${params.toString()}`);
+      customers = res.data || [];
+      pagination = res.pagination;
+      this._customersCache = customers;
+    } catch (err) {
+      this._error('No se pueden cargar clientes: ' + (err.message || err));
+      return;
+    }
+    // Client-side sort
+    customers.sort((a, b) => {
+      const av = String(a[this._customersSortCol] ?? '');
+      const bv = String(b[this._customersSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._customersSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._customersSortCol === col
+      ? (this._customersSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nuevo cliente', 'kds-btn--primary', 'fa-user-plus', "window.AdminView._newCustomer()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportCustomers()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="customers-search"
+        placeholder="Buscar cliente..." value="${this._escape(this._customersSearch)}"
+        oninput="window.AdminView._customersSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (customers.length === 0 && !this._customersSearch) {
+      this._setContent(this._header('Clientes', newBtn) +
+        '<div class="admin-empty">No hay clientes registrados.</div>');
+      return;
+    }
+    const rows = customers.map(c => {
+      const statusBadge = c.IsActive
+        ? '<span class="admin-tag admin-tag--success">Activo</span>'
+        : '<span class="admin-tag admin-tag--danger">Inactivo</span>';
+      return `
+        <tr>
+          <td><strong>${this._escape(c.Name)}</strong></td>
+          <td>${c.Phone ? '<code>' + this._escape(c.Phone) + '</code>' : '—'}</td>
+          <td>${c.Email ? this._escape(c.Email) : '—'}</td>
+          <td class="admin-num">${this._formatMoney(c.AccountBalance || 0)}</td>
+          <td>${statusBadge}</td>
+          <td class="admin-row-actions">
+            ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editCustomer(${c.Id})`)}
+            ${this._btn('Crédito', '', 'fa-plus-circle', `window.AdminView._customerCredit(${c.Id})`)}
+            ${this._btn('Débito', '', 'fa-minus-circle', `window.AdminView._customerDebit(${c.Id})`)}
+            ${c.IsActive
+              ? this._btn('Desactivar', 'kds-btn--void', 'fa-power-off', `window.AdminView._toggleCustomer(${c.Id}, false)`)
+              : this._btn('Activar', '', 'fa-power-off', `window.AdminView._toggleCustomer(${c.Id}, true)`)}
+          </td>
+        </tr>`;
+    }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('Phone')">Teléfono${sortIcon('Phone')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('Email')">Email${sortIcon('Email')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('AccountBalance')">Saldo${sortIcon('AccountBalance')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._customersSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const paginationHtml = this._renderPagination(pagination, '_customersPage', '_renderCustomers');
+    this._setContent(this._header('Clientes', newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml +
+      paginationHtml);
+  },
+
+  _customersSort(col) {
+    if (this._customersSortCol === col) {
+      this._customersSortDir = this._customersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._customersSortCol = col;
+      this._customersSortDir = 'asc';
+    }
+    this._renderCustomers();
+  },
+
+  _exportCustomers() {
+    // Fetch ALL customers for export (no pagination)
+    Api.request('GET', '/customers?limit=10000&offset=0&active=all').then(res => {
+      const customers = res.data || [];
+      window.CSVExport.export(customers, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'Phone', label: 'Teléfono' },
+        { key: 'Email', label: 'Email' },
+        { key: 'AccountBalance', label: 'Saldo' },
+        { key: 'IsActive', label: 'Activo' },
+      ], `clientes-${new Date().toISOString().slice(0,10)}.csv`);
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  _customersSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._customersSearch = value.trim();
+        AdminView._customersPage = 1;
+        AdminView._renderCustomers();
+      }, 300);
+    };
+  })(),
+
+  _newCustomer() { this._customerForm(null); },
+
+  async _editCustomer(id) {
+    try {
+      const res = await Api.request('GET', `/customers/${id}`);
+      this._customerForm(res.data);
+    } catch (err) {
+      this._error('No se puede cargar el cliente: ' + (err.message || err));
+    }
+  },
+
+  _customerForm(customer) {
+    const isEdit = !!customer;
+    const c = customer || {};
+    this._showModal(isEdit ? `Editar cliente — ${customer.Name}` : 'Nuevo cliente', `
+      <div class="admin-row">
+        <div class="admin-field"><span>Nombre *</span><input id="cf-name" class="admin-input" value="${this._escape(c.Name || '')}"></div>
+        <div class="admin-field"><span>Teléfono</span><input id="cf-phone" class="admin-input" value="${this._escape(c.Phone || '')}"></div>
+      </div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Email</span><input id="cf-email" type="email" class="admin-input" value="${this._escape(c.Email || '')}"></div>
+        <div class="admin-field"><span>Saldo inicial</span><input id="cf-balance" type="number" step="0.01" class="admin-input" value="${c.AccountBalance || 0}"></div>
+      </div>
+      <div class="admin-field"><span>Dirección</span><textarea id="cf-address" class="admin-input" rows="2">${this._escape(c.Address || '')}</textarea></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveCustomer(${isEdit ? customer.Id : 'null'})`)}
+      </div>
+    `);
+  },
+
+  async _saveCustomer(id) {
+    const body = {
+      name: document.getElementById('cf-name').value.trim(),
+      phone: document.getElementById('cf-phone').value.trim() || null,
+      email: document.getElementById('cf-email').value.trim() || null,
+      address: document.getElementById('cf-address').value.trim() || null,
+    };
+    if (!body.name) { this._toast('Nombre requerido', 'error'); return; }
+    if (!id) body.accountBalance = parseFloat(document.getElementById('cf-balance').value) || 0;
+    try {
+      if (id) {
+        await Api.request('PATCH', `/customers/${id}`, body);
+        this._toast('Cliente actualizado', 'success');
+      } else {
+        await Api.request('POST', '/customers', body);
+        this._toast('Cliente creado', 'success');
+      }
+      this._closeModal();
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _toggleCustomer(id, activate) {
+    try {
+      await Api.request('POST', `/customers/${id}/${activate ? 'reactivate' : 'deactivate'}`);
+      this._toast(activate ? 'Cliente activado' : 'Cliente desactivado', 'success');
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede cambiar: ' + (err.message || err));
+    }
+  },
+
+  async _customerCredit(id) {
+    const amount = prompt('Monto de crédito a aplicar:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Nota (opcional):', '') || '';
+    try {
+      await Api.request('POST', `/customers/${id}/credit`, { amount: amt, note });
+      this._toast('Crédito aplicado', 'success');
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede aplicar crédito: ' + (err.message || err));
+    }
+  },
+
+  async _customerDebit(id) {
+    const amount = prompt('Monto de débito a aplicar:', '0');
+    if (amount === null) return;
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { this._toast('Monto inválido', 'error'); return; }
+    const note = prompt('Nota (opcional):', '') || '';
+    try {
+      await Api.request('POST', `/customers/${id}/debit`, { amount: amt, note });
+      this._toast('Débito aplicado', 'success');
+      await this._renderCustomers();
+    } catch (err) {
+      this._error('No se puede aplicar débito: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — AUDIT LOGS (viewer)
+  // ===================================================================
+
+  async _renderAuditLogs() {
+    this._loading('Cargando auditoría…');
+    if (this._auditSearch === undefined) this._auditSearch = '';
+    if (this._auditSortCol === undefined) this._auditSortCol = 'CreatedAt';
+    if (this._auditSortDir === undefined) this._auditSortDir = 'desc';
+    let logs = [];
+    let total = 0;
+    try {
+      const res = await Api.request('GET', '/admin/audit-logs?limit=200');
+      logs = res.data || [];
+      total = res.total || 0;
+    } catch (err) {
+      this._error('No se pueden cargar logs: ' + (err.message || err));
+      return;
+    }
+    // Client-side search + sort
+    const filtered = this._auditSearch
+      ? logs.filter(l => (l.Action || '').toLowerCase().includes(this._auditSearch.toLowerCase()) ||
+                          (l.EntityType || '').toLowerCase().includes(this._auditSearch.toLowerCase()) ||
+                          String(l.UserId || '').includes(this._auditSearch))
+      : logs;
+    filtered.sort((a, b) => {
+      const av = String(a[this._auditSortCol] ?? '');
+      const bv = String(b[this._auditSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._auditSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._auditSortCol === col
+      ? (this._auditSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const refreshBtn = this._btn('Actualizar', '', 'fa-rotate', "window.AdminView._renderAuditLogs()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportAuditLogs()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="audit-search"
+        placeholder="Buscar acción, entidad o usuario..." value="${this._escape(this._auditSearch)}"
+        oninput="window.AdminView._auditSearchDebounced(this.value)"
+        style="width: 280px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (logs.length === 0) {
+      this._setContent(this._header('Auditoría', refreshBtn + ' ' + exportBtn) +
+        '<div class="admin-empty">No hay eventos de auditoría.</div>');
+      return;
+    }
+    const rows = filtered.map(l => {
+      const action = l.Action || '—';
+      const entity = l.EntityType || '—';
+      const entityId = l.EntityId || '';
+      const userId = l.UserId || '—';
+      const time = this._formatDate(l.CreatedAt);
+      const details = l.Details ? (typeof l.Details === 'string' ? l.Details : JSON.stringify(l.Details)) : '';
+      return `
+        <tr>
+          <td><code>${this._escape(action)}</code></td>
+          <td>${this._escape(entity)} ${entityId ? '#' + entityId : ''}</td>
+          <td>${userId}</td>
+          <td>${time}</td>
+          <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this._escape(details)}">${this._escape(details)}</td>
+        </tr>`;
+    }).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('Action')">Acción${sortIcon('Action')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('EntityType')">Entidad${sortIcon('EntityType')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('UserId')">Usuario${sortIcon('UserId')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._auditSort('CreatedAt')">Fecha${sortIcon('CreatedAt')}</th>
+      <th>Detalles</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._auditSearch
+      ? `${filtered.length} de ${logs.length} eventos (filtrados)`
+      : `${total} eventos totales`;
+    this._setContent(this._header(`Auditoría (${countInfo})`, refreshBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _auditSort(col) {
+    if (this._auditSortCol === col) {
+      this._auditSortDir = this._auditSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._auditSortCol = col;
+      this._auditSortDir = 'asc';
+    }
+    this._renderAuditLogs();
+  },
+
+  _auditSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._auditSearch = value.trim();
+        AdminView._renderAuditLogs();
+      }, 300);
+    };
+  })(),
+
+  _exportAuditLogs() {
+    Api.request('GET', '/admin/audit-logs?limit=10000').then(res => {
+      const logs = res.data || [];
+      if (logs.length === 0) { this._toast('No hay logs para exportar', 'info'); return; }
+      window.CSVExport.export(logs, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Action', label: 'Acción' },
+        { key: 'EntityType', label: 'Tipo Entidad' },
+        { key: 'EntityId', label: 'ID Entidad' },
+        { key: 'UserId', label: 'Usuario' },
+        { key: 'CreatedAt', label: 'Fecha' },
+        { key: 'Details', label: 'Detalles' },
+      ], `audit-logs-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${logs.length} logs`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — DEPARTMENTS CRUD (admin endpoints)
+  // ===================================================================
+
+  async _renderDepartments() {
+    this._loading('Cargando departamentos…');
+    if (this._deptsSearch === undefined) this._deptsSearch = '';
+    if (this._deptsSortCol === undefined) this._deptsSortCol = 'Name';
+    if (this._deptsSortDir === undefined) this._deptsSortDir = 'asc';
+    let depts = [];
+    try {
+      const res = await Api.request('GET', '/admin/departments');
+      depts = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar departamentos: ' + (err.message || err));
+      return;
+    }
+    const filtered = this._deptsSearch
+      ? depts.filter(d => (d.Name || '').toLowerCase().includes(this._deptsSearch.toLowerCase()) ||
+                            (d.PriceTag || '').toLowerCase().includes(this._deptsSearch.toLowerCase()))
+      : depts;
+    filtered.sort((a, b) => {
+      const av = String(a[this._deptsSortCol] ?? '');
+      const bv = String(b[this._deptsSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._deptsSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._deptsSortCol === col
+      ? (this._deptsSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nuevo departamento', 'kds-btn--primary', 'fa-plus', "window.AdminView._newDepartment()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportDepartments()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="depts-search"
+        placeholder="Buscar departamento..." value="${this._escape(this._deptsSearch)}"
+        oninput="window.AdminView._deptsSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (depts.length === 0) {
+      this._setContent(this._header('Departamentos', newBtn) +
+        '<div class="admin-empty">No hay departamentos.</div>');
+      return;
+    }
+    const rows = filtered.map(d => `
+      <tr>
+        <td><strong>${this._escape(d.Name)}</strong></td>
+        <td>${d.WarehouseId ? 'Almacén #' + d.WarehouseId : '—'}</td>
+        <td>${d.SortOrder || 0}</td>
+        <td>${d.PriceTag ? '<code>' + this._escape(d.PriceTag) + '</code>' : '—'}</td>
+      </tr>
+    `).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._deptsSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th>Almacén</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._deptsSort('SortOrder')">Orden${sortIcon('SortOrder')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._deptsSort('PriceTag')">Price Tag${sortIcon('PriceTag')}</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._deptsSearch
+      ? `${filtered.length} de ${depts.length} departamentos`
+      : `${depts.length} departamentos`;
+    this._setContent(this._header(`Departamentos (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _deptsSort(col) {
+    if (this._deptsSortCol === col) {
+      this._deptsSortDir = this._deptsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._deptsSortCol = col;
+      this._deptsSortDir = 'asc';
+    }
+    this._renderDepartments();
+  },
+
+  _deptsSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._deptsSearch = value.trim();
+        AdminView._renderDepartments();
+      }, 300);
+    };
+  })(),
+
+  _exportDepartments() {
+    Api.request('GET', '/admin/departments').then(res => {
+      const depts = res.data || [];
+      if (depts.length === 0) { this._toast('No hay departamentos para exportar', 'info'); return; }
+      window.CSVExport.export(depts, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'WarehouseId', label: 'Almacén ID' },
+        { key: 'SortOrder', label: 'Orden' },
+        { key: 'PriceTag', label: 'Price Tag' },
+      ], `departamentos-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${depts.length} departamentos`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  _newDepartment() {
+    this._showModal('Nuevo departamento', `
+      <div class="admin-field"><span>Nombre *</span><input id="df-name" class="admin-input" placeholder="Ej: Restaurante"></div>
+      <div class="admin-row">
+        <div class="admin-field"><span>Warehouse ID</span><input id="df-wh" type="number" class="admin-input" value="0"></div>
+        <div class="admin-field"><span>Sort order</span><input id="df-sort" type="number" class="admin-input" value="0"></div>
+      </div>
+      <div class="admin-field"><span>Price tag</span><input id="df-tag" class="admin-input" placeholder="Ej: normal, vip"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveDepartment()")}
+      </div>
+    `);
+  },
+
+  async _saveDepartment() {
+    const body = {
+      name: document.getElementById('df-name').value.trim(),
+      warehouseId: parseInt(document.getElementById('df-wh').value, 10) || 0,
+      sortOrder: parseInt(document.getElementById('df-sort').value, 10) || 0,
+    };
+    if (!body.name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      await Api.request('POST', '/admin/departments', body);
+      this._toast('Departamento creado', 'success');
+      this._closeModal();
+      await this._renderDepartments();
+    } catch (err) {
+      this._error('No se puede crear: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — PAYMENT TYPES CRUD
+  // ===================================================================
+
+  async _renderPaymentTypes() {
+    this._loading('Cargando tipos de pago…');
+    if (this._payTypesSearch === undefined) this._payTypesSearch = '';
+    if (this._payTypesSortCol === undefined) this._payTypesSortCol = 'Name';
+    if (this._payTypesSortDir === undefined) this._payTypesSortDir = 'asc';
+    let types = [];
+    try {
+      const res = await Api.request('GET', '/admin/payment-types');
+      types = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar tipos de pago: ' + (err.message || err));
+      return;
+    }
+    const filtered = this._payTypesSearch
+      ? types.filter(t => (t.Name || '').toLowerCase().includes(this._payTypesSearch.toLowerCase()))
+      : types;
+    filtered.sort((a, b) => {
+      const av = String(a[this._payTypesSortCol] ?? '');
+      const bv = String(b[this._payTypesSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._payTypesSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._payTypesSortCol === col
+      ? (this._payTypesSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nuevo tipo', 'kds-btn--primary', 'fa-plus', "window.AdminView._newPaymentType()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportPaymentTypes()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="paytypes-search"
+        placeholder="Buscar tipo de pago..." value="${this._escape(this._payTypesSearch)}"
+        oninput="window.AdminView._payTypesSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (types.length === 0) {
+      this._setContent(this._header('Tipos de Pago', newBtn) +
+        '<div class="admin-empty">No hay tipos de pago configurados.</div>');
+      return;
+    }
+    const rows = filtered.map(t => `
+      <tr>
+        <td><strong>${this._escape(t.Name)}</strong></td>
+        <td>${t.AccountTransactionTypeId || '—'}</td>
+      </tr>
+    `).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._payTypesSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._payTypesSort('AccountTransactionTypeId')">Tipo Transacción${sortIcon('AccountTransactionTypeId')}</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._payTypesSearch
+      ? `${filtered.length} de ${types.length} tipos`
+      : `${types.length} tipos`;
+    this._setContent(this._header(`Tipos de Pago (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _payTypesSort(col) {
+    if (this._payTypesSortCol === col) {
+      this._payTypesSortDir = this._payTypesSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._payTypesSortCol = col;
+      this._payTypesSortDir = 'asc';
+    }
+    this._renderPaymentTypes();
+  },
+
+  _payTypesSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._payTypesSearch = value.trim();
+        AdminView._renderPaymentTypes();
+      }, 300);
+    };
+  })(),
+
+  _exportPaymentTypes() {
+    Api.request('GET', '/admin/payment-types').then(res => {
+      const types = res.data || [];
+      if (types.length === 0) { this._toast('No hay tipos de pago para exportar', 'info'); return; }
+      window.CSVExport.export(types, [
+        { key: 'Id', label: 'ID' },
+        { key: 'Name', label: 'Nombre' },
+        { key: 'AccountTransactionTypeId', label: 'Tipo Transacción' },
+      ], `tipos-pago-${new Date().toISOString().slice(0,10)}.csv`);
+      this._toast(`Exportados ${types.length} tipos de pago`, 'success');
+    }).catch(err => this._error('No se pueden exportar: ' + (err.message || err)));
+  },
+
+  _newPaymentType() {
+    this._showModal('Nuevo tipo de pago', `
+      <div class="admin-field"><span>Nombre *</span><input id="ptf-name" class="admin-input" placeholder="Ej: Tarjeta de crédito"></div>
+      <div class="admin-field"><span>Tipo transacción (1-4)</span><input id="ptf-tt" type="number" min="1" max="4" class="admin-input" value="4"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._savePaymentType()")}
+      </div>
+    `);
+  },
+
+  async _savePaymentType() {
+    const name = document.getElementById('ptf-name').value.trim();
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    const accountTransactionTypeId = parseInt(document.getElementById('ptf-tt').value, 10) || 4;
+    try {
+      await Api.request('POST', '/admin/payment-types', { name, accountTransactionTypeId });
+      this._toast('Tipo creado', 'success');
+      this._closeModal();
+      await this._renderPaymentTypes();
+    } catch (err) {
+      this._error('No se puede crear: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — SETTINGS (ProgramSettings editor)
+  // ===================================================================
+
+  async _renderSettings() {
+    this._loading('Cargando settings…');
+    let settings = [];
+    try {
+      const res = await Api.request('GET', '/admin/settings');
+      settings = res.data || [];
+    } catch (err) {
+      this._error('No se pueden cargar settings: ' + (err.message || err));
+      return;
+    }
+    const newBtn = this._btn('Nuevo setting', 'kds-btn--primary', 'fa-plus', "window.AdminView._newSetting()");
+    if (settings.length === 0) {
+      this._setContent(this._header('Configuración del Sistema', newBtn) +
+        '<div class="admin-empty">No hay settings.</div>');
+      return;
+    }
+    const rows = settings.map(s => `
+      <tr>
+        <td><code>${this._escape(s.Name)}</code></td>
+        <td>${this._escape(s.Value)}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editSetting('${this._escape(s.Name)}')`)}
+        </td>
+      </tr>
+    `).join('');
+    this._setContent(this._header('Configuración del Sistema', newBtn) +
+      this._table(['Clave', 'Valor', 'Acciones'], rows));
+  },
+
+  _newSetting() {
+    this._showModal('Nuevo setting', `
+      <div class="admin-field"><span>Nombre (clave) *</span><input id="stf-name" class="admin-input" placeholder="Ej: tax_rate"></div>
+      <div class="admin-field"><span>Valor *</span><input id="stf-value" class="admin-input" placeholder="Ej: 0.21"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Crear', 'kds-btn--primary', 'fa-check', "window.AdminView._saveSetting()")}
+      </div>
+    `);
+  },
+
+  _editSetting(name) {
+    this._showModal(`Editar setting — ${name}`, `
+      <div class="admin-field"><span>Valor *</span><input id="stf-value" class="admin-input"></div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn('Guardar', 'kds-btn--primary', 'fa-check', `window.AdminView._updateSetting('${this._escape(name)}')`)}
+      </div>
+    `);
+  },
+
+  async _saveSetting() {
+    const name = document.getElementById('stf-name').value.trim();
+    const value = document.getElementById('stf-value').value;
+    if (!name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      await Api.request('PATCH', `/admin/settings/${name}`, { value });
+      this._toast('Setting creado', 'success');
+      this._closeModal();
+      await this._renderSettings();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _updateSetting(name) {
+    const value = document.getElementById('stf-value').value;
+    try {
+      await Api.request('PATCH', `/admin/settings/${name}`, { value });
+      this._toast('Setting actualizado', 'success');
+      this._closeModal();
+      await this._renderSettings();
+    } catch (err) {
+      this._error('No se puede actualizar: ' + (err.message || err));
+    }
+  },
+
+  // ===================================================================
+  // BLOQUE 11 — COMBOS CRUD completo (7 endpoints)
+  // ===================================================================
+
+  async _renderCombos() {
+    this._loading('Cargando combos…');
+    if (this._combosSearch === undefined) this._combosSearch = '';
+    if (this._combosSortCol === undefined) this._combosSortCol = 'Name';
+    if (this._combosSortDir === undefined) this._combosSortDir = 'asc';
+    let combos = [];
+    try {
+      const res = await Api.request('GET', '/combos');
+      combos = res.data || [];
+      this._combosCache = combos;
+    } catch (err) {
+      this._error('No se pueden cargar combos: ' + (err.message || err));
+      return;
+    }
+    // Client-side search + sort
+    const filtered = this._combosSearch
+      ? combos.filter(c => (c.Name || '').toLowerCase().includes(this._combosSearch.toLowerCase()))
+      : combos;
+    filtered.sort((a, b) => {
+      const av = String(a[this._combosSortCol] ?? '');
+      const bv = String(b[this._combosSortCol] ?? '');
+      const cmp = av.localeCompare(bv);
+      return this._combosSortDir === 'asc' ? cmp : -cmp;
+    });
+    const sortIcon = (col) => this._combosSortCol === col
+      ? (this._combosSortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+    const newBtn = this._btn('Nuevo combo', 'kds-btn--primary', 'fa-layer-group', "window.AdminView._newCombo()");
+    const exportBtn = this._btn('Exportar CSV', '', 'fa-file-csv', "window.AdminView._exportCombos()");
+    const searchInput = `
+      <input type="text" class="admin-input" id="combos-search"
+        placeholder="Buscar combo..." value="${this._escape(this._combosSearch)}"
+        oninput="window.AdminView._combosSearchDebounced(this.value)"
+        style="width: 250px; padding: 6px 10px; min-height: 36px;">
+    `;
+    if (combos.length === 0) {
+      this._setContent(this._header('Combos', newBtn) +
+        '<div class="admin-empty">No hay combos configurados.</div>');
+      return;
+    }
+    const rows = filtered.map(c => `
+      <tr>
+        <td><strong>${this._escape(c.Name)}</strong></td>
+        <td>${c.UseCustomPrice ? '<span class="admin-tag admin-tag--info">$' + Number(c.ComboPrice || 0).toFixed(2) + '</span>' : '<span class="admin-tag">Suma</span>'}</td>
+        <td>${c.IsActive ? '<span class="admin-tag admin-tag--success">Activo</span>' : '<span class="admin-tag admin-tag--danger">Inactivo</span>'}</td>
+        <td class="admin-row-actions">
+          ${this._btn('Editar', '', 'fa-pen', `window.AdminView._editCombo(${c.Id})`)}
+          ${this._btn('Eliminar', 'kds-btn--void', 'fa-trash', `window.AdminView._deleteCombo(${c.Id})`)}
+        </td>
+      </tr>
+    `).join('');
+    const sortableHeaders = `
+      <th style="cursor:pointer;" onclick="window.AdminView._combosSort('Name')">Nombre${sortIcon('Name')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._combosSort('UseCustomPrice')">Precio${sortIcon('UseCustomPrice')}</th>
+      <th style="cursor:pointer;" onclick="window.AdminView._combosSort('IsActive')">Estado${sortIcon('IsActive')}</th>
+      <th>Acciones</th>
+    `;
+    const tableHtml = `
+      <div class="admin-table-wrap is-scrollable">
+        <table class="admin-table">
+          <thead><tr>${sortableHeaders}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    const countInfo = this._combosSearch
+      ? `${filtered.length} de ${combos.length} combos`
+      : `${combos.length} combos`;
+    this._setContent(this._header(`Combos (${countInfo})`, newBtn + ' ' + exportBtn) +
+      `<div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">${searchInput}</div>` +
+      tableHtml);
+  },
+
+  _combosSort(col) {
+    if (this._combosSortCol === col) {
+      this._combosSortDir = this._combosSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this._combosSortCol = col;
+      this._combosSortDir = 'asc';
+    }
+    this._renderCombos();
+  },
+
+  _combosSearchDebounced: (function () {
+    let timer = null;
+    return function (value) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        AdminView._combosSearch = value.trim();
+        AdminView._renderCombos();
+      }, 300);
+    };
+  })(),
+
+  _exportCombos() {
+    if (!this._combosCache || this._combosCache.length === 0) {
+      this._toast('No hay combos para exportar', 'info');
+      return;
+    }
+    window.CSVExport.export(this._combosCache, [
+      { key: 'Id', label: 'ID' },
+      { key: 'Name', label: 'Nombre' },
+      { key: 'UseCustomPrice', label: 'Precio Personalizado' },
+      { key: 'ComboPrice', label: 'Precio' },
+      { key: 'IsActive', label: 'Activo' },
+    ], `combos-${new Date().toISOString().slice(0,10)}.csv`);
+    this._toast(`Exportados ${this._combosCache.length} combos`, 'success');
+  },
+
+  _newCombo() { this._comboForm(null); },
+
+  async _editCombo(id) {
+    try {
+      const res = await Api.request('GET', `/combos/${id}`);
+      this._comboForm(res.data);
+    } catch (err) {
+      this._error('No se puede cargar el combo: ' + (err.message || err));
+    }
+  },
+
+  _comboForm(combo) {
+    const isEdit = !!combo;
+    const c = combo || { UseCustomPrice: false, ComboPrice: 0, IsActive: 1 };
+    this._showModal(isEdit ? `Editar combo — ${combo.Name}` : 'Nuevo combo', `
+      <div class="admin-field"><span>Nombre *</span><input id="cbf-name" class="admin-input" value="${this._escape(c.Name || '')}"></div>
+      <div class="admin-row">
+        <div class="admin-field admin-field--inline">
+          <input type="checkbox" id="cbf-customprice" ${c.UseCustomPrice ? 'checked' : ''}>
+          <span>Precio personalizado</span>
+        </div>
+        <div class="admin-field"><span>Precio</span><input id="cbf-price" type="number" step="0.01" class="admin-input" value="${c.ComboPrice || 0}" ${!c.UseCustomPrice ? 'disabled' : ''}></div>
+      </div>
+      <div class="admin-field admin-field--inline">
+        <input type="checkbox" id="cbf-active" ${c.IsActive ? 'checked' : ''}>
+        <span>Activo</span>
+      </div>
+      <div class="admin-modal-actions">
+        ${this._btn('Cancelar', '', '', "window.AdminView._closeModal()")}
+        ${this._btn(isEdit ? 'Guardar' : 'Crear', 'kds-btn--primary', 'fa-check', `window.AdminView._saveCombo(${isEdit ? combo.Id : 'null'})`)}
+      </div>
+    `);
+    // Toggle price field disabled state
+    const customChk = document.getElementById('cbf-customprice');
+    const priceInput = document.getElementById('cbf-price');
+    if (customChk && priceInput) {
+      customChk.addEventListener('change', () => {
+        priceInput.disabled = !customChk.checked;
+      });
+    }
+  },
+
+  async _saveCombo(id) {
+    const body = {
+      name: document.getElementById('cbf-name').value.trim(),
+      useCustomPrice: document.getElementById('cbf-customprice').checked,
+      comboPrice: parseFloat(document.getElementById('cbf-price').value) || 0,
+      isActive: document.getElementById('cbf-active').checked ? 1 : 0,
+    };
+    if (!body.name) { this._toast('Nombre requerido', 'error'); return; }
+    try {
+      if (id) {
+        await Api.request('PATCH', `/combos/${id}`, body);
+        this._toast('Combo actualizado', 'success');
+      } else {
+        await Api.request('POST', '/combos', body);
+        this._toast('Combo creado', 'success');
+      }
+      this._closeModal();
+      await this._renderCombos();
+    } catch (err) {
+      this._error('No se puede guardar: ' + (err.message || err));
+    }
+  },
+
+  async _deleteCombo(id) {
+    if (!confirm('¿Eliminar este combo?')) return;
+    try {
+      await Api.request('DELETE', `/combos/${id}`);
+      this._toast('Combo eliminado', 'success');
+      await this._renderCombos();
+    } catch (err) {
+      this._error('No se puede eliminar: ' + (err.message || err));
+    }
+  },
+});
+
+window.AdminView = AdminView;
 
 // =====================================================================
 // Bootstrap: inicializa AdminView al cargar el DOM y se registra en
@@ -2145,7 +5054,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.App) {
       if (!window.App.views) window.App.views = {};
       window.App.views.admin = AdminView;
-      // Auto-cargar la pestaña por defecto cuando se entra a la vista admin
       if (window.store) {
         window.store.subscribe((state, prev) => {
           if (state.currentView === 'admin' && prev && prev.currentView !== 'admin') {
@@ -2156,5 +5064,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 0);
 });
-
-window.AdminView = AdminView;

@@ -303,4 +303,67 @@ router.get('/kardex', requirePermission('inventory.view'), async (req, res, next
   } catch (err) { next(err); }
 });
 
+// =====================================================================
+// BLOQUE 5 — Warehouses CRUD
+// =====================================================================
+
+// GET /api/inventory/warehouses — list all warehouses
+router.get('/warehouses', requirePermission('inventory.view'), async (req, res, next) => {
+  try {
+    const warehouses = await db('Warehouses')
+      .leftJoin('WarehouseTypes', 'Warehouses.WarehouseTypeId', 'WarehouseTypes.Id')
+      .select('Warehouses.*', 'WarehouseTypes.Name as WarehouseTypeName')
+      .orderBy('Warehouses.SortOrder');
+    res.json({ data: warehouses, count: warehouses.length });
+  } catch (err) { next(err); }
+});
+
+// POST /api/inventory/warehouses — create warehouse
+router.post('/warehouses', requirePermission('manage.inventory'), auditLog('inventory.warehouse.create', 'Warehouse'), async (req, res, next) => {
+  try {
+    const { name, code, warehouseTypeId, sortOrder } = req.body || {};
+    if (!name) throw new ValidationError('name is required');
+    const [id] = await db('Warehouses').insert({
+      Name: name,
+      WarehouseTypeId: warehouseTypeId || 1,
+      SortOrder: sortOrder || 0,
+    });
+    const warehouse = await db('Warehouses').where({ Id: id }).first();
+    res.status(201).json({ data: warehouse });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/inventory/warehouses/:id — update warehouse
+router.patch('/warehouses/:id', requirePermission('manage.inventory'), auditLog('inventory.warehouse.update', 'Warehouse'), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) throw new ValidationError('id must be a number');
+    const { name, warehouseTypeId, sortOrder } = req.body || {};
+    const updates = {};
+    if (name !== undefined) updates.Name = name;
+    if (warehouseTypeId !== undefined) updates.WarehouseTypeId = warehouseTypeId;
+    if (sortOrder !== undefined) updates.SortOrder = sortOrder;
+    if (Object.keys(updates).length === 0) throw new ValidationError('No valid fields to update');
+    await db('Warehouses').where({ Id: id }).update(updates);
+    const warehouse = await db('Warehouses').where({ Id: id }).first();
+    if (!warehouse) throw new NotFoundError(`Warehouse ${id} not found`);
+    res.json({ data: warehouse });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/inventory/warehouses/:id — delete warehouse (only if no stock)
+router.delete('/warehouses/:id', requirePermission('manage.inventory'), auditLog('inventory.warehouse.delete', 'Warehouse'), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) throw new ValidationError('id must be a number');
+    // Check if any stock balance references this warehouse
+    const stockCount = await db('StockBalances').where({ WarehouseId: id }).count('* as c').first();
+    if (stockCount && stockCount.c > 0) {
+      throw new ValidationError('Cannot delete warehouse with existing stock. Move or zero out stock first.');
+    }
+    await db('Warehouses').where({ Id: id }).del();
+    res.json({ data: { deleted: true, id } });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
