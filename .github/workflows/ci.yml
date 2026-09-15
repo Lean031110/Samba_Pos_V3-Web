@@ -126,6 +126,9 @@ jobs:
           find src tests scripts -name '*.js' -type f -print0 \
             | xargs -0 -n1 node --check
 
+      - name: Create data directory for SQLite
+        run: mkdir -p data
+
       - name: Run migrations + seed (programmatic)
         working-directory: backend
         run: node scripts/run-migrations.js
